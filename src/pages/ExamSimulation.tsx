@@ -188,6 +188,25 @@ export default function ExamSimulation() {
               lastUpdatedAt: serverTimestamp()
            });
         }
+
+        // Recompute per-topic mastery & adaptive recommendations (best-effort, non-blocking)
+        try {
+          const { updateMasteryAndRecommend } = await import('../lib/adaptiveEngine');
+          await updateMasteryAndRecommend({
+            userId: user!.uid,
+            answers: answerRecords.map((r: any) => ({
+              questionId: r.questionId,
+              selectedOptionId: r.selectedOptionId,
+              correctOptionId: r.correctOptionId,
+              isCorrect: r.isCorrect,
+              categoryId: r.categoryId,
+              topicId: r.topicId,
+              skillIds: r.skillIds,
+            })),
+          });
+        } catch (e) {
+          console.warn('adaptive update failed', e);
+        }
         
         navigate('/quiz-results', { 
            state: { 
