@@ -13,6 +13,8 @@ export default function Dashboard() {
     categories: 0,
     modules: 0,
     textbooks: 0,
+    avgProgress: 0,
+    completedModules: 0,
     recentActivity: [] as any[],
     usageData: [] as any[]
   });
@@ -68,6 +70,15 @@ export default function Dashboard() {
     const unsubTextbooks = onSnapshot(collection(db, 'textbooks'), (s) => {
       setCounts(prev => ({ ...prev, textbooks: s.size }));
     });
+
+    const unsubProgress = onSnapshot(collection(db, 'moduleProgress'), (s) => {
+      const progressRows = s.docs.map((doc) => doc.data());
+      const avgProgress = progressRows.length
+        ? Math.round(progressRows.reduce((sum, row) => sum + (row.progressPercent || 0), 0) / progressRows.length)
+        : 0;
+      const completedModules = progressRows.filter((row) => row.status === 'completed').length;
+      setCounts(prev => ({ ...prev, avgProgress, completedModules }));
+    });
     
     const unsubActivity = onSnapshot(query(collection(db, 'activityLogs'), orderBy('createdAt', 'desc'), limit(5)), (s) => {
       const activities = s.docs.map(doc => ({
@@ -80,8 +91,8 @@ export default function Dashboard() {
       setCounts(prev => ({ ...prev, recentActivity: activities }));
     });
     
-    // Recent Usage (last 7 days based on quiz attempts)
-    const usageQuery = query(collection(db, 'quizAttempts'), orderBy('createdAt', 'desc'), limit(50));
+    // Recent Usage (last 7 days based on real module progress updates)
+    const usageQuery = query(collection(db, 'moduleProgress'), orderBy('lastAccessedAt', 'desc'), limit(50));
     const unsubUsage = onSnapshot(usageQuery, (s) => {
       const data: { [key: string]: number } = {};
       const now = new Date();
@@ -92,7 +103,7 @@ export default function Dashboard() {
       }
       s.docs.forEach(doc => {
         const attempt = doc.data();
-        const date = attempt.createdAt?.toDate?.() || new Date(attempt.createdAt);
+        const date = attempt.lastAccessedAt?.toDate?.() || new Date(attempt.lastAccessedAt);
         const day = date.toLocaleDateString('en-US', { weekday: 'short' });
         if (data.hasOwnProperty(day)) {
           data[day]++;
@@ -102,7 +113,7 @@ export default function Dashboard() {
       setCounts(prev => ({ ...prev, usageData: chartData }));
     });
       
-    return () => { unsubUsers(); unsubQs(); unsubCats(); unsubModules(); unsubTextbooks(); unsubActivity(); unsubUsage(); unsubDrafts(); };
+    return () => { unsubUsers(); unsubQs(); unsubCats(); unsubModules(); unsubTextbooks(); unsubProgress(); unsubActivity(); unsubUsage(); unsubDrafts(); };
   }, []);
 
   return (
@@ -184,11 +195,14 @@ export default function Dashboard() {
                 }
               }}
             >
-              <p className="font-body text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-[0.2em]">System Health</p>
+              <p className="font-body text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-[0.2em]">Learner Progress</p>
               <div className="relative z-10 flex items-end justify-between">
-                <div className={`font-headline text-4xl font-extrabold ${systemHealth === 'Optimal' ? 'text-emerald-500' : 'text-error'} tracking-tighter`}>{systemHealth}</div>
-                <div className={`w-10 h-10 rounded-2xl ${systemHealth === 'Optimal' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-error/10 text-error'} flex items-center justify-center`}>
-                  <span className="material-symbols-outlined text-[24px]">{systemHealth === 'Optimal' ? 'verified' : 'warning'}</span>
+                <div>
+                  <div className="font-headline text-4xl font-extrabold text-emerald-500 tracking-tighter">{counts.avgProgress}%</div>
+                  <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-widest mt-1">{counts.completedModules} completed modules</p>
+                </div>
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-[24px]">monitoring</span>
                 </div>
               </div>
             </div>
@@ -199,7 +213,7 @@ export default function Dashboard() {
               <div className="flex justify-between items-center mb-6">
                 <div>
                   <h2 className="font-headline text-lg font-extrabold text-on-surface tracking-tight">Active Usage</h2>
-                  <p className="text-[11px] text-on-surface-variant/40 font-bold uppercase tracking-widest">Student quiz attempts</p>
+                  <p className="text-[11px] text-on-surface-variant/40 font-bold uppercase tracking-widest">Module progress updates</p>
                 </div>
               </div>
               <div className="h-[250px] min-h-[250px] w-full relative">

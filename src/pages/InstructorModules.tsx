@@ -34,6 +34,7 @@ interface BuilderModule {
 
 const blankQuestion = (id: string): JourneyQuestion => ({
   id,
+  type: 'multiple_choice',
   stem: 'Write the question stem here.',
   options: [
     { id: 'A', text: 'Option A' },
@@ -777,21 +778,76 @@ function QuestionEditor({
   return (
     <div className="rounded-2xl border border-outline-variant/40 bg-surface-container/20 p-4 space-y-4">
       <h4 className="font-extrabold text-on-surface">{title}</h4>
+      <Field label="Question type">
+        <select
+          value={question.type || 'multiple_choice'}
+          onChange={(event) => {
+            const type = event.target.value as JourneyQuestion['type'];
+            if (type === 'true_false') {
+              onQuestion({
+                type,
+                options: [{ id: 'A', text: 'True' }, { id: 'B', text: 'False' }],
+                correctOptionId: 'A',
+              });
+            } else if (type === 'multiple_choice') {
+              onQuestion({
+                type,
+                options: question.options?.length ? question.options : blankQuestion(question.id).options,
+                correctOptionId: question.correctOptionId || 'A',
+              });
+            } else {
+              onQuestion({
+                type,
+                options: [],
+                correctOptionId: '',
+                acceptedAnswers: question.acceptedAnswers?.length ? question.acceptedAnswers : ['Key idea from the reading'],
+                expectedAnswer: question.expectedAnswer || 'Expected answer based on the textbook reading.',
+              });
+            }
+          }}
+          className="input font-bold"
+        >
+          <option value="multiple_choice">Multiple choice</option>
+          <option value="true_false">True / False</option>
+          <option value="enumeration">Enumeration</option>
+          <option value="short_answer">Short answer</option>
+          <option value="essay">Essay</option>
+        </select>
+      </Field>
       <Field label="Question stem">
         <textarea value={question.stem} onChange={(event) => onQuestion({ stem: event.target.value })} rows={3} className="input resize-none" />
       </Field>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {question.options.map((option) => (
-          <Field key={option.id} label={`Option ${option.id}`}>
-            <input value={option.text} onChange={(event) => onOption(option.id, event.target.value)} className="input" />
+      {(!question.type || question.type === 'multiple_choice' || question.type === 'true_false') ? (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {question.options.map((option) => (
+              <Field key={option.id} label={`Option ${option.id}`}>
+                <input value={option.text} onChange={(event) => onOption(option.id, event.target.value)} className="input" />
+              </Field>
+            ))}
+          </div>
+          <Field label="Correct answer">
+            <select value={question.correctOptionId} onChange={(event) => onQuestion({ correctOptionId: event.target.value })} className="input font-bold">
+              {question.options.map((option) => <option key={option.id} value={option.id}>{option.id}</option>)}
+            </select>
           </Field>
-        ))}
-      </div>
-      <Field label="Correct answer">
-        <select value={question.correctOptionId} onChange={(event) => onQuestion({ correctOptionId: event.target.value })} className="input font-bold">
-          {question.options.map((option) => <option key={option.id} value={option.id}>{option.id}</option>)}
-        </select>
-      </Field>
+        </>
+      ) : (
+        <>
+          <Field label="Expected answer / rubric">
+            <textarea value={question.expectedAnswer || ''} onChange={(event) => onQuestion({ expectedAnswer: event.target.value })} rows={3} className="input resize-none" />
+          </Field>
+          <Field label="Accepted answers or key terms">
+            <textarea
+              value={(question.acceptedAnswers || []).join('\n')}
+              onChange={(event) => onQuestion({ acceptedAnswers: event.target.value.split('\n').map((item) => item.trim()).filter(Boolean) })}
+              rows={3}
+              className="input resize-none"
+              placeholder="One accepted answer or key term per line"
+            />
+          </Field>
+        </>
+      )}
       <Field label="Explanation">
         <textarea value={question.explanation} onChange={(event) => onQuestion({ explanation: event.target.value })} rows={2} className="input resize-none" />
       </Field>

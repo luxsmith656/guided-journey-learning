@@ -22,6 +22,37 @@ async function callAI(body: any) {
   return res.json();
 }
 
+function normalizeAnswer(value: string) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenSimilarity(a: string, b: string) {
+  const aTokens = new Set(normalizeAnswer(a).split(' ').filter(Boolean));
+  const bTokens = new Set(normalizeAnswer(b).split(' ').filter(Boolean));
+  if (aTokens.size === 0 || bTokens.size === 0) return 0;
+  const overlap = [...aTokens].filter((token) => bTokens.has(token)).length;
+  return overlap / Math.max(aTokens.size, bTokens.size);
+}
+
+function deterministicGrade({ studentAnswer, expectedAnswer = '', acceptedAnswers = [] }: any) {
+  const normalizedStudent = normalizeAnswer(studentAnswer);
+  const candidates = [expectedAnswer, ...acceptedAnswers].filter(Boolean);
+  const bestSimilarity = candidates.reduce((best, answer) => Math.max(best, tokenSimilarity(normalizedStudent, answer)), 0);
+  const exact = candidates.some((answer) => normalizeAnswer(answer) === normalizedStudent);
+  const score = exact ? 100 : bestSimilarity >= 0.85 ? 90 : bestSimilarity >= 0.65 ? 75 : bestSimilarity >= 0.45 ? 50 : 0;
+  return {
+    score,
+    isCorrect: score >= 70,
+    feedback: score >= 70
+      ? 'Accepted. Minor wording or spelling differences are okay when the meaning is correct.'
+      : 'Review the reading and try to include the key idea more clearly.',
+  };
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || Number(process.argv[process.argv.indexOf('--port') + 1]) || 8080;
@@ -126,6 +157,111 @@ Keep the explanation under 4 short sentences. Pedagogical, warm, no markdown.`;
         : error.status === 402 ? 'AI credits exhausted.'
         : error.message;
       res.status(status).json({ success: false, error: msg });
+    }
+  });
+
+  app.post('/api/grade-answer', async (req: any, res: any) => {
+    const { question, studentAnswer, expectedAnswer, acceptedAnswers = [], textbookContext = '', strict = false } = req.body || {};
+    if (!question || studentAnswer == null) return res.status(400).json({ success: false, error: 'question and studentAnswer required' });
+
+    try {
+      const data = await callAI({
+        messages: [
+          {
+            role: 'system',
+            content: 'You grade LET review answers. Be fair with spelling and grammar. Award credit when meaning matches the expected idea. Do not hallucinate beyond the supplied textbook context.',
+          },
+          {
+            role: 'user',
+            content: `Question: ${question.stem || question}\nType: ${question.type || 'short_answer'}\nExpected answer: ${expectedAnswer || question.expectedAnswer || ''}\nAccepted answers: ${JSON.stringify(acceptedAnswers || question.acceptedAnswers || [])}\nStudent answer: ${studentAnswer}\nTextbook context: ${String(textbookContext).slice(0, 2500)}\nStrict final exam mode: ${strict ? 'yes' : 'no'}\nReturn a fair score from 0-100 and brief feedback.`,
+          },
+        ],
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'return_grade',
+            description: 'Return answer grade',
+            parameters: {
+              type: 'object',
+              properties: {
+                score: { type: 'number' },
+                isCorrect: { type: 'boolean' },
+                feedback: { type: 'string' },
+              },
+              required: ['score', 'isCorrect', 'feedback'],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: 'function', function: { name: 'return_grade' } },
+      });
+      const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+      const grade = toolCall ? JSON.parse(toolCall.function.arguments) : deterministicGrade({ studentAnswer, expectedAnswer, acceptedAnswers });
+      res.json({ success: true, ...grade });
+    } catch (error: any) {
+      console.error('grade-answer fallback:', error.message);
+      res.json({ success: true, ...deterministicGrade({ studentAnswer, expectedAnswer: expectedAnswer || question.expectedAnswer, acceptedAnswers: acceptedAnswers || question.acceptedAnswers }) });
+    }
+  });
+
+  app.post('/api/generate-module-exam', async (req: any, res: any) => {
+    const { moduleTitle, textbookContext = '', count = 4 } = req.body || {};
+    if (!moduleTitle && !textbookContext) return res.status(400).json({ success: false, error: 'moduleTitle or textbookContext required' });
+
+    try {
+      const data = await callAI({
+        messages: [
+          { role: 'system', content: 'Create fresh LET-style module exam questions grounded only in the provided textbook context. Mix multiple choice, true/false, enumeration, and short answer when appropriate.' },
+          { role: 'user', content: `Module: ${moduleTitle}\nTextbook context:\n${String(textbookContext).slice(0, 5000)}\nGenerate ${count} fresh questions. Do not reuse exact prior wording.` },
+        ],
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'return_exam',
+            description: 'Return module exam questions',
+            parameters: {
+              type: 'object',
+              properties: {
+                questions: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string' },
+                      stem: { type: 'string' },
+                      type: { type: 'string', enum: ['multiple_choice', 'true_false', 'enumeration', 'short_answer', 'essay'] },
+                      options: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: { id: { type: 'string' }, text: { type: 'string' } },
+                          required: ['id', 'text'],
+                          additionalProperties: false,
+                        },
+                      },
+                      correctOptionId: { type: 'string' },
+                      acceptedAnswers: { type: 'array', items: { type: 'string' } },
+                      expectedAnswer: { type: 'string' },
+                      explanation: { type: 'string' },
+                    },
+                    required: ['id', 'stem', 'type', 'options', 'correctOptionId', 'explanation'],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ['questions'],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: 'function', function: { name: 'return_exam' } },
+      });
+      const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+      const args = toolCall ? JSON.parse(toolCall.function.arguments) : { questions: [] };
+      res.json({ success: true, questions: args.questions });
+    } catch (error: any) {
+      console.error('generate-module-exam error:', error.message);
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 

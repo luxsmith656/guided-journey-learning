@@ -10,9 +10,13 @@ export interface JourneyResource {
 export interface JourneyQuestion {
   id: string;
   stem: string;
+  type?: 'multiple_choice' | 'true_false' | 'enumeration' | 'short_answer' | 'essay';
   options: { id: string; text: string }[];
   correctOptionId: string;
   explanation: string;
+  acceptedAnswers?: string[];
+  expectedAnswer?: string;
+  points?: number;
 }
 
 export interface JourneyModulePart {
@@ -205,6 +209,16 @@ export const journeyModules: JourneyModule[] = [
         correctOptionId: 'B',
         explanation: 'Unsupported claims should be rejected even when they sound familiar.',
       },
+      {
+        id: 'gened-reading-final-q3',
+        type: 'short_answer',
+        stem: 'In one sentence, explain why a familiar phrase from the passage is not enough proof that an option is correct.',
+        options: [],
+        correctOptionId: '',
+        acceptedAnswers: ['the idea must be supported', 'passage evidence matters', 'words can repeat but change meaning'],
+        expectedAnswer: 'A repeated phrase is not enough because the option must match the supported idea in the passage.',
+        explanation: 'The answer should mention support, evidence, or matching the passage idea.',
+      },
     ],
   },
   {
@@ -326,6 +340,16 @@ export const journeyModules: JourneyModule[] = [
         correctOptionId: 'B',
         explanation: 'Alignment keeps the learning target, learning work, and evidence of learning connected.',
       },
+      {
+        id: 'profed-assessment-final-q2',
+        type: 'enumeration',
+        stem: 'Enumerate the three elements that must align in constructive alignment.',
+        options: [],
+        correctOptionId: '',
+        acceptedAnswers: ['objectives', 'learning activities', 'assessment', 'outcomes', 'instruction'],
+        expectedAnswer: 'Learning outcomes or objectives, teaching-learning activities or instruction, and assessment tasks.',
+        explanation: 'The three aligned elements are outcomes/objectives, instruction/activities, and assessment.',
+      },
     ],
   },
   {
@@ -417,6 +441,17 @@ export const journeyModules: JourneyModule[] = [
         ],
         correctOptionId: 'A',
         explanation: 'Proportions compare equal ratios, which means the relationship scales consistently.',
+      },
+      {
+        id: 'major-math-final-q2',
+        type: 'true_false',
+        stem: 'True or False: A correct-looking proportion can still answer the wrong quantity if the units were mislabeled.',
+        options: [
+          { id: 'A', text: 'True' },
+          { id: 'B', text: 'False' },
+        ],
+        correctOptionId: 'A',
+        explanation: 'Unit labels matter because they tell you what quantity the answer represents.',
       },
     ],
   },

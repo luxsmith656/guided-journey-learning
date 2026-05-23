@@ -32,7 +32,15 @@ interface QuestProgress {
   phase: QuestPhase;
   partScores: Record<string, number>;
   finalScore?: number;
+  failedAttempts?: number;
+  mustReread?: boolean;
   status: 'in_progress' | 'completed';
+}
+
+interface GradeResult {
+  score: number;
+  isCorrect: boolean;
+  feedback: string;
 }
 
 const optionTone = {
@@ -78,15 +86,22 @@ export default function LearningQuest() {
   const [module, setModule] = useState<JourneyModule>(() => findJourneyModule(moduleId));
   const [progress, setProgress] = useState<QuestProgress>(defaultProgress);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
+  const [writtenAnswer, setWrittenAnswer] = useState('');
   const [lastQuestionResult, setLastQuestionResult] = useState<'correct' | 'wrong' | null>(null);
+  const [lastFeedback, setLastFeedback] = useState('');
+  const [lastGradeScore, setLastGradeScore] = useState<number | null>(null);
   const [finalAnswers, setFinalAnswers] = useState<Record<string, string>>({});
+  const [finalGrades, setFinalGrades] = useState<Record<string, GradeResult>>({});
+  const [finalQuestionSet, setFinalQuestionSet] = useState<JourneyQuestion[]>([]);
+  const [isGrading, setIsGrading] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const parts = useMemo(() => getModuleParts(module), [module]);
-  const finalExam = useMemo(() => getModuleFinalExam(module), [module]);
+  const baseFinalExam = useMemo(() => getModuleFinalExam(module), [module]);
+  const finalExam = finalQuestionSet.length > 0 ? finalQuestionSet : baseFinalExam;
   const currentPart = parts[Math.min(progress.currentPartIndex, Math.max(parts.length - 1, 0))];
   const currentMiniQuestion = currentPart?.miniQuiz?.[0];
-  const finalAnsweredCount = Object.keys(finalAnswers).length;
+  const finalAnsweredCount = finalExam.filter((question) => !!finalAnswers[question.id]?.trim()).length;
   const finalScorePercent = progress.finalScore ?? 0;
 
   const progressDocId = user ? `${user.uid}_${module.id}` : '';
@@ -95,7 +110,10 @@ export default function LearningQuest() {
   const persistProgress = async (nextProgress: QuestProgress) => {
     setProgress(nextProgress);
     setSelectedAnswer(null);
+    setWrittenAnswer('');
     setLastQuestionResult(null);
+    setLastFeedback('');
+    setLastGradeScore(null);
 
     try {
       localStorage.setItem(localProgressKey, JSON.stringify(nextProgress));
@@ -116,6 +134,8 @@ export default function LearningQuest() {
           phase: nextProgress.phase,
           partScores: nextProgress.partScores,
           finalScore: nextProgress.finalScore ?? null,
+          failedAttempts: nextProgress.failedAttempts || 0,
+          mustReread: !!nextProgress.mustReread,
           progressPercent: computeProgressPercent(nextProgress, parts.length),
           lastAccessedAt: serverTimestamp(),
           completedAt: nextProgress.status === 'completed' ? serverTimestamp() : null,
@@ -178,6 +198,8 @@ export default function LearningQuest() {
               phase: data.phase || 'intro',
               partScores: data.partScores || {},
               finalScore: data.finalScore ?? undefined,
+              failedAttempts: data.failedAttempts || 0,
+              mustReread: !!data.mustReread,
               status: data.status === 'completed' ? 'completed' : 'in_progress',
             };
           }
@@ -193,6 +215,7 @@ export default function LearningQuest() {
         }
 
         setProgress(restoredProgress || defaultProgress);
+        setFinalQuestionSet(getModuleFinalExam(activeModule));
       } catch (error) {
         console.error('Failed to load module, using journey fallback', error);
         setModule(findJourneyModule(moduleId));
@@ -204,15 +227,61 @@ export default function LearningQuest() {
     loadModuleAndProgress();
   }, [moduleId, user]);
 
-  const moveToPhase = (phase: QuestPhase) => {
+  const moveToPhase = async (phase: QuestPhase) => {
+    if (phase === 'finalExam') {
+      await prepareFinalExam(!!progress.mustReread || (progress.failedAttempts || 0) > 0);
+    }
     persistProgress({ ...progress, phase, status: phase === 'complete' ? 'completed' : 'in_progress' });
   };
 
-  const completeMiniQuiz = () => {
-    const isCorrect = selectedAnswer === currentMiniQuestion?.correctOptionId;
+  const gradeQuestion = async (question: JourneyQuestion, answer: string, strict = false): Promise<GradeResult> => {
+    if (isChoiceQuestion(question)) {
+      const correct = answer === question.correctOptionId;
+      return {
+        score: correct ? 100 : 0,
+        isCorrect: correct,
+        feedback: question.explanation,
+      };
+    }
+
+    const expectedAnswer = question.expectedAnswer || question.acceptedAnswers?.[0] || question.explanation;
+    try {
+      const response = await fetch('/api/grade-answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question,
+          studentAnswer: answer,
+          expectedAnswer,
+          acceptedAnswers: question.acceptedAnswers || [],
+          textbookContext: parts.map((part) => `${part.textbookSection.title}\n${part.textbookSection.body}`).join('\n\n'),
+          strict,
+        }),
+      });
+      const data = await response.json();
+      return {
+        score: Math.max(0, Math.min(100, Number(data.score || 0))),
+        isCorrect: !!data.isCorrect || Number(data.score || 0) >= 70,
+        feedback: data.feedback || 'Answer checked.',
+      };
+    } catch {
+      const normalized = answer.trim().toLowerCase();
+      const accepted = (question.acceptedAnswers || [expectedAnswer]).map((item) => item.toLowerCase());
+      const correct = accepted.some((item) => normalized.includes(item) || item.includes(normalized));
+      return { score: correct ? 80 : 0, isCorrect: correct, feedback: correct ? 'Accepted.' : 'Review the textbook section and try again.' };
+    }
+  };
+
+  const completeMiniQuiz = async () => {
+    const answer = isChoiceQuestion(currentMiniQuestion) ? selectedAnswer || '' : writtenAnswer;
+    const grade = lastGradeScore != null
+      ? { score: lastGradeScore, isCorrect: lastGradeScore >= 70, feedback: lastFeedback }
+      : currentMiniQuestion
+        ? await gradeQuestion(currentMiniQuestion, answer)
+        : { score: 100, isCorrect: true, feedback: '' };
     const nextScores = {
       ...progress.partScores,
-      [currentPart.id]: isCorrect ? 100 : 0,
+      [currentPart.id]: grade.score,
     };
 
     if (currentPart.activity) {
@@ -223,9 +292,10 @@ export default function LearningQuest() {
     goToNextPart(nextScores);
   };
 
-  const goToNextPart = (partScores = progress.partScores) => {
+  const goToNextPart = async (partScores = progress.partScores) => {
     const nextIndex = progress.currentPartIndex + 1;
     if (nextIndex >= parts.length) {
+      await prepareFinalExam(!!progress.mustReread || (progress.failedAttempts || 0) > 0);
       persistProgress({ ...progress, currentPartIndex: progress.currentPartIndex, phase: 'finalExam', partScores });
       return;
     }
@@ -234,19 +304,31 @@ export default function LearningQuest() {
   };
 
   const submitFinalExam = async () => {
-    const correctCount = finalExam.reduce((sum, question) => {
-      return sum + (finalAnswers[question.id] === question.correctOptionId ? 1 : 0);
-    }, 0);
-    const score = Math.round((correctCount / Math.max(finalExam.length, 1)) * 100);
+    setIsGrading(true);
+    const grades: Record<string, GradeResult> = {};
+    for (const question of finalExam) {
+      const answer = finalAnswers[question.id] || '';
+      grades[question.id] = await gradeQuestion(question, answer, true);
+    }
+    setFinalGrades(grades);
+    const score = Math.round(Object.values(grades).reduce((sum, grade) => sum + grade.score, 0) / Math.max(finalExam.length, 1));
     const status = score >= 70 ? 'completed' : 'in_progress';
-    const phase: QuestPhase = score >= 70 ? 'complete' : 'finalExam';
+    const phase: QuestPhase = score >= 70 ? 'complete' : 'read';
 
     await persistProgress({
       ...progress,
       phase,
+      currentPartIndex: score >= 70 ? progress.currentPartIndex : 0,
       finalScore: score,
       status,
+      mustReread: score < 70,
+      failedAttempts: score >= 70 ? progress.failedAttempts || 0 : (progress.failedAttempts || 0) + 1,
     });
+    setIsGrading(false);
+    if (score < 70) {
+      setFinalAnswers({});
+      setFinalGrades({});
+    }
 
     if (score >= 70 && user) {
       try {
@@ -269,12 +351,92 @@ export default function LearningQuest() {
 
   const resetFinalExam = () => {
     setFinalAnswers({});
-    persistProgress({ ...progress, finalScore: undefined, phase: 'finalExam', status: 'in_progress' });
+    setFinalGrades({});
+    persistProgress({ ...progress, finalScore: undefined, phase: 'read', currentPartIndex: 0, status: 'in_progress', mustReread: true });
   };
 
   const answerMiniQuiz = (optionId: string) => {
     setSelectedAnswer(optionId);
     setLastQuestionResult(optionId === currentMiniQuestion?.correctOptionId ? 'correct' : 'wrong');
+  };
+
+  const checkWrittenMiniQuiz = async () => {
+    if (!currentMiniQuestion || !writtenAnswer.trim()) return;
+    setIsGrading(true);
+    const grade = await gradeQuestion(currentMiniQuestion, writtenAnswer);
+    setLastGradeScore(grade.score);
+    setLastQuestionResult(grade.isCorrect ? 'correct' : 'wrong');
+    setLastFeedback(grade.feedback);
+    setIsGrading(false);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT';
+      const key = event.key.toUpperCase();
+
+      if (progress.phase === 'miniQuiz' && currentMiniQuestion && !isTyping) {
+        if (isChoiceQuestion(currentMiniQuestion) && ['A', 'B', 'C', 'D', 'T', 'F'].includes(key)) {
+          const optionId = key === 'T' ? 'A' : key === 'F' ? 'B' : key;
+          const hasOption = currentMiniQuestion.options.some((option) => option.id === optionId);
+          if (hasOption && !selectedAnswer) answerMiniQuiz(optionId);
+        }
+        if (event.key === 'Enter' && (selectedAnswer || (!isChoiceQuestion(currentMiniQuestion) && writtenAnswer.trim()))) {
+          event.preventDefault();
+          if (!isChoiceQuestion(currentMiniQuestion) && !lastFeedback) {
+            checkWrittenMiniQuiz();
+          } else {
+            completeMiniQuiz();
+          }
+        }
+      }
+
+      if (progress.phase === 'finalExam' && !isTyping) {
+        if (['A', 'B', 'C', 'D', 'T', 'F'].includes(key)) {
+          const nextQuestion = finalExam.find((question) => isChoiceQuestion(question) && !finalAnswers[question.id]);
+          if (nextQuestion) {
+            const optionId = key === 'T' ? 'A' : key === 'F' ? 'B' : key;
+            if (nextQuestion.options.some((option) => option.id === optionId)) {
+              setFinalAnswers((answers) => ({ ...answers, [nextQuestion.id]: optionId }));
+            }
+          }
+        }
+        if (event.key === 'Enter' && finalExam.every((question) => !!finalAnswers[question.id]?.trim())) {
+          event.preventDefault();
+          submitFinalExam();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [progress.phase, currentMiniQuestion, selectedAnswer, writtenAnswer, finalAnswers, finalExam, lastFeedback]);
+
+  const prepareFinalExam = async (fresh: boolean) => {
+    if (!fresh) {
+      setFinalQuestionSet(baseFinalExam);
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/generate-module-exam', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          moduleTitle: module.title,
+          textbookContext: parts.map((part) => `${part.textbookSection.title}\n${part.textbookSection.body}`).join('\n\n'),
+          count: Math.max(3, baseFinalExam.length),
+        }),
+      });
+      const data = await response.json();
+      const freshQuestions = (data.questions || []).filter((question: JourneyQuestion) => question.stem);
+      setFinalQuestionSet(freshQuestions.length ? freshQuestions : rotateQuestions(baseFinalExam));
+    } catch {
+      setFinalQuestionSet(rotateQuestions(baseFinalExam));
+    }
+    setFinalAnswers({});
+    setFinalGrades({});
   };
 
   if (loading) {
@@ -344,6 +506,11 @@ export default function LearningQuest() {
             <HeaderKicker icon={Library} label={`Part ${progress.currentPartIndex + 1} textbook`} />
             <h2 className="text-2xl font-extrabold font-headline text-on-surface">{currentPart.textbookSection.title}</h2>
             <p className="text-xs font-bold text-on-surface-variant/50 mt-2">{currentPart.textbookSection.estimatedReadMinutes} min read</p>
+            {progress.mustReread && (
+              <div className="rounded-2xl border border-error/20 bg-error/10 p-4 mt-5">
+                <p className="font-bold text-error">Final exam not passed yet. Reread this section first; your next exam attempt will use fresh questions from this textbook.</p>
+              </div>
+            )}
             <p className="text-on-surface-variant leading-relaxed mt-5 whitespace-pre-line">{currentPart.textbookSection.body}</p>
             <button onClick={() => moveToPhase('lesson')} className="w-full bg-primary text-on-primary px-6 py-4 rounded-2xl font-bold flex items-center justify-between shadow-sm mt-6">
               Continue to lesson
@@ -387,29 +554,49 @@ export default function LearningQuest() {
           <Card>
             <HeaderKicker icon={FileQuestion} label="Mini quiz" />
             <h2 className="text-xl font-extrabold text-on-surface leading-snug mb-6">{currentMiniQuestion.stem}</h2>
-            <div className="space-y-3">
-              {currentMiniQuestion.options.map((option) => {
-                const isChosen = selectedAnswer === option.id;
-                const isCorrect = option.id === currentMiniQuestion.correctOptionId;
-                const tone = !selectedAnswer ? optionTone.idle : isCorrect ? optionTone.right : isChosen ? optionTone.wrong : optionTone.idle;
-                return (
-                  <button
-                    key={option.id}
-                    disabled={!!selectedAnswer}
-                    onClick={() => answerMiniQuiz(option.id)}
-                    className={`w-full rounded-xl border-2 p-4 text-left font-semibold transition-all ${tone}`}
-                  >
-                    {option.id}. {option.text}
-                  </button>
-                );
-              })}
-            </div>
-            {selectedAnswer && (
+            {isChoiceQuestion(currentMiniQuestion) ? (
+              <div className="space-y-3">
+                {normalizeOptions(currentMiniQuestion).map((option) => {
+                  const isChosen = selectedAnswer === option.id;
+                  const isCorrect = option.id === currentMiniQuestion.correctOptionId;
+                  const tone = !selectedAnswer ? optionTone.idle : isCorrect ? optionTone.right : isChosen ? optionTone.wrong : optionTone.idle;
+                  return (
+                    <button
+                      key={option.id}
+                      disabled={!!selectedAnswer}
+                      onClick={() => answerMiniQuiz(option.id)}
+                      className={`w-full rounded-xl border-2 p-4 text-left font-semibold transition-all ${tone}`}
+                    >
+                      {option.id}. {option.text}
+                    </button>
+                  );
+                })}
+                <p className="text-[11px] text-on-surface-variant/50 font-bold">Keyboard: press A/B/C/D, or T/F for true or false, then Enter.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <textarea
+                  value={writtenAnswer}
+                  onChange={(event) => setWrittenAnswer(event.target.value)}
+                  rows={currentMiniQuestion.type === 'essay' ? 6 : 3}
+                  placeholder={currentMiniQuestion.type === 'enumeration' ? 'List answers separated by commas or new lines.' : 'Type your answer here.'}
+                  className="w-full bg-surface-container border border-outline-variant/30 rounded-xl p-4 text-sm font-medium outline-none focus:border-primary/40"
+                />
+                <button
+                  disabled={!writtenAnswer.trim() || isGrading}
+                  onClick={checkWrittenMiniQuiz}
+                  className="rounded-xl bg-primary text-on-primary px-5 py-3 text-sm font-bold disabled:opacity-50"
+                >
+                  {isGrading ? 'Checking...' : 'Check answer'}
+                </button>
+              </div>
+            )}
+            {(selectedAnswer || lastFeedback) && (
               <div className="mt-5 rounded-xl bg-surface-container p-4">
                 <p className={`text-sm font-black mb-2 ${lastQuestionResult === 'correct' ? 'text-emerald-600' : 'text-error'}`}>
                   {lastQuestionResult === 'correct' ? 'Correct' : 'Review this idea'}
                 </p>
-                <p className="text-sm font-bold text-on-surface">{currentMiniQuestion.explanation}</p>
+                <p className="text-sm font-bold text-on-surface">{lastFeedback || currentMiniQuestion.explanation}</p>
                 <button onClick={completeMiniQuiz} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary text-on-primary px-5 py-3 text-sm font-bold">
                   {currentPart.activity ? 'Continue to activity' : 'Continue'}
                   <ChevronRight size={16} />
@@ -441,45 +628,55 @@ export default function LearningQuest() {
           <Card>
             <HeaderKicker icon={Trophy} label="Final module exam" />
             <h2 className="text-2xl font-extrabold font-headline text-on-surface">Pass this module exam to unlock completion.</h2>
-            <p className="text-sm text-on-surface-variant mt-2">Required score: 70%. You can retry if needed.</p>
+            <p className="text-sm text-on-surface-variant mt-2">Required score: 70%. Choices support A/B/C/D and Enter. Written answers are AI-checked with spelling tolerance.</p>
 
             {progress.finalScore !== undefined && progress.finalScore < 70 && (
               <div className="rounded-2xl border border-error/20 bg-error/10 p-4 mt-5">
-                <p className="font-bold text-error">Score {progress.finalScore}%. Review the parts and retry the final exam.</p>
+                <p className="font-bold text-error">Last score: {progress.finalScore}%. You must reread the textbook before retrying. The next attempt uses fresh questions from the same reading.</p>
               </div>
             )}
 
             <div className="space-y-6 mt-6">
               {finalExam.map((question, index) => (
                 <div key={question.id} className="rounded-2xl border border-outline-variant/40 bg-surface-container/20 p-4">
-                  <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Question {index + 1}</p>
+                  <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Question {index + 1} / {questionTypeLabel(question)}</p>
                   <h3 className="font-extrabold text-on-surface leading-snug mb-4">{question.stem}</h3>
-                  <div className="grid grid-cols-1 gap-2">
-                    {question.options.map((option) => {
-                      const selected = finalAnswers[question.id] === option.id;
-                      return (
-                        <button
-                          key={option.id}
-                          onClick={() => setFinalAnswers((answers) => ({ ...answers, [question.id]: option.id }))}
-                          className={`rounded-xl border p-3 text-left text-sm font-semibold transition-colors ${
-                            selected ? 'border-primary bg-primary/10 text-primary' : 'border-outline-variant/30 bg-surface-container/30 text-on-surface'
-                          }`}
-                        >
-                          {option.id}. {option.text}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  {isChoiceQuestion(question) ? (
+                    <div className="grid grid-cols-1 gap-2">
+                      {normalizeOptions(question).map((option) => {
+                        const selected = finalAnswers[question.id] === option.id;
+                        return (
+                          <button
+                            key={option.id}
+                            onClick={() => setFinalAnswers((answers) => ({ ...answers, [question.id]: option.id }))}
+                            className={`rounded-xl border p-3 text-left text-sm font-semibold transition-colors ${
+                              selected ? 'border-primary bg-primary/10 text-primary' : 'border-outline-variant/30 bg-surface-container/30 text-on-surface'
+                            }`}
+                          >
+                            {option.id}. {option.text}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <textarea
+                      value={finalAnswers[question.id] || ''}
+                      onChange={(event) => setFinalAnswers((answers) => ({ ...answers, [question.id]: event.target.value }))}
+                      rows={question.type === 'essay' ? 6 : 3}
+                      placeholder={question.type === 'enumeration' ? 'List answers separated by commas or new lines.' : 'Type your answer here.'}
+                      className="w-full bg-surface-container border border-outline-variant/30 rounded-xl p-4 text-sm font-medium outline-none focus:border-primary/40"
+                    />
+                  )}
                 </div>
               ))}
             </div>
 
             <button
-              disabled={finalAnsweredCount < finalExam.length}
+              disabled={finalAnsweredCount < finalExam.length || isGrading}
               onClick={submitFinalExam}
               className="w-full bg-primary text-on-primary px-6 py-4 rounded-2xl font-bold flex items-center justify-between shadow-sm mt-6 disabled:opacity-50"
             >
-              Submit final exam
+              {isGrading ? 'Checking final exam...' : 'Submit final exam'}
               <ChevronRight size={18} />
             </button>
           </Card>
@@ -500,7 +697,7 @@ export default function LearningQuest() {
               </button>
               <button onClick={resetFinalExam} className="rounded-xl bg-surface-container text-on-surface px-6 py-3 font-bold border border-outline-variant inline-flex items-center justify-center gap-2">
                 <RotateCcw size={16} />
-                Retake exam
+                Retake with new questions
               </button>
             </div>
           </Card>
@@ -544,6 +741,48 @@ function computeProgressPercent(progress: QuestProgress, partCount: number) {
   const base = Math.round((completedParts / Math.max(partCount + 1, 1)) * 100);
   if (progress.phase === 'finalExam') return Math.max(base, 85);
   return Math.min(95, base);
+}
+
+function isChoiceQuestion(question?: JourneyQuestion) {
+  if (!question) return false;
+  return !question.type || question.type === 'multiple_choice' || question.type === 'true_false';
+}
+
+function normalizeOptions(question: JourneyQuestion) {
+  if (question.type === 'true_false' && (!question.options || question.options.length === 0)) {
+    return [
+      { id: 'A', text: 'True' },
+      { id: 'B', text: 'False' },
+    ];
+  }
+  return question.options || [];
+}
+
+function questionTypeLabel(question: JourneyQuestion) {
+  const type = question.type || 'multiple_choice';
+  return type.replace('_', ' ');
+}
+
+function rotateQuestions(questions: JourneyQuestion[]) {
+  return questions.map((question, index) => {
+    if (!isChoiceQuestion(question)) {
+      return { ...question, id: `${question.id}-retry-${Date.now()}-${index}` };
+    }
+    const options = normalizeOptions(question);
+    const rotatedOptions = [...options.slice(1), options[0]].map((option, optionIndex) => ({
+      ...option,
+      id: String.fromCharCode(65 + optionIndex),
+    }));
+    const oldCorrectIndex = options.findIndex((option) => option.id === question.correctOptionId);
+    const newCorrectIndex = oldCorrectIndex <= 0 ? options.length - 1 : oldCorrectIndex - 1;
+    return {
+      ...question,
+      id: `${question.id}-retry-${Date.now()}-${index}`,
+      stem: `${question.stem} (new attempt)`,
+      options: rotatedOptions,
+      correctOptionId: String.fromCharCode(65 + Math.max(0, newCorrectIndex)),
+    };
+  });
 }
 
 function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {

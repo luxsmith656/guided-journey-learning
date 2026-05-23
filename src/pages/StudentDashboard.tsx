@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import StudentLayout from '../components/StudentLayout';
 import { useNavigate } from 'react-router-dom';
-import { doc, getDoc, collection, query, where, getDocs, updateDoc } from 'firebase/firestore';
-import { auth, db } from '../lib/firebase';
+import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { 
   BookOpen, 
@@ -48,6 +48,9 @@ export default function StudentDashboard() {
         }
 
         // Simulating fetching active courses/modules workflow
+        const progressSnap = await getDocs(query(collection(db, 'moduleProgress'), where('userId', '==', user.uid)));
+        const progressByModule = new Map(progressSnap.docs.map((progressDoc) => [progressDoc.data().moduleId, progressDoc.data()]));
+
         if (user.learningMode === 'class_based' && user.activeClassId) {
           const classRef = await getDoc(doc(db, 'classes', user.activeClassId));
           if (classRef.exists()) {
@@ -64,15 +67,15 @@ export default function StudentDashboard() {
                    mods.push({
                      id: mid,
                      title: moduleData?.title || localModule?.title || `Module ${mid.substring(0,4)}`,
-                     status: localModule?.status === 'completed' ? 'Completed' : 'In Progress',
-                     progress: localModule?.progress ?? Math.floor(Math.random() * 60) + 20
+                     status: progressByModule.get(mid)?.status === 'completed' ? 'Completed' : progressByModule.get(mid)?.phase === 'finalExam' ? 'Final Exam' : 'In Progress',
+                     progress: progressByModule.get(mid)?.progressPercent ?? localModule?.progress ?? 0
                    });
                  } catch {
                    mods.push({
                      id: mid,
                      title: localModule?.title || `Module ${mid.substring(0,4)}`,
-                     status: 'In Progress',
-                     progress: localModule?.progress || 20
+                     status: progressByModule.get(mid)?.status === 'completed' ? 'Completed' : 'In Progress',
+                     progress: progressByModule.get(mid)?.progressPercent ?? localModule?.progress ?? 0
                    });
                  }
               }
@@ -84,8 +87,8 @@ export default function StudentDashboard() {
            setAssignedModules(journeyModules.slice(0, 3).map(module => ({
              id: module.id,
              title: module.title,
-             status: module.status === 'completed' ? 'Completed' : module.status === 'available' ? 'Ready' : 'In Progress',
-             progress: module.progress
+             status: progressByModule.get(module.id)?.status === 'completed' ? 'Completed' : module.status === 'available' ? 'Ready' : 'In Progress',
+             progress: progressByModule.get(module.id)?.progressPercent ?? module.progress
            })));
         }
       } catch (e) {

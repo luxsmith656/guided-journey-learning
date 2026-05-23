@@ -35,6 +35,7 @@ export default function StudentCourses() {
   const [searchTerm, setSearchTerm] = useState('');
   const [remoteModules, setRemoteModules] = useState<JourneyModule[]>([]);
   const [completedModuleIds, setCompletedModuleIds] = useState<Set<string>>(new Set());
+  const [progressByModule, setProgressByModule] = useState<Record<string, any>>({});
 
   useEffect(() => {
     const modulesQuery = query(collection(db, 'modules'), where('isPublished', '==', true));
@@ -75,9 +76,15 @@ export default function StudentCourses() {
 
   useEffect(() => {
     if (!user) return;
-    const progressQuery = query(collection(db, 'moduleProgress'), where('userId', '==', user.uid), where('status', '==', 'completed'));
+    const progressQuery = query(collection(db, 'moduleProgress'), where('userId', '==', user.uid));
     const unsubscribe = onSnapshot(progressQuery, (snapshot) => {
-      setCompletedModuleIds(new Set(snapshot.docs.map((progressDoc) => progressDoc.data().moduleId).filter(Boolean)));
+      const progressMap: Record<string, any> = {};
+      snapshot.docs.forEach((progressDoc) => {
+        const data = progressDoc.data();
+        if (data.moduleId) progressMap[data.moduleId] = data;
+      });
+      setProgressByModule(progressMap);
+      setCompletedModuleIds(new Set(Object.values(progressMap).filter((data: any) => data.status === 'completed').map((data: any) => data.moduleId)));
     }, (error) => {
       console.warn('Unable to load module completion gates', error);
     });
@@ -89,8 +96,15 @@ export default function StudentCourses() {
   const selectedTopic = selectedSubject.topics.find((topic) => topic.id === selectedTopicId) || selectedSubject.topics[0];
   const allModules = useMemo(() => {
     const remoteIds = new Set(remoteModules.map((module) => module.id));
-    return [...remoteModules, ...journeyModules.filter((module) => !remoteIds.has(module.id))];
-  }, [remoteModules]);
+    return [...remoteModules, ...journeyModules.filter((module) => !remoteIds.has(module.id))].map((module) => {
+      const progress = progressByModule[module.id];
+      return {
+        ...module,
+        status: progress?.status === 'completed' ? 'completed' : progress ? 'in_progress' : module.status,
+        progress: progress?.progressPercent ?? module.progress,
+      } as JourneyModule;
+    });
+  }, [remoteModules, progressByModule]);
   const subjectModules = getSubjectModules(selectedSubject.id, allModules);
   const topicModules = getTopicModules(selectedTopic.id, allModules);
 

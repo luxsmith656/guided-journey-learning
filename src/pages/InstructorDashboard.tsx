@@ -29,7 +29,22 @@ export default function InstructorDashboard() {
       const classDataPromises = Array.from(merged.values()).map(async (classData) => {
         const qEnrollments = query(collection(db, 'classEnrollments'), where('classId', '==', classData.id));
         const eSnap = await getDocs(qEnrollments);
-        return { ...classData, studentCount: eSnap.size || classData.studentCount || 0 };
+        const studentIds = eSnap.docs.map((docSnap) => docSnap.data().studentId).filter(Boolean);
+        const progressSnap = await getDocs(collection(db, 'moduleProgress'));
+        const relevantProgress = progressSnap.docs
+          .map((docSnap) => docSnap.data())
+          .filter((progress) => {
+            const studentMatch = studentIds.length === 0 || studentIds.includes(progress.userId);
+            const moduleMatch = !classData.assignedModuleIds?.length || classData.assignedModuleIds.includes(progress.moduleId);
+            return studentMatch && moduleMatch;
+          });
+        const avgProgress = relevantProgress.length
+          ? Math.round(relevantProgress.reduce((sum, progress) => sum + (progress.progressPercent || 0), 0) / relevantProgress.length)
+          : 0;
+        const passRate = relevantProgress.length
+          ? Math.round((relevantProgress.filter((progress) => progress.status === 'completed').length / relevantProgress.length) * 100)
+          : 0;
+        return { ...classData, studentCount: eSnap.size || classData.studentCount || 0, avgProgress, passRate };
       });
       const classData = await Promise.all(classDataPromises);
       setClasses(classData);
@@ -110,7 +125,7 @@ export default function InstructorDashboard() {
             { title: 'Questions Curated', value: stats.questions.toLocaleString(), icon: BookOpen, color: 'text-primary', bg: 'bg-primary/10' },
             { title: 'Active Students', value: stats.activeStudents.toString(), icon: Users, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
             { title: 'AI Drafts Pending', value: stats.aiDrafts.toString(), icon: BrainCircuit, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-            { title: 'Pass Rate Est.', value: '84%', icon: Activity, color: 'text-indigo-500', bg: 'bg-indigo-500/10' }
+            { title: 'Avg Progress', value: `${classes.length ? Math.round(classes.reduce((sum, cls) => sum + (cls.avgProgress || 0), 0) / classes.length) : 0}%`, icon: Activity, color: 'text-indigo-500', bg: 'bg-indigo-500/10' }
           ].map((stat, i) => (
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
@@ -186,8 +201,8 @@ export default function InstructorDashboard() {
                          <p className="text-xs text-on-surface-variant/40 font-medium">{cls.studentCount || 0} students</p>
                        </div>
                        <div className="text-right">
-                         <p className={`font-black text-lg ${76 >= 75 ? 'text-emerald-500' : 'text-error'}`}>{76}%</p>
-                         <p className="text-[9px] uppercase tracking-widest font-bold text-on-surface-variant/40">Avg</p>
+                         <p className={`font-black text-lg ${(cls.avgProgress || 0) >= 70 ? 'text-emerald-500' : 'text-error'}`}>{cls.avgProgress || 0}%</p>
+                         <p className="text-[9px] uppercase tracking-widest font-bold text-on-surface-variant/40">Progress</p>
                        </div>
                     </div>
                   ))}
