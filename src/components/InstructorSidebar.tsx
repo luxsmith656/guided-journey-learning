@@ -11,7 +11,7 @@ export default function InstructorSidebar() {
   const navItems = [
     { name: 'Dashboard', path: '/instructor/dashboard', icon: 'dashboard' },
     { name: 'Classes', path: '/instructor/classes', icon: 'groups' },
-    { name: 'Modules', path: '/instructor/modules', icon: 'book' },
+    { name: 'Studio', path: '/instructor/modules', icon: 'design_services' },
     { name: 'Assignments', path: '/instructor/assignments', icon: 'assignment' },
     { name: 'Gradebook', path: '/instructor/grades', icon: 'grade' },
     { name: 'Students', path: '/instructor/students', icon: 'person_search' },
@@ -49,7 +49,7 @@ export default function InstructorSidebar() {
           {!isCollapsed && (
             <div className="min-w-0">
               <div className="font-extrabold text-primary text-[20px] tracking-tight leading-tight truncate">{settings.siteName}</div>
-              <div className="text-[11px] text-on-surface-variant/40 font-medium font-body mt-0.5 truncate uppercase tracking-wider">Instructor Panel</div>
+              <div className="text-[11px] text-on-surface-variant/40 font-medium font-body mt-0.5 truncate uppercase tracking-wider">Instructor Studio</div>
             </div>
           )}
           

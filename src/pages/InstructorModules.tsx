@@ -4,12 +4,15 @@ import {
   BookOpen,
   CheckCircle2,
   ClipboardList,
+  Copy,
   FileQuestion,
   Eye,
+  GripVertical,
   Layers3,
   Plus,
   Save,
   Search,
+  Settings2,
   Sparkles,
   Trash2,
   Wand2,
@@ -39,9 +42,34 @@ interface BuilderModule {
   recordFirstAttemptOnly: boolean;
   authorName?: string;
   authorEmail?: string;
+  isTemplate?: boolean;
+  templateSourceId?: string;
+  prerequisiteModuleIds: string[];
+  competencies: { id: string; label: string; description?: string }[];
+  rubric: { criterion: string; points: number; description: string }[];
+  unlockRules: { minScorePercent: number; requireAllParts: boolean; motivationalQuote: string };
+  examBlueprint: {
+    questionCount: number;
+    sectionDistribution: Record<string, number>;
+    competencyDistribution: Record<string, number>;
+    difficultyMix: Record<'easy' | 'medium' | 'hard', number>;
+  };
   parts: JourneyModulePart[];
   finalExam: JourneyQuestion[];
 }
+
+const defaultUnlockRules = {
+  minScorePercent: 85,
+  requireAllParts: true,
+  motivationalQuote: 'Master the idea before you chase the score.',
+};
+
+const defaultExamBlueprint = {
+  questionCount: 10,
+  sectionDistribution: {},
+  competencyDistribution: {},
+  difficultyMix: { easy: 30, medium: 50, hard: 20 },
+};
 
 const blankQuestion = (id: string): JourneyQuestion => ({
   id,
@@ -91,6 +119,13 @@ const emptyModule: BuilderModule = {
   recordFirstAttemptOnly: true,
   authorName: '',
   authorEmail: '',
+  isTemplate: false,
+  templateSourceId: '',
+  prerequisiteModuleIds: [],
+  competencies: [{ id: 'competency-1', label: 'Core understanding', description: 'Explain the key idea in your own words.' }],
+  rubric: [{ criterion: 'Concept accuracy', points: 10, description: 'Answer matches the textbook concept and uses correct terms.' }],
+  unlockRules: defaultUnlockRules,
+  examBlueprint: defaultExamBlueprint,
   parts: [blankPart(0)],
   finalExam: [blankQuestion('final-q1')],
 };
@@ -112,6 +147,13 @@ function fromSeedModule(module: (typeof journeyModules)[number]): BuilderModule 
     recordFirstAttemptOnly: true,
     authorName: 'Preset curriculum',
     authorEmail: '',
+    isTemplate: false,
+    templateSourceId: '',
+    prerequisiteModuleIds: module.prerequisiteModuleIds || [],
+    competencies: module.competencies?.length ? module.competencies : emptyModule.competencies,
+    rubric: module.rubric?.length ? module.rubric : emptyModule.rubric,
+    unlockRules: { ...defaultUnlockRules, ...(module.unlockRules || {}) },
+    examBlueprint: { ...defaultExamBlueprint, ...(module.examBlueprint || {}) },
     parts: module.parts?.length ? module.parts : [blankPart(0)],
     finalExam: module.finalExam?.length ? module.finalExam : module.questions.slice(0, 2),
   };
@@ -148,6 +190,13 @@ function fromFirestoreModule(id: string, data: any): BuilderModule {
     recordFirstAttemptOnly: data.recordFirstAttemptOnly ?? true,
     authorName: data.authorName || data.createdByName || data.instructorName || 'Instructor',
     authorEmail: data.authorEmail || '',
+    isTemplate: !!data.isTemplate,
+    templateSourceId: data.templateSourceId || '',
+    prerequisiteModuleIds: data.prerequisiteModuleIds || [],
+    competencies: data.competencies?.length ? data.competencies : emptyModule.competencies,
+    rubric: data.rubric?.length ? data.rubric : emptyModule.rubric,
+    unlockRules: { ...defaultUnlockRules, ...(data.unlockRules || {}) },
+    examBlueprint: { ...defaultExamBlueprint, ...(data.examBlueprint || {}) },
     parts: data.parts?.length ? data.parts : [legacyPart],
     finalExam: data.finalExam?.length ? data.finalExam : [blankQuestion('final-q1')],
   };
@@ -157,6 +206,7 @@ const builderSteps = [
   { id: 'outline', label: 'Outline' },
   { id: 'parts', label: 'Parts' },
   { id: 'assessments', label: 'Quizzes' },
+  { id: 'design', label: 'Design' },
   { id: 'publish', label: 'Publish' },
 ] as const;
 
@@ -172,6 +222,7 @@ export default function InstructorModules() {
   const [activePartIndex, setActivePartIndex] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [assistantPrompt, setAssistantPrompt] = useState('');
+  const [assistantSource, setAssistantSource] = useState('');
   const [isDrafting, setIsDrafting] = useState(false);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
   const [moduleFilter, setModuleFilter] = useState<'all' | 'published' | 'draft'>('all');
@@ -237,7 +288,7 @@ export default function InstructorModules() {
     });
   }, [modules, searchTerm, moduleFilter]);
 
-  const updateDraft = (field: keyof BuilderModule, value: string | number | boolean | JourneyModulePart[] | JourneyQuestion[] | string[]) => {
+  const updateDraft = (field: keyof BuilderModule, value: any) => {
     setDraft((current) => {
       if (field === 'subjectId') {
         const nextSubject = journeySubjects.find((subject) => subject.id === value) || journeySubjects[0];
@@ -312,7 +363,7 @@ export default function InstructorModules() {
     setIsCreatingNew(true);
     setSelectedModuleId('');
     setSearchTerm('');
-    setDraft({ ...emptyModule, title: '', description: '', subjectId: selectedSubject.id, topicId, parts: [blankPart(0)], finalExam: [blankQuestion('final-q1')] });
+    setDraft({ ...emptyModule, title: '', description: '', subjectId: selectedSubject.id, topicId, parts: [blankPart(0)], finalExam: [blankQuestion('final-q1')], isTemplate: false, templateSourceId: '' });
     setActiveStep('outline');
     setActivePartIndex(0);
     setBuilderMode('edit');
@@ -335,6 +386,29 @@ export default function InstructorModules() {
 
   const addFinalQuestion = () => {
     updateDraft('finalExam', [...draft.finalExam, blankQuestion(`final-q${draft.finalExam.length + 1}`)]);
+  };
+
+  const reorderPart = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || toIndex < 0 || toIndex >= draft.parts.length) return;
+    const nextParts = [...draft.parts];
+    const [movedPart] = nextParts.splice(fromIndex, 1);
+    nextParts.splice(toIndex, 0, movedPart);
+    updateDraft('parts', nextParts);
+    setActivePartIndex(toIndex);
+  };
+
+  const duplicatePart = (partIndex: number) => {
+    const source = draft.parts[partIndex] || blankPart(0);
+    const copy: JourneyModulePart = {
+      ...source,
+      id: `${source.id}-copy-${Date.now()}`,
+      title: `${source.title} copy`,
+      miniQuiz: (source.miniQuiz || []).map((question, index) => ({ ...question, id: `${question.id}-copy-${Date.now()}-${index}` })),
+    };
+    const nextParts = [...draft.parts];
+    nextParts.splice(partIndex + 1, 0, copy);
+    updateDraft('parts', nextParts);
+    setActivePartIndex(partIndex + 1);
   };
 
   const deleteModule = async () => {
@@ -360,56 +434,81 @@ export default function InstructorModules() {
     }
   };
 
+  const duplicateModule = () => {
+    setDraft({
+      ...draft,
+      id: '',
+      title: `${draft.title || 'Untitled module'} copy`,
+      isPublished: false,
+      isTemplate: false,
+      templateSourceId: draft.id || draft.templateSourceId || '',
+      parts: draft.parts.map((part, partIndex) => ({
+        ...part,
+        id: `part-${partIndex + 1}-${Date.now()}`,
+        miniQuiz: (part.miniQuiz || []).map((question, questionIndex) => ({ ...question, id: `part-${partIndex + 1}-q${questionIndex + 1}-${Date.now()}` })),
+      })),
+      finalExam: draft.finalExam.map((question, index) => ({ ...question, id: `final-q${index + 1}-${Date.now()}` })),
+    });
+    setSelectedModuleId('');
+    setIsCreatingNew(true);
+    setBuilderMode('edit');
+    setToastMsg('Module duplicated as an unpublished draft.');
+    setShowToast(true);
+  };
+
+  const saveAsTemplate = async () => {
+    const templateDraft = {
+      ...draft,
+      id: '',
+      title: `${draft.title || 'Untitled'} template`,
+      isPublished: false,
+      isTemplate: true,
+      templateSourceId: draft.id || draft.templateSourceId || '',
+    };
+    setDraft(templateDraft);
+    setSelectedModuleId('');
+    setIsCreatingNew(true);
+    setToastMsg('Template draft prepared. Save it to store this reusable journey pattern.');
+    setShowToast(true);
+  };
+
   const generateAIDraft = async () => {
     const prompt = assistantPrompt.trim() || draft.title || 'LET review module';
     setIsDrafting(true);
     try {
-      const response = await fetch('/api/draft-questions', {
+      const response = await fetch('/api/course-builder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: prompt, difficulty: 'medium', count: 3 }),
+        body: JSON.stringify({
+          topic: prompt,
+          sourceText: assistantSource,
+          subject: selectedSubject.title,
+          partCount: Math.max(2, draft.parts.length || 2),
+        }),
       });
       const data = await response.json();
-      const questions = (data.questions || []).map((question: any, index: number) => ({
-        id: `ai-q-${Date.now()}-${index}`,
-        stem: question.stem,
-        options: question.options,
-        correctOptionId: question.correctOptionId,
-        explanation: question.explanation,
-      }));
+      if (!data.success || !data.module) throw new Error(data.error || 'AI course builder returned no module');
+      const aiModule = data.module;
 
       const nextTitle = draft.title || prompt;
       setDraft((current) => ({
         ...current,
-        title: nextTitle,
-        description: current.description || `Guided module for ${prompt}.`,
-        parts: [
-          {
-            ...blankPart(0),
-            title: `Part 1: Foundations of ${prompt}`,
-            objective: `Understand the core idea behind ${prompt}.`,
-            textbookSection: {
-              title: `${prompt}: textbook reading`,
-              body: `This reading introduces ${prompt}. Start with the key terms, then connect each concept to a classroom or exam situation. Keep notes on definitions, common misconceptions, and examples that could appear in a LET-style item.`,
-              estimatedReadMinutes: 10,
-            },
-            lessonBlocks: [
-              { type: 'heading', content: `Core idea: ${prompt}` },
-              { type: 'text', content: `Explain ${prompt} with a concrete example, then show how it appears in LET questions.` },
-              { type: 'callout', content: 'Ask learners to prove each answer with the concept, not with guesswork.' },
-            ],
-            miniQuiz: questions[0] ? [questions[0]] : [blankQuestion('ai-part-q1')],
-          },
-          {
-            ...blankPart(1),
-            title: `Part 2: Apply ${prompt}`,
-            objective: `Use ${prompt} in a question or classroom scenario.`,
-            miniQuiz: questions[1] ? [questions[1]] : [blankQuestion('ai-part-q2')],
-          },
-        ],
-        finalExam: questions.length ? questions : current.finalExam,
+        title: current.title || aiModule.title || nextTitle,
+        description: current.description || aiModule.description || `Guided module for ${prompt}.`,
+        competencies: aiModule.competencies?.length ? aiModule.competencies : current.competencies,
+        prerequisiteModuleIds: aiModule.prerequisiteTopics || current.prerequisiteModuleIds,
+        examBlueprint: aiModule.examBlueprint || current.examBlueprint,
+        parts: aiModule.parts?.length ? aiModule.parts.map((part: any, index: number) => ({
+          ...blankPart(index),
+          ...part,
+          id: part.id || `ai-part-${index + 1}-${Date.now()}`,
+          textbookSection: { ...blankPart(index).textbookSection, ...(part.textbookSection || {}) },
+          lessonBlocks: part.lessonBlocks?.length ? part.lessonBlocks : blankPart(index).lessonBlocks,
+          miniQuiz: part.miniQuiz?.length ? part.miniQuiz : [blankQuestion(`ai-part-${index + 1}-q1`)],
+        })) : current.parts,
+        finalExam: aiModule.finalExam?.length ? aiModule.finalExam : current.finalExam,
       }));
-      setToastMsg('AI draft added. Review and edit before publishing.');
+      setToastMsg('AI Course Builder drafted a module. Review and approve by saving/publishing.');
     } catch (error) {
       console.warn('AI draft failed, using local template', error);
       setDraft((current) => ({
@@ -478,6 +577,16 @@ export default function InstructorModules() {
       dueAt: draft.dueAt || '',
       antiCheatEnabled: draft.antiCheatEnabled,
       recordFirstAttemptOnly: draft.recordFirstAttemptOnly,
+      isTemplate: !!draft.isTemplate,
+      templateSourceId: draft.templateSourceId || '',
+      prerequisiteModuleIds: draft.prerequisiteModuleIds,
+      competencies: draft.competencies,
+      rubric: draft.rubric,
+      unlockRules: draft.unlockRules,
+      examBlueprint: {
+        ...draft.examBlueprint,
+        questionCount: draft.finalExam.length || draft.examBlueprint.questionCount,
+      },
       createdBy: user?.uid || 'instructor',
       authorId: user?.uid || 'instructor',
       authorName: user?.fullName || user?.email || 'Instructor',
@@ -536,19 +645,19 @@ export default function InstructorModules() {
   const moduleStats = [
     { label: 'Modules', value: modules.length, icon: Layers3 },
     { label: 'Published', value: modules.filter((module) => module.isPublished).length, icon: CheckCircle2 },
-    { label: 'Parts', value: draft.parts.length, icon: ClipboardList },
+    { label: 'Templates', value: modules.filter((module) => module.isTemplate).length, icon: Copy },
   ];
 
   return (
-    <DashboardLayout title="Journey Builder">
+    <DashboardLayout title="Instructor Studio">
       <div className="p-4 md:p-8 max-w-7xl mx-auto w-full text-on-surface space-y-6">
         <section className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 md:p-6 shadow-sm">
           <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-5">
             <div className="max-w-3xl">
-              <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Instructor CMS</p>
-              <h1 className="text-3xl font-extrabold font-headline text-on-surface tracking-tight">Build modules in steps, not as one confusing form.</h1>
+              <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Instructor Studio</p>
+              <h1 className="text-3xl font-extrabold font-headline text-on-surface tracking-tight">Design learning journeys, not upload folders.</h1>
               <p className="text-sm text-on-surface-variant mt-3 leading-relaxed">
-                Each module has ordered parts. Every part can include a textbook reading, mini lesson, mini quiz, and activity. The final exam is the gate before completion.
+                Create modules with textbook sections, quizzes, competencies, rubrics, unlock rules, blueprints, templates, and a student preview beside an AI course builder.
               </p>
             </div>
 
@@ -626,7 +735,7 @@ export default function InstructorModules() {
                       <p className="text-[11px] text-on-surface-variant/60 mt-1 line-clamp-2">{subject?.title || 'Subject'} / {topic?.title || 'Topic'}</p>
                       <p className="text-[11px] text-on-surface-variant/50 mt-1 line-clamp-1">Author: {module.authorName || 'Instructor'}</p>
                       <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/40 mt-2">
-                        {module.parts.length} parts / {module.finalExam.length} exam items / {module.isPublished ? 'Published' : 'Draft'}
+                        {module.parts.length} parts / {module.finalExam.length} exam items / {module.isTemplate ? 'Template' : module.isPublished ? 'Published' : 'Draft'}
                       </p>
                     </button>
                   );
@@ -662,6 +771,14 @@ export default function InstructorModules() {
                 >
                   {builderMode === 'edit' ? <Eye size={16} /> : <Wand2 size={16} />}
                   {builderMode === 'edit' ? 'Preview as student' : 'Back to edit'}
+                </button>
+                <button onClick={duplicateModule} className="inline-flex items-center justify-center gap-2 rounded-xl bg-surface-container text-on-surface px-5 py-3 font-bold text-sm border border-outline-variant/40">
+                  <Copy size={16} />
+                  Duplicate
+                </button>
+                <button onClick={saveAsTemplate} className="inline-flex items-center justify-center gap-2 rounded-xl bg-surface-container text-on-surface px-5 py-3 font-bold text-sm border border-outline-variant/40">
+                  <Sparkles size={16} />
+                  Template
                 </button>
                 <button onClick={saveModule} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-on-primary px-5 py-3 font-bold text-sm shadow-sm">
                   <Save size={16} />
@@ -701,6 +818,8 @@ export default function InstructorModules() {
                   updatePartLessonBlock={updatePartLessonBlock}
                   addPart={addPart}
                   removePart={removePart}
+                  reorderPart={reorderPart}
+                  duplicatePart={duplicatePart}
                 />
               )}
 
@@ -716,6 +835,10 @@ export default function InstructorModules() {
                   updateFinalOption={updateFinalOption}
                   addFinalQuestion={addFinalQuestion}
                 />
+              )}
+
+              {builderMode === 'edit' && activeStep === 'design' && (
+                <LearningDesignStep draft={draft} updateDraft={updateDraft} />
               )}
 
               {builderMode === 'edit' && activeStep === 'publish' && (
@@ -738,6 +861,8 @@ export default function InstructorModules() {
         setIsOpen={setAiOpen}
         prompt={assistantPrompt}
         setPrompt={setAssistantPrompt}
+        sourceText={assistantSource}
+        setSourceText={setAssistantSource}
         isWorking={isDrafting}
         onDraft={generateAIDraft}
         onProofread={() => rewriteActiveReading('proofread')}
@@ -876,6 +1001,8 @@ function FloatingAIHelper({
   setIsOpen,
   prompt,
   setPrompt,
+  sourceText,
+  setSourceText,
   isWorking,
   onDraft,
   onProofread,
@@ -885,6 +1012,8 @@ function FloatingAIHelper({
   setIsOpen: (open: boolean) => void;
   prompt: string;
   setPrompt: (value: string) => void;
+  sourceText: string;
+  setSourceText: (value: string) => void;
   isWorking: boolean;
   onDraft: () => void;
   onProofread: () => void;
@@ -907,13 +1036,33 @@ function FloatingAIHelper({
             value={prompt}
             onChange={(event) => setPrompt(event.target.value)}
             rows={4}
-            placeholder="Ask for edits: proofread, paraphrase, make it clearer, or draft a quiz from this topic."
+            placeholder="Type a topic or instruction, e.g. draft a LET module about assessment validity."
             className="w-full bg-surface-container border border-transparent rounded-xl px-4 py-3 text-sm font-medium resize-none outline-none focus:border-primary/30"
+          />
+          <label className="block mt-3">
+            <span className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Paste or upload lesson content</span>
+            <textarea
+              value={sourceText}
+              onChange={(event) => setSourceText(event.target.value)}
+              rows={4}
+              placeholder="Paste reviewer notes, a lesson draft, or document text for AI to divide into objectives, sections, quizzes, and exam items."
+              className="mt-2 w-full bg-surface-container border border-transparent rounded-xl px-4 py-3 text-sm font-medium resize-none outline-none focus:border-primary/30"
+            />
+          </label>
+          <input
+            type="file"
+            accept=".txt,.md,.csv"
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              if (!file) return;
+              setSourceText(await file.text());
+            }}
+            className="mt-2 text-xs font-bold text-on-surface-variant"
           />
           <div className="grid grid-cols-1 gap-2 mt-3">
             <button onClick={onDraft} disabled={isWorking} className="rounded-xl bg-primary text-on-primary px-4 py-3 text-sm font-bold disabled:opacity-50 inline-flex items-center justify-center gap-2">
               <Sparkles size={16} />
-              Draft module/quiz
+              AI Course Builder
             </button>
             <div className="grid grid-cols-2 gap-2">
               <button onClick={onProofread} disabled={isWorking} className="rounded-xl bg-surface-container text-on-surface px-4 py-3 text-xs font-black uppercase tracking-widest border border-outline-variant/30 disabled:opacity-50">
@@ -946,6 +1095,8 @@ function PartsStep({
   updatePartLessonBlock,
   addPart,
   removePart,
+  reorderPart,
+  duplicatePart,
 }: {
   draft: BuilderModule;
   activePartIndex: number;
@@ -955,15 +1106,32 @@ function PartsStep({
   updatePartLessonBlock: (blockIndex: number, content: string) => void;
   addPart: () => void;
   removePart: (index: number) => void;
+  reorderPart: (fromIndex: number, toIndex: number) => void;
+  duplicatePart: (partIndex: number) => void;
 }) {
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+
   return (
     <div className="space-y-5">
       <SectionTitle icon={Layers3} title="Step 2: Build the parts" body="Each part becomes one stop in the learner journey: reading, lesson, quiz, optional activity." />
       <div className="flex flex-wrap gap-2">
         {draft.parts.map((part, index) => (
-          <button key={part.id} onClick={() => setActivePartIndex(index)} className={`rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest ${activePartIndex === index ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface-variant'}`}>
-            Part {index + 1}
-          </button>
+          <div
+            key={part.id}
+            draggable
+            onDragStart={() => setDragIndex(index)}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={() => {
+              if (dragIndex != null) reorderPart(dragIndex, index);
+              setDragIndex(null);
+            }}
+            className={`rounded-xl px-3 py-2 text-xs font-black uppercase tracking-widest border flex items-center gap-2 ${activePartIndex === index ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container text-on-surface-variant border-outline-variant/30'}`}
+          >
+            <GripVertical size={14} className="cursor-grab" />
+            <button onClick={() => setActivePartIndex(index)}>Part {index + 1}</button>
+            <button onClick={() => reorderPart(index, index - 1)} disabled={index === 0} className="disabled:opacity-30">Up</button>
+            <button onClick={() => reorderPart(index, index + 1)} disabled={index === draft.parts.length - 1} className="disabled:opacity-30">Down</button>
+          </div>
         ))}
         <button onClick={addPart} className="rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest bg-primary/10 text-primary inline-flex items-center gap-2">
           <Plus size={14} />
@@ -1015,6 +1183,10 @@ function PartsStep({
           <button onClick={() => removePart(activePartIndex)} className="w-full mt-4 rounded-xl bg-error/10 text-error px-4 py-3 text-xs font-bold inline-flex items-center justify-center gap-2">
             <Trash2 size={14} />
             Remove part
+          </button>
+          <button onClick={() => duplicatePart(activePartIndex)} className="w-full mt-2 rounded-xl bg-surface-container text-on-surface px-4 py-3 text-xs font-bold border border-outline-variant/40 inline-flex items-center justify-center gap-2">
+            <Copy size={14} />
+            Duplicate part
           </button>
         </aside>
       </div>
@@ -1087,6 +1259,125 @@ function AssessmentsStep({
   );
 }
 
+function LearningDesignStep({
+  draft,
+  updateDraft,
+}: {
+  draft: BuilderModule;
+  updateDraft: (field: keyof BuilderModule, value: any) => void;
+}) {
+  const updateCompetency = (index: number, patch: Partial<BuilderModule['competencies'][number]>) => {
+    updateDraft('competencies', draft.competencies.map((competency, itemIndex) => itemIndex === index ? { ...competency, ...patch } : competency));
+  };
+  const updateRubric = (index: number, patch: Partial<BuilderModule['rubric'][number]>) => {
+    updateDraft('rubric', draft.rubric.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+  };
+
+  return (
+    <div className="space-y-8">
+      <SectionTitle icon={Settings2} title="Step 4: Design rules and competencies" body="Define what mastery means before learners see the module." />
+
+      <section className="rounded-2xl border border-outline-variant/40 bg-surface-container/20 p-4 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="font-headline font-extrabold text-xl">Competencies</h3>
+          <button
+            onClick={() => updateDraft('competencies', [...draft.competencies, { id: `competency-${draft.competencies.length + 1}`, label: 'New competency', description: '' }])}
+            className="rounded-xl bg-primary/10 text-primary px-4 py-2 text-xs font-black uppercase tracking-widest"
+          >
+            Add competency
+          </button>
+        </div>
+        <div className="space-y-3">
+          {draft.competencies.map((competency, index) => (
+            <div key={competency.id} className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr_auto] gap-3">
+              <input value={competency.label} onChange={(event) => updateCompetency(index, { label: event.target.value })} className="input" />
+              <input value={competency.description || ''} onChange={(event) => updateCompetency(index, { description: event.target.value })} className="input" placeholder="What students must demonstrate" />
+              <button onClick={() => updateDraft('competencies', draft.competencies.filter((_item, itemIndex) => itemIndex !== index))} className="rounded-xl bg-error/10 text-error px-4 py-2 text-xs font-bold">Remove</button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-outline-variant/40 bg-surface-container/20 p-4 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="font-headline font-extrabold text-xl">Rubric</h3>
+          <button
+            onClick={() => updateDraft('rubric', [...draft.rubric, { criterion: 'New criterion', points: 5, description: '' }])}
+            className="rounded-xl bg-primary/10 text-primary px-4 py-2 text-xs font-black uppercase tracking-widest"
+          >
+            Add rubric row
+          </button>
+        </div>
+        <div className="space-y-3">
+          {draft.rubric.map((item, index) => (
+            <div key={`${item.criterion}-${index}`} className="grid grid-cols-1 lg:grid-cols-[1fr_100px_1.4fr_auto] gap-3">
+              <input value={item.criterion} onChange={(event) => updateRubric(index, { criterion: event.target.value })} className="input" />
+              <input type="number" min={1} value={item.points} onChange={(event) => updateRubric(index, { points: Number(event.target.value) })} className="input" />
+              <input value={item.description} onChange={(event) => updateRubric(index, { description: event.target.value })} className="input" placeholder="How this is judged" />
+              <button onClick={() => updateDraft('rubric', draft.rubric.filter((_item, itemIndex) => itemIndex !== index))} className="rounded-xl bg-error/10 text-error px-4 py-2 text-xs font-bold">Remove</button>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container/20 p-4 space-y-4">
+          <h3 className="font-headline font-extrabold text-xl">Unlock rules</h3>
+          <Field label="Minimum final score">
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={draft.unlockRules.minScorePercent}
+              onChange={(event) => updateDraft('unlockRules', { ...draft.unlockRules, minScorePercent: Number(event.target.value) })}
+              className="input"
+            />
+          </Field>
+          <label className="flex items-center justify-between gap-4 bg-surface-container rounded-xl px-4 py-4">
+            <span className="text-sm font-extrabold text-on-surface">Require all parts before final exam</span>
+            <input type="checkbox" checked={draft.unlockRules.requireAllParts} onChange={(event) => updateDraft('unlockRules', { ...draft.unlockRules, requireAllParts: event.target.checked })} className="w-5 h-5 accent-primary" />
+          </label>
+          <Field label="Motivational quote">
+            <textarea value={draft.unlockRules.motivationalQuote} onChange={(event) => updateDraft('unlockRules', { ...draft.unlockRules, motivationalQuote: event.target.value })} rows={3} className="input resize-none" />
+          </Field>
+        </div>
+
+        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container/20 p-4 space-y-4">
+          <h3 className="font-headline font-extrabold text-xl">Exam blueprint</h3>
+          <Field label="Question count">
+            <input type="number" min={1} value={draft.examBlueprint.questionCount} onChange={(event) => updateDraft('examBlueprint', { ...draft.examBlueprint, questionCount: Number(event.target.value) })} className="input" />
+          </Field>
+          <div className="grid grid-cols-3 gap-3">
+            {(['easy', 'medium', 'hard'] as const).map((difficulty) => (
+              <Field key={difficulty} label={`${difficulty} %`}>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={draft.examBlueprint.difficultyMix[difficulty]}
+                  onChange={(event) => updateDraft('examBlueprint', {
+                    ...draft.examBlueprint,
+                    difficultyMix: { ...draft.examBlueprint.difficultyMix, [difficulty]: Number(event.target.value) },
+                  })}
+                  className="input"
+                />
+              </Field>
+            ))}
+          </div>
+          <Field label="Prerequisite topics or module IDs">
+            <textarea
+              value={draft.prerequisiteModuleIds.join('\n')}
+              onChange={(event) => updateDraft('prerequisiteModuleIds', event.target.value.split('\n').map((item) => item.trim()).filter(Boolean))}
+              rows={4}
+              className="input resize-none"
+            />
+          </Field>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function PublishStep({
   draft,
   classes,
@@ -1104,13 +1395,14 @@ function PublishStep({
     { label: 'At least one learning part', done: draft.parts.length > 0 },
     { label: 'Every part has reading text', done: draft.parts.every((part) => !!part.textbookSection.body.trim()) },
     { label: 'Final exam has at least one item', done: draft.finalExam.length > 0 },
+    { label: 'Competencies are defined', done: draft.competencies.length > 0 },
   ];
 
   const canPublish = readyChecks.every((item) => item.done);
 
   return (
     <div className="space-y-5">
-      <SectionTitle icon={CheckCircle2} title="Step 4: Review and publish" body="Publish only when the path is complete enough for learners to follow without confusion." />
+      <SectionTitle icon={CheckCircle2} title="Step 5: Review and publish" body="Publish only when the path is complete enough for learners to follow without confusion." />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {readyChecks.map((item) => <ChecklistItem key={item.label} done={item.done} label={item.label} />)}
       </div>

@@ -125,6 +125,159 @@ async function startServer() {
     }
   });
 
+  app.post('/api/course-builder', async (req: any, res: any) => {
+    const { topic = '', sourceText = '', subject = 'LET Review', partCount = 2 } = req.body || {};
+    if (!String(topic || sourceText).trim()) return res.status(400).json({ success: false, error: 'topic or sourceText required' });
+
+    try {
+      const data = await callAI({
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert LET instructional designer. Turn instructor content into an editable learning journey. Keep all generated material grounded in the supplied topic/content.',
+          },
+          {
+            role: 'user',
+            content: `Subject: ${subject}
+Topic/instruction: ${topic}
+Source content:
+${String(sourceText).slice(0, 7000)}
+
+Create a concise module with ${Math.max(2, Math.min(Number(partCount) || 2, 5))} ordered parts. Include objectives, textbook-style sections, mini quizzes, final exam questions, competencies, prerequisite topic suggestions, and an exam blueprint.`,
+          },
+        ],
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'return_course_module',
+            description: 'Return an editable learning journey module draft',
+            parameters: {
+              type: 'object',
+              properties: {
+                module: {
+                  type: 'object',
+                  properties: {
+                    title: { type: 'string' },
+                    description: { type: 'string' },
+                    prerequisiteTopics: { type: 'array', items: { type: 'string' } },
+                    competencies: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          label: { type: 'string' },
+                          description: { type: 'string' },
+                        },
+                        required: ['id', 'label', 'description'],
+                        additionalProperties: false,
+                      },
+                    },
+                    examBlueprint: {
+                      type: 'object',
+                      properties: {
+                        questionCount: { type: 'number' },
+                        sectionDistribution: { type: 'object', additionalProperties: { type: 'number' } },
+                        competencyDistribution: { type: 'object', additionalProperties: { type: 'number' } },
+                        difficultyMix: {
+                          type: 'object',
+                          properties: {
+                            easy: { type: 'number' },
+                            medium: { type: 'number' },
+                            hard: { type: 'number' },
+                          },
+                          required: ['easy', 'medium', 'hard'],
+                          additionalProperties: false,
+                        },
+                      },
+                      required: ['questionCount', 'sectionDistribution', 'competencyDistribution', 'difficultyMix'],
+                      additionalProperties: false,
+                    },
+                    parts: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          title: { type: 'string' },
+                          objective: { type: 'string' },
+                          textbookSection: {
+                            type: 'object',
+                            properties: {
+                              title: { type: 'string' },
+                              body: { type: 'string' },
+                              estimatedReadMinutes: { type: 'number' },
+                            },
+                            required: ['title', 'body', 'estimatedReadMinutes'],
+                            additionalProperties: false,
+                          },
+                          lessonBlocks: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                type: { type: 'string', enum: ['heading', 'text', 'callout'] },
+                                content: { type: 'string' },
+                              },
+                              required: ['type', 'content'],
+                              additionalProperties: false,
+                            },
+                          },
+                          miniQuiz: { type: 'array', items: { $ref: '#/$defs/question' } },
+                        },
+                        required: ['id', 'title', 'objective', 'textbookSection', 'lessonBlocks', 'miniQuiz'],
+                        additionalProperties: false,
+                      },
+                    },
+                    finalExam: { type: 'array', items: { $ref: '#/$defs/question' } },
+                  },
+                  required: ['title', 'description', 'prerequisiteTopics', 'competencies', 'examBlueprint', 'parts', 'finalExam'],
+                  additionalProperties: false,
+                },
+              },
+              required: ['module'],
+              additionalProperties: false,
+              $defs: {
+                question: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    stem: { type: 'string' },
+                    type: { type: 'string', enum: ['multiple_choice', 'true_false', 'enumeration', 'short_answer', 'essay'] },
+                    options: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: { id: { type: 'string' }, text: { type: 'string' } },
+                        required: ['id', 'text'],
+                        additionalProperties: false,
+                      },
+                    },
+                    correctOptionId: { type: 'string' },
+                    acceptedAnswers: { type: 'array', items: { type: 'string' } },
+                    expectedAnswer: { type: 'string' },
+                    explanation: { type: 'string' },
+                    difficulty: { type: 'string', enum: ['easy', 'medium', 'hard'] },
+                    competencyId: { type: 'string' },
+                  },
+                  required: ['id', 'stem', 'type', 'options', 'correctOptionId', 'explanation', 'difficulty', 'competencyId'],
+                  additionalProperties: false,
+                },
+              },
+            },
+          },
+        }],
+        tool_choice: { type: 'function', function: { name: 'return_course_module' } },
+      });
+      const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+      const args = toolCall ? JSON.parse(toolCall.function.arguments) : null;
+      res.json({ success: true, module: args?.module });
+    } catch (error: any) {
+      console.error('course-builder error:', error.message);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // AI explanation tutor
   app.post('/api/explain-answer', async (req: any, res: any) => {
     try {
