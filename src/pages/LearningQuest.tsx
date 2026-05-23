@@ -1,278 +1,354 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'motion/react';
-import { OfflineData } from '../lib/offline/offlineData';
-import { ChevronRight, ArrowLeft } from 'lucide-react';
-
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { AnimatePresence, motion } from 'motion/react';
+import { ArrowLeft, BookOpen, CheckCircle2, ChevronRight, FileQuestion, Library, Trophy } from 'lucide-react';
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
+import { findJourneyModule, JourneyModule, JourneyQuestion } from '../lib/learningJourney';
 
-import { useSearchParams } from 'react-router-dom';
-import { updateDoc, serverTimestamp } from 'firebase/firestore';
+type QuestStep = 'hook' | 'lesson' | 'check' | 'challenge' | 'complete';
+
+function normalizeFirestoreModule(id: string, data: any): JourneyModule {
+  return {
+    id,
+    title: data.title || 'Learning Module',
+    description: data.description || 'Instructor-created module',
+    subjectId: data.subjectId || data.categoryId || 'gened',
+    topicId: data.topicId || 'gened_english',
+    level: data.level || 1,
+    duration: data.duration || '30 min',
+    status: 'available',
+    progress: 0,
+    lessonBlocks: data.lessonBlocks?.length
+      ? data.lessonBlocks
+      : [{ type: 'text', content: data.description || 'Read the lesson prepared by your instructor.' }],
+    resources: data.resources || [],
+    questions: [],
+  };
+}
+
+const optionTone = {
+  idle: 'border-outline-variant/30 bg-surface-container/30 text-on-surface hover:border-primary/40',
+  right: 'border-emerald-500 bg-emerald-500/10 text-emerald-700',
+  wrong: 'border-error bg-error/10 text-error',
+};
 
 export default function LearningQuest() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const moduleId = searchParams.get('moduleId');
-  
   const { user } = useAuth();
-  const [step, setStep] = useState<'hook' | 'lesson' | 'check' | 'challenge' | 'complete'>('hook');
-  const [module, setModule] = useState<any>(null);
-  const [topicName, setTopicName] = useState('Learning Quest');
-  const [questions, setQuestions] = useState<any[]>([]);
+
+  const [step, setStep] = useState<QuestStep>('hook');
+  const [module, setModule] = useState<JourneyModule>(() => findJourneyModule(moduleId));
+  const [questions, setQuestions] = useState<JourneyQuestion[]>(() => findJourneyModule(moduleId).questions);
   const [loading, setLoading] = useState(true);
-  
-  const [challengeScore, setChallengeScore] = useState(0);
-  // Quick check state
   const [checkAnswer, setCheckAnswer] = useState<string | null>(null);
-  
-  // Challenge state
   const [challengeIndex, setChallengeIndex] = useState(0);
-  const [challengeAnswers, setChallengeAnswers] = useState<Record<string, string>>({});
+  const [correctCount, setCorrectCount] = useState(0);
 
   useEffect(() => {
-    async function loadContent() {
+    async function loadModule() {
+      setLoading(true);
       try {
-        let activeModule: any = null;
-        let mid = moduleId;
+        let activeModule = findJourneyModule(moduleId);
+        let activeQuestions = activeModule.questions;
 
-        if (!mid && user) {
-          const profileSnap = await getDoc(doc(db, 'learnerProfiles', user.uid));
-          if (profileSnap.exists()) {
-             const p = profileSnap.data();
-             mid = p.nextRecommendedModuleId || (p.recommendedModuleIds && p.recommendedModuleIds[0]);
-          }
-        }
+        if (moduleId) {
+          const moduleSnap = await getDoc(doc(db, 'modules', moduleId));
+          if (moduleSnap.exists()) {
+            activeModule = normalizeFirestoreModule(moduleSnap.id, moduleSnap.data());
+            const questionIds = [
+              ...(moduleSnap.data().checkQuestionIds || []),
+              ...(moduleSnap.data().challengeQuestionIds || []),
+              ...(moduleSnap.data().questionIds || []),
+            ];
 
-        if (mid) {
-          const modSnap = await getDoc(doc(db, 'modules', mid));
-          if (modSnap.exists()) {
-            activeModule = { id: modSnap.id, ...modSnap.data() } as any;
-            setModule(activeModule);
-            setTopicName(activeModule.title);
-            
-            // Load questions for challenge
-            if (activeModule.questionIds && activeModule.questionIds.length > 0) {
-              const qs: any[] = [];
-              for (const qid of activeModule.questionIds as string[]) {
-                const qSnap = await getDoc(doc(db, 'questions', qid));
-                if (qSnap.exists()) qs.push({ id: qSnap.id, ...qSnap.data() });
+            if (questionIds.length > 0) {
+              const loadedQuestions: JourneyQuestion[] = [];
+              for (const questionId of questionIds.slice(0, 6)) {
+                const questionSnap = await getDoc(doc(db, 'questions', questionId));
+                if (questionSnap.exists()) {
+                  const question = questionSnap.data() as any;
+                  loadedQuestions.push({
+                    id: questionSnap.id,
+                    stem: question.stem,
+                    options: question.options || [],
+                    correctOptionId: question.correctOptionId,
+                    explanation: question.explanation || '',
+                  });
+                }
               }
-              setQuestions(qs);
+              if (loadedQuestions.length > 0) activeQuestions = loadedQuestions;
             }
           }
         }
 
-        if (!activeModule) {
-           // Fallback to offline categories if no module found
-           const qs = await OfflineData.getRandomQuestions('general_education', 5);
-           setQuestions(qs);
-        }
-      } catch (err) {
-        console.error(err);
+        setModule(activeModule);
+        setQuestions(activeQuestions.length > 0 ? activeQuestions : findJourneyModule(moduleId).questions);
+      } catch (error) {
+        console.error('Failed to load module, using journey fallback', error);
+        const fallback = findJourneyModule(moduleId);
+        setModule(fallback);
+        setQuestions(fallback.questions);
       } finally {
-         setLoading(false);
+        setLoading(false);
       }
     }
-    loadContent();
-  }, [user, moduleId]);
 
-  const handleQuestComplete = async () => {
-    if (!user || !module) {
-      navigate('/student/dashboard');
-      return;
-    }
+    loadModule();
+  }, [moduleId]);
 
-    try {
-      // Save Progress
-      const progressRef = doc(db, 'moduleProgress', `${user.uid}_${module.id}`);
-      await setDoc(progressRef, {
-        userId: user.uid,
-        moduleId: module.id,
-        status: 'completed',
-        completedAt: serverTimestamp(),
-        lastAccessedAt: serverTimestamp()
-      }, { merge: true });
+  const quickCheck = questions[0];
+  const challengeQuestions = useMemo(() => questions.slice(1), [questions]);
+  const currentChallenge = challengeQuestions[challengeIndex];
 
-      // Update Learner Profile - award mastery for this module's topic
-      const profileRef = doc(db, 'learnerProfiles', user.uid);
-      const profileSnap = await getDoc(profileRef);
-      if (profileSnap.exists()) {
-         const p = profileSnap.data();
-         const topicId = module.topicId;
-         const currentMastery = p.masteryByTopic?.[topicId] || 0;
-         const newMastery = Math.min(100, currentMastery + 10); // Simple gain
-         
-         await updateDoc(profileRef, {
-            [`masteryByTopic.${topicId}`]: newMastery,
-            lastUpdatedAt: serverTimestamp()
-         });
+  const completeQuest = async (finalCorrectCount: number) => {
+    if (user) {
+      try {
+        await setDoc(
+          doc(db, 'moduleProgress', `${user.uid}_${module.id}`),
+          {
+            userId: user.uid,
+            moduleId: module.id,
+            status: 'completed',
+            scorePercent: Math.round((finalCorrectCount / Math.max(questions.length, 1)) * 100),
+            completedAt: serverTimestamp(),
+            lastAccessedAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
+
+        const profileRef = doc(db, 'learnerProfiles', user.uid);
+        const profileSnap = await getDoc(profileRef);
+        if (profileSnap.exists()) {
+          const profile = profileSnap.data();
+          const currentMastery = profile.masteryByTopic?.[module.topicId] || 0;
+          await updateDoc(profileRef, {
+            [`masteryByTopic.${module.topicId}`]: Math.min(100, currentMastery + 10),
+            lastUpdatedAt: serverTimestamp(),
+          });
+        }
+      } catch (error) {
+        console.warn('Quest progress could not be saved', error);
       }
-
-      setStep('complete');
-    } catch (e) {
-      console.error('Failed to complete quest', e);
-      setStep('complete');
     }
+
+    setStep('complete');
   };
 
-  const handleQuickCheck = (id: string, isCorrect: boolean) => {
-    setCheckAnswer(id);
-    setTimeout(() => {
-       setStep('challenge');
-    }, 1500);
+  const handleQuickCheck = (optionId: string) => {
+    setCheckAnswer(optionId);
+    if (optionId === quickCheck.correctOptionId) setCorrectCount((count) => count + 1);
   };
 
-  const handleChallengeAction = async (optId: string) => {
-    if (challengeIndex >= questions.length - 1) { 
-       await handleQuestComplete();
+  const continueAfterCheck = () => {
+    if (challengeQuestions.length === 0) {
+      completeQuest(correctCount);
     } else {
-       setChallengeAnswers(p => ({ ...p, [questions[challengeIndex + 1].id]: optId }));
-       setChallengeIndex(c => c + 1);
+      setStep('challenge');
     }
   };
 
-  if (loading) return <div className="p-12 text-center text-[#1b366a] font-bold">Loading Quest...</div>;
-  if (questions.length < 2) return <div className="p-12 text-center">Not enough data to start a quest. Sync first.</div>;
+  const answerChallenge = async (optionId: string) => {
+    const nextCorrectCount = optionId === currentChallenge.correctOptionId ? correctCount + 1 : correctCount;
+    setCorrectCount(nextCorrectCount);
+
+    if (challengeIndex >= challengeQuestions.length - 1) {
+      await completeQuest(nextCorrectCount);
+    } else {
+      setChallengeIndex((index) => index + 1);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-surface flex items-center justify-center text-on-surface">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="font-bold">Opening module...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const renderLessonBlock = (block: JourneyModule['lessonBlocks'][number], index: number) => {
+    if (block.type === 'heading') {
+      return (
+        <h2 key={index} className="text-xl font-extrabold font-headline text-on-surface">
+          {block.content}
+        </h2>
+      );
+    }
+
+    if (block.type === 'callout') {
+      return (
+        <div key={index} className="rounded-2xl border border-primary/20 bg-primary/10 p-4 text-sm font-semibold text-on-surface">
+          {block.content}
+        </div>
+      );
+    }
+
+    return (
+      <p key={index} className="text-on-surface-variant leading-relaxed">
+        {block.content}
+      </p>
+    );
+  };
 
   const renderContent = () => {
     switch (step) {
       case 'hook':
         return (
-          <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-20}} className="space-y-6">
-            <div className="bg-indigo-50 border-l-4 border-indigo-500 p-6 rounded-r-2xl">
-              <h2 className="text-xl font-bold text-indigo-900 mb-2">Did you know?</h2>
-              <p className="text-indigo-800">Effective teachers don't just know their subjects; they know how to translate that knowledge into engaging learning experiences. This quest will sharpen your {topicName} mastery.</p>
+          <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="space-y-5">
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-sm">
+              <div className="w-12 h-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center mb-5">
+                <BookOpen size={24} />
+              </div>
+              <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Mini module</p>
+              <h1 className="text-3xl font-extrabold font-headline text-on-surface tracking-tight">{module.title}</h1>
+              <p className="text-on-surface-variant mt-3 leading-relaxed">{module.description}</p>
+
+              <div className="grid grid-cols-3 gap-3 mt-6">
+                <div className="rounded-xl bg-surface-container p-3 border border-outline-variant/40">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Level</p>
+                  <p className="text-xl font-black text-on-surface">{module.level}</p>
+                </div>
+                <div className="rounded-xl bg-surface-container p-3 border border-outline-variant/40">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Time</p>
+                  <p className="text-xl font-black text-on-surface">{module.duration}</p>
+                </div>
+                <div className="rounded-xl bg-surface-container p-3 border border-outline-variant/40">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Items</p>
+                  <p className="text-xl font-black text-on-surface">{questions.length}</p>
+                </div>
+              </div>
             </div>
-            <button onClick={() => setStep('lesson')} className="bg-[#1b366a] text-white px-6 py-3 rounded-xl font-bold flex items-center justify-between w-full shadow-md">
-               <span>Start Mini-Lesson</span>
-               <ChevronRight size={18} />
+
+            <button onClick={() => setStep('lesson')} className="w-full bg-primary text-on-primary px-6 py-4 rounded-2xl font-bold flex items-center justify-between shadow-sm">
+              Start lesson
+              <ChevronRight size={18} />
             </button>
-          </motion.div>
+          </motion.section>
         );
+
       case 'lesson':
         return (
-          <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-20}} className="space-y-6">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <h2 className="text-2xl font-extrabold text-[#1b366a] mb-4">{module?.title || topicName}</h2>
-              {module?.lessonBlocks && module.lessonBlocks.length > 0 ? (
-                <div className="space-y-4">
-                  {module.lessonBlocks.map((block: any, idx: number) => (
-                    <div key={idx} className="text-slate-600 leading-relaxed">
-                      {block.type === 'text' && <p>{block.content}</p>}
-                      {block.type === 'heading' && <h4 className="font-bold text-slate-800 text-lg mt-4">{block.content}</h4>}
-                      {block.type === 'quote' && <blockquote className="border-l-4 border-primary/20 pl-4 py-1 italic bg-primary/5 rounded-r-lg">{block.content}</blockquote>}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <>
-                  <p className="text-slate-600 mb-4 leading-relaxed">
-                    The primary purpose of assessment is not accountability but rather to improve student learning. Constructive alignment is the key: ensuring your objectives, instructional activities, and assessments all align.
-                  </p>
-                  <p className="text-slate-600 leading-relaxed font-medium">
-                    Keep an eye out for "distractors" in the board exam that sound highly technical but don't align with the core philosophy of learner-centered education.
-                  </p>
-                </>
-              )}
+          <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="space-y-5">
+            <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-sm space-y-5">
+              {module.lessonBlocks.map(renderLessonBlock)}
             </div>
-            <button onClick={() => setStep('check')} className="bg-[#1b366a] text-white px-6 py-3 rounded-xl font-bold flex items-center justify-between w-full shadow-md">
-               <span>Take Quick Check</span>
-               <ChevronRight size={18} />
-            </button>
-          </motion.div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button onClick={() => navigate('/library')} className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-4 text-left hover:border-primary/40 transition-colors">
+                <Library className="text-primary mb-3" size={22} />
+                <p className="font-extrabold text-on-surface">Open textbook</p>
+                <p className="text-xs text-on-surface-variant/60 mt-1">Read the supporting chapter.</p>
+              </button>
+              <button onClick={() => setStep('check')} className="rounded-2xl bg-primary text-on-primary p-4 text-left shadow-sm">
+                <FileQuestion className="mb-3" size={22} />
+                <p className="font-extrabold">Take quick check</p>
+                <p className="text-xs text-on-primary/70 mt-1">Answer before the challenge.</p>
+              </button>
+            </div>
+          </motion.section>
         );
+
       case 'check':
-        const qCheck = questions[0];
         return (
-          <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-20}} className="space-y-6">
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-               <span className="text-xs font-bold uppercase tracking-widest text-emerald-500 mb-2 block">Quick Check</span>
-               <h2 className="text-xl font-bold text-slate-800 mb-6">{qCheck.stem}</h2>
-               <div className="space-y-3">
-                 {qCheck.options?.map((opt: any) => {
-                   let style = "border-slate-200 text-slate-700 bg-white hover:border-blue-300 hover:bg-blue-50";
-                   if (checkAnswer === opt.id) {
-                     style = opt.id === qCheck.correctOptionId ? "border-emerald-500 bg-emerald-50 text-emerald-800" : "border-red-500 bg-red-50 text-red-800";
-                   } else if (checkAnswer && opt.id === qCheck.correctOptionId) {
-                     style = "border-emerald-500 bg-emerald-50 text-emerald-800";
-                   }
-                   return (
-                     <button 
-                       key={opt.id} 
-                       disabled={!!checkAnswer}
-                       onClick={() => handleQuickCheck(opt.id, opt.id === qCheck.correctOptionId)}
-                       className={`w-full text-left p-4 rounded-xl border-2 font-semibold transition-all ${style}`}
-                     >
-                       {opt.text}
-                     </button>
-                   );
-                 })}
-               </div>
-               {checkAnswer && (
-                 <motion.p initial={{opacity:0}} animate={{opacity:1}} className={`mt-4 text-sm font-bold ${checkAnswer === qCheck.correctOptionId ? 'text-emerald-600' : 'text-red-600'}`}>
-                   {checkAnswer === qCheck.correctOptionId ? 'Great job! Moving to challenge...' : 'Review the concept. Moving to challenge...'}
-                 </motion.p>
-               )}
+          <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-sm">
+            <p className="text-xs font-black uppercase tracking-widest text-primary mb-3">Quick check</p>
+            <h2 className="text-xl font-extrabold text-on-surface leading-snug mb-6">{quickCheck.stem}</h2>
+            <div className="space-y-3">
+              {quickCheck.options.map((option) => {
+                const isChosen = checkAnswer === option.id;
+                const isCorrect = option.id === quickCheck.correctOptionId;
+                const tone = !checkAnswer ? optionTone.idle : isCorrect ? optionTone.right : isChosen ? optionTone.wrong : optionTone.idle;
+                return (
+                  <button
+                    key={option.id}
+                    disabled={!!checkAnswer}
+                    onClick={() => handleQuickCheck(option.id)}
+                    className={`w-full rounded-xl border-2 p-4 text-left font-semibold transition-all ${tone}`}
+                  >
+                    {option.id}. {option.text}
+                  </button>
+                );
+              })}
             </div>
-          </motion.div>
+
+            {checkAnswer && (
+              <div className="mt-5 rounded-xl bg-surface-container p-4">
+                <p className="text-sm font-bold text-on-surface">{quickCheck.explanation}</p>
+                <button onClick={continueAfterCheck} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary text-on-primary px-5 py-3 text-sm font-bold">
+                  Continue to challenge
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
+          </motion.section>
         );
+
       case 'challenge':
-        const qChallenge = questions[challengeIndex + 1];
-        if (!qChallenge) return null;
         return (
-          <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-20}} className="space-y-6">
-            <div className="bg-[#1b366a] p-6 rounded-2xl shadow-lg shadow-blue-900/20 text-white relative overflow-hidden">
-               <div className="absolute top-0 right-0 p-4 opacity-10 font-black text-6xl italic">?</div>
-               <span className="text-[10px] font-bold uppercase tracking-widest text-amber-300 mb-2 block relative z-10">Quest Challenge {challengeIndex + 1}/{questions.length - 1}</span>
-               <h2 className="text-xl font-bold mb-6 relative z-10 leading-relaxed">{qChallenge.stem}</h2>
-               <div className="space-y-3 relative z-10">
-                 {qChallenge.options?.map((opt: any) => (
-                    <button 
-                      key={opt.id} 
-                      onClick={() => handleChallengeAction(opt.id)}
-                      className="w-full text-left p-4 rounded-xl border border-white/20 bg-white/10 hover:bg-white/20 text-white font-semibold transition-all"
-                    >
-                      {opt.text}
-                    </button>
-                 ))}
-               </div>
+          <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }} className="bg-primary text-on-primary rounded-2xl p-6 shadow-sm">
+            <p className="text-[10px] font-black uppercase tracking-widest text-on-primary/70 mb-3">
+              Challenge {challengeIndex + 1} / {challengeQuestions.length}
+            </p>
+            <h2 className="text-xl font-extrabold leading-snug mb-6">{currentChallenge.stem}</h2>
+            <div className="space-y-3">
+              {currentChallenge.options.map((option) => (
+                <button
+                  key={option.id}
+                  onClick={() => answerChallenge(option.id)}
+                  className="w-full text-left p-4 rounded-xl border border-white/20 bg-white/10 hover:bg-white/20 font-semibold transition-all"
+                >
+                  {option.id}. {option.text}
+                </button>
+              ))}
             </div>
-          </motion.div>
+          </motion.section>
         );
+
       case 'complete':
         return (
-          <motion.div initial={{opacity:0, y:20}} animate={{opacity:1, y:0}} className="text-center bg-white p-10 rounded-3xl border border-slate-200 shadow-sm mt-8">
-             <div className="w-20 h-20 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6">
-               <span className="material-symbols-outlined text-[40px]">workspace_premium</span>
-             </div>
-             <h2 className="text-2xl font-black font-headline text-slate-800 mb-2">Quest Completed!</h2>
-             <p className="text-slate-500 mb-8 max-w-sm mx-auto">You've gained valuable points in Professional Education. Keep up the momentum!</p>
-             <button onClick={() => navigate('/student/dashboard')} className="bg-[#1b366a] text-white px-8 py-3 rounded-xl font-bold shadow-lg shadow-blue-900/20">
-               Return to Dashboard
-             </button>
-          </motion.div>
-        )
+          <motion.section initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="text-center bg-surface-container-lowest border border-outline-variant rounded-2xl p-8 shadow-sm">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 text-emerald-600 flex items-center justify-center mx-auto mb-5">
+              <Trophy size={32} />
+            </div>
+            <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Module complete</p>
+            <h2 className="text-2xl font-extrabold font-headline text-on-surface">You finished {module.title}</h2>
+            <p className="text-on-surface-variant mt-3">
+              Score: {correctCount} of {questions.length}. Your path is ready for the next lesson, quiz, or exam practice.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center mt-7">
+              <button onClick={() => navigate('/student/courses')} className="rounded-xl bg-primary text-on-primary px-6 py-3 font-bold">
+                Back to journey
+              </button>
+              <button onClick={() => navigate(`/exam?type=practice&category=${module.subjectId}`)} className="rounded-xl bg-surface-container text-on-surface px-6 py-3 font-bold border border-outline-variant">
+                Practice quiz
+              </button>
+            </div>
+          </motion.section>
+        );
     }
-  }
+  };
 
   return (
-    <div className="bg-[#f0f2f5] min-h-screen p-4 md:p-8 flex flex-col font-body">
+    <div className="bg-surface text-on-surface min-h-screen p-4 md:p-8 font-body">
       <header className="max-w-2xl mx-auto w-full flex items-center gap-4 mb-8">
-        <button onClick={() => navigate('/student/dashboard')} className="p-2 bg-white rounded-full text-slate-400 hover:text-slate-800 border border-slate-200 shadow-sm">
+        <button onClick={() => navigate('/student/courses')} className="p-2 bg-surface-container-lowest rounded-full text-on-surface-variant hover:text-on-surface border border-outline-variant shadow-sm">
           <ArrowLeft size={20} />
         </button>
-        <div>
-          <h1 className="text-xl font-extrabold text-slate-800 tracking-tight font-headline">Daily Learning Quest</h1>
-          <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Mini-Module</p>
+        <div className="min-w-0">
+          <h1 className="text-xl font-extrabold text-on-surface tracking-tight font-headline truncate">{module.title}</h1>
+          <p className="text-xs text-on-surface-variant/60 font-bold uppercase tracking-widest">Learning quest</p>
         </div>
       </header>
-      
-      <main className="max-w-xl mx-auto w-full flex-1">
-        <AnimatePresence mode="wait">
-           {renderContent()}
-        </AnimatePresence>
+
+      <main className="max-w-2xl mx-auto w-full">
+        <AnimatePresence mode="wait">{renderContent()}</AnimatePresence>
       </main>
     </div>
   );

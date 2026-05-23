@@ -46,10 +46,12 @@ export default function InstructorClasses() {
   const loadClasses = async () => {
     if (!user) return;
     try {
-      const q = query(collection(db, 'classes'), where('instructorId', '==', user.uid), where('status', '==', 'active'));
-      const snap = await getDocs(q);
-      const data = snap.docs.map(d => ({id: d.id, ...d.data()}));
-      setClasses(data);
+      const byUid = query(collection(db, 'classes'), where('instructorId', '==', user.uid), where('status', '==', 'active'));
+      const byEmail = query(collection(db, 'classes'), where('instructorEmail', '==', user.email), where('status', '==', 'active'));
+      const [uidSnap, emailSnap] = await Promise.all([getDocs(byUid), getDocs(byEmail)]);
+      const merged = new Map<string, any>();
+      [...uidSnap.docs, ...emailSnap.docs].forEach(d => merged.set(d.id, {id: d.id, ...d.data()}));
+      setClasses(Array.from(merged.values()));
     } catch (e) {
       console.error(e);
     } finally {
@@ -88,6 +90,7 @@ export default function InstructorClasses() {
         className: newClass.className,
         description: newClass.description,
         instructorId: user.uid,
+        instructorEmail: user.email,
         instructorName: user.fullName || user.email,
         classCode: newClass.classCode,
         inviteLink: `${window.location.origin}/join/${newClass.classCode}`,

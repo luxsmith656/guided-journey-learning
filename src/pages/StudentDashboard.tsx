@@ -15,6 +15,7 @@ import {
   PlayCircle, FileText
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { journeyModules } from '../lib/learningJourney';
 
 export default function StudentDashboard() {
   const { user } = useAuth();
@@ -56,18 +57,36 @@ export default function StudentDashboard() {
             if (data.assignedModuleIds && data.assignedModuleIds.length > 0) {
               const mods: any[] = [];
               for (const mid of data.assignedModuleIds) {
-                 // Try getting from local modules collection cache or Firebase
-                 mods.push({ id: mid, title: `Module ${mid.substring(0,4)}`, status: 'In Progress', progress: Math.floor(Math.random() * 100) });
+                 const localModule = journeyModules.find(module => module.id === mid);
+                 try {
+                   const modSnap = await getDoc(doc(db, 'modules', mid));
+                   const moduleData = modSnap.exists() ? modSnap.data() : localModule;
+                   mods.push({
+                     id: mid,
+                     title: moduleData?.title || localModule?.title || `Module ${mid.substring(0,4)}`,
+                     status: localModule?.status === 'completed' ? 'Completed' : 'In Progress',
+                     progress: localModule?.progress ?? Math.floor(Math.random() * 60) + 20
+                   });
+                 } catch {
+                   mods.push({
+                     id: mid,
+                     title: localModule?.title || `Module ${mid.substring(0,4)}`,
+                     status: 'In Progress',
+                     progress: localModule?.progress || 20
+                   });
+                 }
               }
               setAssignedModules(mods);
             }
           }
         } else {
            // Self study fallback mock modules
-           setAssignedModules([
-              { id: 'm1', title: 'Foundations of Education', status: 'In Progress', progress: 45 },
-              { id: 'm2', title: 'Child & Adolescent Development', status: 'Not Started', progress: 0 }
-           ]);
+           setAssignedModules(journeyModules.slice(0, 3).map(module => ({
+             id: module.id,
+             title: module.title,
+             status: module.status === 'completed' ? 'Completed' : module.status === 'available' ? 'Ready' : 'In Progress',
+             progress: module.progress
+           })));
         }
       } catch (e) {
         console.error('Failed to fetch dashboard data', e);
@@ -144,7 +163,10 @@ export default function StudentDashboard() {
                                    <Clock size={12} /> {module.status} • 3 Lessons left
                                 </p>
                              </div>
-                             <button className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center group-hover:bg-primary group-hover:text-on-primary transition-colors shrink-0">
+                             <button
+                               onClick={() => navigate(`/quest?moduleId=${module.id}`)}
+                               className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center group-hover:bg-primary group-hover:text-on-primary transition-colors shrink-0"
+                             >
                                 <PlayCircle size={20} style={{ fontVariationSettings: "'FILL' 1" }} />
                              </button>
                           </div>

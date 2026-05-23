@@ -96,6 +96,11 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isInstructor();
     }
+
+    match /textbooks/{textbookId} {
+      allow read: if isSignedIn();
+      allow write: if isInstructor();
+    }
     
     match /questions/{questionId} {
       allow read: if isSignedIn() && (resource.data.get('approved', false) == true || isInstructor());

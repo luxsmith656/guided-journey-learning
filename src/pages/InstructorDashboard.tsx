@@ -21,21 +21,32 @@ export default function InstructorDashboard() {
   useEffect(() => {
     if (!user) return;
     
-    // Fetch classes and students
-    const qClasses = query(collection(db, 'classes'), where('instructorId', '==', user.uid));
-    const unsubClasses = onSnapshot(qClasses, async (s) => {
-      const classDataPromises = s.docs.map(async (d) => {
-          const classData = {id: d.id, ...d.data()};
-          const qEnrollments = query(collection(db, 'classEnrollments'), where('classId', '==', d.id));
-          const eSnap = await getDocs(qEnrollments);
-          return { ...classData, studentCount: eSnap.size };
+    // Fetch classes and students. Demo seeded classes are keyed by email so they still show after Firebase claims the account.
+    const classSnapshots: Record<string, any[]> = { uid: [], email: [] };
+    const publishClasses = async () => {
+      const merged = new Map<string, any>();
+      [...classSnapshots.uid, ...classSnapshots.email].forEach((d) => merged.set(d.id, { id: d.id, ...d.data() }));
+      const classDataPromises = Array.from(merged.values()).map(async (classData) => {
+        const qEnrollments = query(collection(db, 'classEnrollments'), where('classId', '==', classData.id));
+        const eSnap = await getDocs(qEnrollments);
+        return { ...classData, studentCount: eSnap.size || classData.studentCount || 0 };
       });
       const classData = await Promise.all(classDataPromises);
       setClasses(classData);
-      
-      // Calculate total students
+
       const totalStudents = classData.reduce((acc, cls) => acc + (cls.studentCount || 0), 0);
       setStats(prev => ({ ...prev, activeStudents: totalStudents }));
+    };
+
+    const qClassesByUid = query(collection(db, 'classes'), where('instructorId', '==', user.uid));
+    const qClassesByEmail = query(collection(db, 'classes'), where('instructorEmail', '==', user.email));
+    const unsubClassesByUid = onSnapshot(qClassesByUid, async (s) => {
+      classSnapshots.uid = s.docs;
+      await publishClasses();
+    });
+    const unsubClassesByEmail = onSnapshot(qClassesByEmail, async (s) => {
+      classSnapshots.email = s.docs;
+      await publishClasses();
     });
 
     // Fetch question count
@@ -51,7 +62,8 @@ export default function InstructorDashboard() {
     });
     
     return () => {
-      unsubClasses();
+      unsubClassesByUid();
+      unsubClassesByEmail();
       unsubQuestions();
       unsubDrafts();
     };
@@ -127,15 +139,15 @@ export default function InstructorDashboard() {
                 <h3 className="text-xl font-bold font-headline text-on-surface flex items-center gap-2">
                    <BookOpen className="text-primary" /> Content Bank
                 </h3>
-                <button onClick={() => navigate('/instructor/questions')} className="text-primary text-xs font-bold uppercase tracking-widest hover:underline">View All</button>
+                <button onClick={() => navigate('/instructor/modules')} className="text-primary text-xs font-bold uppercase tracking-widest hover:underline">Open Builder</button>
               </div>
-              <p className="text-sm text-on-surface-variant/60 font-medium mb-6">Create, edit and organize multiple-choice questions for the offline student reviewer.</p>
+              <p className="text-sm text-on-surface-variant/60 font-medium mb-6">Create topic modules, textbook links, quizzes, and exam practice so students follow a clear path.</p>
               <div className="flex gap-4">
-                 <button onClick={() => navigate('/instructor/question/new')} className="bg-primary text-on-primary px-6 py-3 rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] transition-all">
-                    + Prepare New Question
+                 <button onClick={() => navigate('/instructor/modules')} className="bg-primary text-on-primary px-6 py-3 rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] transition-all">
+                    + Build Module
                  </button>
-                 <button onClick={() => navigate('/instructor/bulk-upload')} className="bg-surface-container text-on-surface-variant px-6 py-3 rounded-xl font-bold text-sm border border-outline-variant/50 hover:bg-surface-container/80 transition-all flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[18px]">upload_file</span> Bulk Upload
+                 <button onClick={() => navigate('/instructor/questions')} className="bg-surface-container text-on-surface-variant px-6 py-3 rounded-xl font-bold text-sm border border-outline-variant/50 hover:bg-surface-container/80 transition-all flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px]">quiz</span> Question Bank
                  </button>
               </div>
             </div>

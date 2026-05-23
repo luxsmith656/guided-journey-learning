@@ -1,131 +1,155 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FixedSizeList as List } from 'react-window';
-import { BookOpen, Search, ArrowLeft, Filter, BookText, Download } from 'lucide-react';
-import DashboardLayout from '../components/DashboardLayout';
+import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
+import { ArrowLeft, BookOpen, BookText, Download, Filter, Search } from 'lucide-react';
+import { db } from '../lib/firebase';
+import { TEXTBOOKS } from '../lib/seedData';
 
-// Mock generation of a massive library
-const generateLibrary = (size: number) => {
-  const domains = ['General Education', 'Professional Education', 'Major in English', 'Major in Math', 'Major in Science'];
-  const data = [];
-  for (let i = 0; i < size; i++) {
-    data.push({
-      id: `book-${i}`,
-      title: `Comprehensive Guide to ${domains[i % domains.length]} Vol ${Math.floor(i / 5) + 1}`,
-      author: `Dr. Expert ${i}`,
-      domain: domains[i % domains.length],
-      pages: 150 + (i % 300),
-      readTime: `${2 + (i % 5)}h`,
-      rating: (4 + (i % 10) / 10).toFixed(1),
-    });
-  }
-  return data;
+interface Textbook {
+  id: string;
+  title: string;
+  author: string;
+  categoryId: string;
+  topicId: string;
+  description: string;
+  pages: number;
+  readTime: string;
+  level: string;
+  chapter: string;
+  isPublished: boolean;
+  offlineReady: boolean;
+}
+
+const categoryLabels: Record<string, string> = {
+  gened: 'General Education',
+  profed: 'Professional Education',
+  major: 'Major / Specialization',
 };
-
-const massiveLibrary = generateLibrary(10000); // 10,000 textbooks without lag
 
 export default function TextbookLibrary() {
   const navigate = useNavigate();
+  const [textbooks, setTextbooks] = useState<Textbook[]>(TEXTBOOKS);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedDomain, setSelectedDomain] = useState('All');
+  const [selectedCategory, setSelectedCategory] = useState('All');
 
-  const filteredLibrary = useMemo(() => {
-    return massiveLibrary.filter(book => {
-      const matchSearch = book.title.toLowerCase().includes(searchTerm.toLowerCase()) || book.author.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchDomain = selectedDomain === 'All' || book.domain === selectedDomain;
-      return matchSearch && matchDomain;
+  useEffect(() => {
+    const textbooksQuery = query(collection(db, 'textbooks'), orderBy('title', 'asc'));
+    const unsubscribe = onSnapshot(textbooksQuery, (snapshot) => {
+      const remoteBooks = snapshot.docs
+        .map((bookDoc) => ({ id: bookDoc.id, ...bookDoc.data() } as Textbook))
+        .filter((book) => book.isPublished !== false);
+
+      if (remoteBooks.length > 0) {
+        setTextbooks(remoteBooks);
+      }
+    }, (error) => {
+      console.warn('Unable to load cloud textbooks, using seeded local samples', error);
     });
-  }, [searchTerm, selectedDomain]);
 
-  const Row = ({ index, style }: { index: number; style: React.CSSProperties }) => {
-    const book = filteredLibrary[index];
-    if (!book) return null;
+    return () => unsubscribe();
+  }, []);
 
-    return (
-      <div style={style} className="pr-4 pb-4">
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 md:p-6 flex flex-col md:flex-row items-start md:items-center gap-4 hover:border-[#1b366a]/30 transition-all group h-[140px] md:h-[100px] overflow-hidden">
-           <div className="w-12 h-16 bg-[#1b366a] rounded-lg flex items-center justify-center shrink-0 shadow-inner">
-              <BookText className="text-white opacity-80" size={24} />
-           </div>
-           <div className="flex-1 min-w-0">
-             <h3 className="font-bold text-slate-800 text-lg truncate group-hover:text-[#1b366a] transition-colors">{book.title}</h3>
-             <p className="text-sm text-slate-500 truncate">{book.author} • {book.domain}</p>
-             <div className="mt-2 flex items-center gap-3 text-xs font-bold text-slate-400">
-               <span className="flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">auto_stories</span> {book.pages} pages</span>
-               <span className="flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">schedule</span> {book.readTime}</span>
-               <span className="flex items-center gap-1 text-amber-500"><span className="material-symbols-outlined text-[14px] font-variation-fill">star</span> {book.rating}</span>
-             </div>
-           </div>
-           <div className="shrink-0 flex gap-2 w-full md:w-auto mt-2 md:mt-0">
-             <button className="flex-1 md:flex-none px-4 py-2 bg-blue-50 text-[#1b366a] font-bold text-xs uppercase tracking-widest rounded-xl hover:bg-blue-100 transition-colors hidden md:flex items-center justify-center gap-2">
-               <Download size={14} /> Offline
-             </button>
-             <button className="flex-1 md:flex-none px-6 py-2 bg-[#1b366a] text-white font-bold text-xs uppercase tracking-widest rounded-xl hover:bg-[#112349] shadow-md shadow-blue-900/20 transition-all text-center">
-               Read
-             </button>
-           </div>
-        </div>
-      </div>
-    );
-  };
+  const filteredTextbooks = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return textbooks.filter((book) => {
+      const matchesCategory = selectedCategory === 'All' || book.categoryId === selectedCategory;
+      const matchesSearch = !term ||
+        book.title.toLowerCase().includes(term) ||
+        book.author.toLowerCase().includes(term) ||
+        book.description.toLowerCase().includes(term) ||
+        categoryLabels[book.categoryId]?.toLowerCase().includes(term);
+
+      return matchesCategory && matchesSearch;
+    });
+  }, [searchTerm, selectedCategory, textbooks]);
 
   return (
-    <div className="bg-[#f0f2f5] min-h-screen flex flex-col font-body">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm px-6 py-4">
-        <div className="max-w-5xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <button onClick={() => navigate('/student/dashboard')} className="p-2 bg-slate-50 text-slate-500 hover:text-slate-800 rounded-full transition-colors">
+    <div className="bg-surface text-on-surface min-h-screen flex flex-col font-body">
+      <header className="bg-surface-container-lowest border-b border-outline-variant sticky top-0 z-30 shadow-sm px-5 py-4">
+        <div className="max-w-6xl mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-center gap-4 min-w-0">
+            <button onClick={() => navigate('/student/courses')} className="p-2 bg-surface-container text-on-surface-variant hover:text-on-surface rounded-full transition-colors">
               <ArrowLeft size={20} />
             </button>
-            <div>
-               <h1 className="text-2xl font-black font-headline text-slate-800 tracking-tight">Textbook Library</h1>
-               <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{massiveLibrary.length.toLocaleString()} Resources Available</p>
+            <div className="min-w-0">
+              <h1 className="text-2xl font-black font-headline text-on-surface tracking-tight">Textbook Library</h1>
+              <p className="text-xs font-bold text-on-surface-variant/50 uppercase tracking-widest">
+                {textbooks.length.toLocaleString()} curated LET resources
+              </p>
             </div>
           </div>
-          
-          <div className="flex-1 max-w-xl w-full flex items-center gap-2">
+
+          <div className="flex-1 max-w-2xl w-full flex items-center gap-2">
             <div className="flex-1 relative">
-               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-               <input 
-                 type="text" 
-                 value={searchTerm}
-                 onChange={(e) => setSearchTerm(e.target.value)}
-                 placeholder="Search books, authors, topics..." 
-                 className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-[#1b366a]/50 focus:border-[#1b366a]"
-               />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/40" size={18} />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Search textbooks, authors, topics"
+                className="w-full bg-surface-container border border-outline-variant/30 rounded-xl py-3 pl-10 pr-4 text-sm font-medium focus:outline-none focus:border-primary/40"
+              />
             </div>
-            <select 
-              value={selectedDomain}
-              onChange={(e) => setSelectedDomain(e.target.value)}
-              className="bg-slate-50 border border-slate-200 text-slate-700 text-sm font-semibold rounded-xl py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-[#1b366a]/50 max-w-[150px] truncate"
-            >
-              <option value="All">All Domains</option>
-              <option value="General Education">Gen Ed</option>
-              <option value="Professional Education">Prof Ed</option>
-              <option value="Major in English">English</option>
-              <option value="Major in Math">Math</option>
-              <option value="Major in Science">Science</option>
-            </select>
+            <div className="relative">
+              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/40" size={16} />
+              <select
+                value={selectedCategory}
+                onChange={(event) => setSelectedCategory(event.target.value)}
+                className="bg-surface-container border border-outline-variant/30 text-on-surface text-sm font-bold rounded-xl py-3 pl-10 pr-4 focus:outline-none focus:border-primary/40 max-w-[180px]"
+              >
+                <option value="All">All subjects</option>
+                <option value="gened">General Ed</option>
+                <option value="profed">Professional Ed</option>
+                <option value="major">Major</option>
+              </select>
+            </div>
           </div>
         </div>
       </header>
 
-      <main className="flex-1 max-w-5xl mx-auto w-full p-6 h-[calc(100vh-140px)]">
-        {filteredLibrary.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-slate-400">
-             <BookOpen size={48} className="mb-4 opacity-50" />
-             <p className="font-bold text-lg">No textbooks found matching your criteria.</p>
+      <main className="flex-1 max-w-6xl mx-auto w-full p-5 md:p-8">
+        {filteredTextbooks.length === 0 ? (
+          <div className="flex flex-col items-center justify-center min-h-[420px] text-on-surface-variant/50 text-center">
+            <BookOpen size={48} className="mb-4 opacity-50" />
+            <p className="font-bold text-lg">No textbooks found.</p>
+            <p className="text-sm mt-2">Try another subject or search term.</p>
           </div>
         ) : (
-          <List
-            height={window.innerHeight - 180}
-            itemCount={filteredLibrary.length}
-            itemSize={window.innerWidth < 768 ? 160 : 120} // Adjust size based on rough breakpoint
-            width="100%"
-            className="no-scrollbar"
-          >
-            {Row}
-          </List>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            {filteredTextbooks.map((book) => (
+              <article key={book.id} className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-sm flex flex-col min-h-[280px]">
+                <div className="flex items-start justify-between gap-4 mb-5">
+                  <div className="w-12 h-16 bg-primary rounded-lg flex items-center justify-center shrink-0 shadow-inner">
+                    <BookText className="text-on-primary opacity-90" size={24} />
+                  </div>
+                  <div className="text-right">
+                    <span className="inline-flex rounded-full bg-primary/10 text-primary px-3 py-1 text-[10px] font-black uppercase tracking-widest">
+                      {book.level}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex-1">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50 mb-2">
+                    {categoryLabels[book.categoryId] || book.categoryId} / {book.chapter}
+                  </p>
+                  <h2 className="font-headline font-extrabold text-lg leading-tight text-on-surface">{book.title}</h2>
+                  <p className="text-xs text-on-surface-variant/60 mt-1">{book.author}</p>
+                  <p className="text-sm text-on-surface-variant mt-4 leading-relaxed">{book.description}</p>
+                </div>
+
+                <div className="mt-5 pt-4 border-t border-outline-variant/40 flex items-center justify-between gap-3">
+                  <div className="text-xs font-bold text-on-surface-variant/60">
+                    {book.pages} pages / {book.readTime}
+                  </div>
+                  <button className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-on-primary font-bold text-xs rounded-xl hover:opacity-90 transition-colors">
+                    <Download size={14} />
+                    Offline
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
         )}
       </main>
     </div>

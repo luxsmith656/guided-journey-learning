@@ -12,14 +12,76 @@ export const TOPICS = [
   { id: 'profed_assessment', categoryId: 'profed', name: 'Assessment of Learning', isPublished: true },
   { id: 'profed_principles', categoryId: 'profed', name: 'Principles of Teaching', isPublished: true },
   { id: 'profed_childdev', categoryId: 'profed', name: 'Child and Adolescent Development', isPublished: true },
-  { id: 'profed_curriculum', categoryId: 'profed', name: 'Curriculum Development', isPublished: true }
+  { id: 'profed_curriculum', categoryId: 'profed', name: 'Curriculum Development', isPublished: true },
+  { id: 'major_math', categoryId: 'major', name: 'Mathematics: Number Sense and Problem Solving', isPublished: true }
 ];
 
 export const SKILLS = [
   { id: 'profed_assessment_summative', topicId: 'profed_assessment', name: 'Summative Assessment' },
   { id: 'profed_assessment_formative', topicId: 'profed_assessment', name: 'Formative Assessment' },
   { id: 'gened_math_algebra', topicId: 'gened_math', name: 'Algebra' },
-  { id: 'gened_english_grammar', topicId: 'gened_english', name: 'Grammar' }
+  { id: 'gened_english_grammar', topicId: 'gened_english', name: 'Grammar' },
+  { id: 'gened_english_inference', topicId: 'gened_english', name: 'Inference and Evidence' },
+  { id: 'major_math_ratio', topicId: 'major_math', name: 'Ratios and Proportion' }
+];
+
+export const TEXTBOOKS = [
+  {
+    id: 'book_gened_communication_foundations',
+    title: 'General Education Reviewer: Communication Foundations',
+    author: 'Let Mastery Editorial Team',
+    categoryId: 'gened',
+    topicId: 'gened_english',
+    description: 'Evidence-based reading, grammar traps, vocabulary, and LET-style passage strategies.',
+    pages: 86,
+    readTime: '2h 10m',
+    level: 'Core',
+    chapter: 'Chapter 2',
+    isPublished: true,
+    offlineReady: true
+  },
+  {
+    id: 'book_profed_assessment_alignment',
+    title: 'Professional Education Reviewer: Assessment and Alignment',
+    author: 'Prof. Reyes',
+    categoryId: 'profed',
+    topicId: 'profed_assessment',
+    description: 'Formative assessment, constructive alignment, rubrics, validity, reliability, and feedback.',
+    pages: 112,
+    readTime: '3h',
+    level: 'Teaching Practice',
+    chapter: 'Chapter 5',
+    isPublished: true,
+    offlineReady: true
+  },
+  {
+    id: 'book_profed_child_development',
+    title: 'Child and Adolescent Development Quick Textbook',
+    author: 'Dr. Jane Teacher',
+    categoryId: 'profed',
+    topicId: 'profed_childdev',
+    description: 'Piaget, Erikson, Vygotsky, motivation, individual differences, and learner-centered decisions.',
+    pages: 74,
+    readTime: '1h 45m',
+    level: 'Teaching Practice',
+    chapter: 'Chapter 3',
+    isPublished: true,
+    offlineReady: true
+  },
+  {
+    id: 'book_major_math_number_sense',
+    title: 'Mathematics Major Reviewer: Number Sense',
+    author: 'Ms. Dela Cruz',
+    categoryId: 'major',
+    topicId: 'major_math',
+    description: 'Ratios, proportion, estimation, operations, and translating word problems into equations.',
+    pages: 98,
+    readTime: '2h 30m',
+    level: 'Specialization',
+    chapter: 'Chapter 1',
+    isPublished: true,
+    offlineReady: true
+  }
 ];
 
 export const INITIAL_QUESTIONS = [

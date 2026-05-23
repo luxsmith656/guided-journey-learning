@@ -11,6 +11,8 @@ export default function Dashboard() {
     users: 0,
     questions: 0,
     categories: 0,
+    modules: 0,
+    textbooks: 0,
     recentActivity: [] as any[],
     usageData: [] as any[]
   });
@@ -58,6 +60,14 @@ export default function Dashboard() {
     const unsubCats = onSnapshot(collection(db, 'categories'), (s) => {
       setCounts(prev => ({ ...prev, categories: s.size }));
     });
+
+    const unsubModules = onSnapshot(collection(db, 'modules'), (s) => {
+      setCounts(prev => ({ ...prev, modules: s.size }));
+    });
+
+    const unsubTextbooks = onSnapshot(collection(db, 'textbooks'), (s) => {
+      setCounts(prev => ({ ...prev, textbooks: s.size }));
+    });
     
     const unsubActivity = onSnapshot(query(collection(db, 'activityLogs'), orderBy('createdAt', 'desc'), limit(5)), (s) => {
       const activities = s.docs.map(doc => ({
@@ -92,7 +102,7 @@ export default function Dashboard() {
       setCounts(prev => ({ ...prev, usageData: chartData }));
     });
       
-    return () => { unsubUsers(); unsubQs(); unsubCats(); unsubActivity(); unsubUsage(); unsubDrafts(); };
+    return () => { unsubUsers(); unsubQs(); unsubCats(); unsubModules(); unsubTextbooks(); unsubActivity(); unsubUsage(); unsubDrafts(); };
   }, []);
 
   return (
@@ -156,9 +166,12 @@ export default function Dashboard() {
               <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                 <span className="material-symbols-outlined text-4xl text-primary">book</span>
               </div>
-              <p className="font-body text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-[0.2em]">Curriculum Domains</p>
+              <p className="font-body text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-[0.2em]">Journey Modules</p>
               <div className="relative z-10">
-                <div className="font-headline text-4xl font-extrabold text-on-surface tracking-tighter">{counts.categories}</div>
+                <div className="font-headline text-4xl font-extrabold text-on-surface tracking-tighter">{counts.modules}</div>
+                <p className="text-[10px] font-bold text-on-surface-variant/50 uppercase tracking-widest mt-1">
+                  {counts.textbooks} textbooks / {counts.categories} domains
+                </p>
               </div>
             </div>
 
