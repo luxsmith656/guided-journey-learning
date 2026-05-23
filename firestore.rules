@@ -146,9 +146,20 @@ service cloud.firestore {
       allow update: if isInstructor() || (isSignedIn() && existing().userId == request.auth.uid);
     }
 
+    match /studyReminders/{reminderId} {
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow read, update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
     match /learningNotes/{noteId} {
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
       allow read, update, delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
+    }
+
+    match /contentVersions/{versionId} {
+      allow read: if isInstructor();
+      allow create: if isInstructor();
+      allow update, delete: if isAdmin();
     }
     
     match /aiDrafts/{draftId} {

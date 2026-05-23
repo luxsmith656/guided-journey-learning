@@ -19,7 +19,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import { addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from 'firebase/firestore';
 import DashboardLayout from '../components/DashboardLayout';
 import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
@@ -58,6 +58,13 @@ interface BuilderModule {
   certificateEnabled: boolean;
   certificateTemplateId?: string;
   certificateRequirementNote?: string;
+  attemptPolicy: {
+    maxAttempts: number;
+    scoreMode: 'first' | 'highest' | 'latest';
+    showAnswersAfterSubmit: boolean;
+    timeLimitMinutes: number;
+    randomizeQuestions: boolean;
+  };
   flowItems: { id: string; type: 'textbook' | 'lesson' | 'quiz' | 'activity' | 'exam'; refId: string; title: string }[];
   parts: JourneyModulePart[];
   finalExam: JourneyQuestion[];
@@ -76,6 +83,14 @@ const defaultExamBlueprint = {
   sectionDistribution: {},
   competencyDistribution: {},
   difficultyMix: { easy: 30, medium: 50, hard: 20 },
+};
+
+const defaultAttemptPolicy = {
+  maxAttempts: 1,
+  scoreMode: 'first' as const,
+  showAnswersAfterSubmit: false,
+  timeLimitMinutes: 0,
+  randomizeQuestions: false,
 };
 
 const blankQuestion = (id: string): JourneyQuestion => ({
@@ -150,6 +165,7 @@ const emptyModule: BuilderModule = {
   certificateEnabled: false,
   certificateTemplateId: '',
   certificateRequirementNote: 'Issue a certificate after this module is completed and the final assessment is passed.',
+  attemptPolicy: defaultAttemptPolicy,
   flowItems: buildDefaultFlow([blankPart(0)], [blankQuestion('final-q1')]),
   parts: [blankPart(0)],
   finalExam: [blankQuestion('final-q1')],
@@ -182,6 +198,7 @@ function fromSeedModule(module: (typeof journeyModules)[number]): BuilderModule 
     certificateEnabled: !!(module as any).certificateEnabled,
     certificateTemplateId: (module as any).certificateTemplateId || '',
     certificateRequirementNote: (module as any).certificateRequirementNote || emptyModule.certificateRequirementNote,
+    attemptPolicy: { ...defaultAttemptPolicy, ...((module as any).attemptPolicy || {}) },
     parts: module.parts?.length ? module.parts : [blankPart(0)],
     finalExam: module.finalExam?.length ? module.finalExam : module.questions.slice(0, 2),
     flowItems: module.flowItems?.length ? module.flowItems : buildDefaultFlow(module.parts?.length ? module.parts : [blankPart(0)], module.finalExam?.length ? module.finalExam : module.questions.slice(0, 2)),
@@ -231,6 +248,7 @@ function fromFirestoreModule(id: string, data: any): BuilderModule {
     certificateEnabled: !!data.certificateEnabled,
     certificateTemplateId: data.certificateTemplateId || '',
     certificateRequirementNote: data.certificateRequirementNote || emptyModule.certificateRequirementNote,
+    attemptPolicy: { ...defaultAttemptPolicy, ...(data.attemptPolicy || {}) },
     parts,
     finalExam,
     flowItems: data.flowItems?.length ? data.flowItems : buildDefaultFlow(parts, finalExam),
@@ -640,11 +658,14 @@ export default function InstructorModules() {
       certificateEnabled: draft.certificateEnabled,
       certificateTemplateId: draft.certificateTemplateId || '',
       certificateRequirementNote: draft.certificateRequirementNote || '',
+      attemptPolicy: draft.attemptPolicy,
       flowItems: draft.flowItems,
       createdBy: user?.uid || 'instructor',
       authorId: user?.uid || 'instructor',
       authorName: user?.fullName || user?.email || 'Instructor',
       authorEmail: user?.email || '',
+      updatedBy: user?.uid || '',
+      updatedByEmail: user?.email || '',
       parts: draft.parts,
       finalExam: draft.finalExam,
       lessonBlocks: draft.parts.flatMap((part) => part.lessonBlocks),
@@ -655,7 +676,21 @@ export default function InstructorModules() {
     try {
       let savedModuleId = draft.id;
       if (draft.id && !journeyModules.some((module) => module.id === draft.id)) {
-        await updateDoc(doc(db, 'modules', draft.id), payload);
+        const moduleRef = doc(db, 'modules', draft.id);
+        const previous = await getDoc(moduleRef);
+        if (previous.exists()) {
+          await addDoc(collection(db, 'contentVersions'), {
+            contentType: 'module',
+            contentId: draft.id,
+            title: previous.data().title || draft.title,
+            snapshot: previous.data(),
+            changedBy: user?.uid || '',
+            changedByEmail: user?.email || '',
+            changedByName: user?.fullName || user?.email || 'Instructor',
+            versionedAt: serverTimestamp(),
+          });
+        }
+        await updateDoc(moduleRef, payload);
         setToastMsg('Module updated');
       } else {
         const newDoc = await addDoc(collection(db, 'modules'), {
@@ -700,7 +735,7 @@ export default function InstructorModules() {
 
   return (
     <DashboardLayout title="Instructor Studio">
-      <div className="p-4 md:p-8 max-w-7xl mx-auto w-full text-on-surface space-y-6">
+      <div className="p-4 md:p-8 max-w-[1600px] mx-auto w-full text-on-surface space-y-6">
         <section className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 md:p-6 shadow-sm">
           <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-5">
             <div className="max-w-3xl">
@@ -723,7 +758,7 @@ export default function InstructorModules() {
           </div>
         </section>
 
-        <section className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-6">
+        <section className="grid grid-cols-1 xl:grid-cols-[300px_1fr] gap-6">
           <aside className="space-y-4">
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-sm">
               <div className="flex items-center justify-between mb-4">
@@ -989,8 +1024,9 @@ function ModuleStudentPreview({
   reorderFlowItem: (fromIndex: number, toIndex: number) => void;
   resetFlowOrder: () => void;
 }) {
+  const [dragFlowIndex, setDragFlowIndex] = useState<number | null>(null);
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[260px_1fr] gap-5">
+    <div className="grid grid-cols-1 xl:grid-cols-[230px_1fr] gap-5">
       <aside className="rounded-2xl border border-outline-variant/40 bg-surface-container/30 p-4 h-fit">
         <div className="flex items-center justify-between gap-2 mb-3">
           <p className="text-xs font-black uppercase tracking-widest text-primary">Student flow</p>
@@ -998,16 +1034,23 @@ function ModuleStudentPreview({
         </div>
         <div className="space-y-2">
           {draft.flowItems.map((item, index) => (
-            <div key={item.id} className={`rounded-xl border p-3 ${index === 0 ? 'border-primary bg-primary/10' : 'border-outline-variant/30 bg-surface-container/40'}`}>
+            <div
+              key={item.id}
+              draggable
+              onDragStart={() => setDragFlowIndex(index)}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={() => {
+                if (dragFlowIndex != null) reorderFlowItem(dragFlowIndex, index);
+                setDragFlowIndex(null);
+              }}
+              className={`rounded-xl border p-3 cursor-grab active:cursor-grabbing ${index === 0 ? 'border-primary bg-primary/10' : 'border-outline-variant/30 bg-surface-container/40'}`}
+            >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">{index + 1}. {item.type}</p>
                   <p className="text-sm font-extrabold text-on-surface line-clamp-2">{item.title}</p>
                 </div>
-                <div className="flex flex-col gap-1">
-                  <button onClick={() => reorderFlowItem(index, index - 1)} disabled={index === 0} className="text-[10px] font-black text-on-surface-variant disabled:opacity-30">Up</button>
-                  <button onClick={() => reorderFlowItem(index, index + 1)} disabled={index === draft.flowItems.length - 1} className="text-[10px] font-black text-on-surface-variant disabled:opacity-30">Down</button>
-                </div>
+                <GripVertical size={14} className="text-on-surface-variant/50 shrink-0" />
               </div>
             </div>
           ))}
@@ -1196,8 +1239,6 @@ function PartsStep({
           >
             <GripVertical size={14} className="cursor-grab" />
             <button onClick={() => setActivePartIndex(index)}>Part {index + 1}</button>
-            <button onClick={() => reorderPart(index, index - 1)} disabled={index === 0} className="disabled:opacity-30">Up</button>
-            <button onClick={() => reorderPart(index, index + 1)} disabled={index === draft.parts.length - 1} className="disabled:opacity-30">Down</button>
           </div>
         ))}
         <button onClick={addPart} className="rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest bg-primary/10 text-primary inline-flex items-center gap-2">
@@ -1558,6 +1599,35 @@ function PublishStep({
           <input type="checkbox" checked={draft.recordFirstAttemptOnly} onChange={(event) => updateDraft('recordFirstAttemptOnly', event.target.checked)} className="w-5 h-5 accent-primary" />
         </label>
       </div>
+      <section className="rounded-2xl border border-outline-variant/40 bg-surface-container/20 p-4 space-y-4">
+        <h3 className="font-headline font-extrabold text-xl">Attempt controls</h3>
+        <p className="text-xs text-on-surface-variant/60">Default is one take. Practice modules can loosen this, while final exams can stay strict.</p>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <Field label="Allowed attempts">
+            <input type="number" min={1} value={draft.attemptPolicy.maxAttempts} onChange={(event) => updateDraft('attemptPolicy', { ...draft.attemptPolicy, maxAttempts: Number(event.target.value) })} className="input" />
+          </Field>
+          <Field label="Score counted">
+            <select value={draft.attemptPolicy.scoreMode} onChange={(event) => updateDraft('attemptPolicy', { ...draft.attemptPolicy, scoreMode: event.target.value })} className="input font-bold">
+              <option value="first">First score</option>
+              <option value="highest">Highest score</option>
+              <option value="latest">Latest score</option>
+            </select>
+          </Field>
+          <Field label="Time limit minutes">
+            <input type="number" min={0} value={draft.attemptPolicy.timeLimitMinutes} onChange={(event) => updateDraft('attemptPolicy', { ...draft.attemptPolicy, timeLimitMinutes: Number(event.target.value) })} className="input" />
+          </Field>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <label className="flex items-center justify-between gap-4 bg-surface-container rounded-xl px-4 py-4">
+            <span className="text-sm font-extrabold text-on-surface">Show answers after submission</span>
+            <input type="checkbox" checked={draft.attemptPolicy.showAnswersAfterSubmit} onChange={(event) => updateDraft('attemptPolicy', { ...draft.attemptPolicy, showAnswersAfterSubmit: event.target.checked })} className="w-5 h-5 accent-primary" />
+          </label>
+          <label className="flex items-center justify-between gap-4 bg-surface-container rounded-xl px-4 py-4">
+            <span className="text-sm font-extrabold text-on-surface">Randomize questions</span>
+            <input type="checkbox" checked={draft.attemptPolicy.randomizeQuestions} onChange={(event) => updateDraft('attemptPolicy', { ...draft.attemptPolicy, randomizeQuestions: event.target.checked })} className="w-5 h-5 accent-primary" />
+          </label>
+        </div>
+      </section>
       <button onClick={saveModule} className="rounded-xl bg-primary text-on-primary px-6 py-3 font-bold">Save module</button>
     </div>
   );

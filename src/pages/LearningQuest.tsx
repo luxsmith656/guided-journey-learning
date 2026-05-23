@@ -10,13 +10,17 @@ import {
   Clock,
   FileQuestion,
   Gamepad2,
+  Download,
+  EyeOff,
+  Highlighter,
   Library,
+  MessageCircle,
   RotateCcw,
   Save,
   ShieldAlert,
   Trophy,
 } from 'lucide-react';
-import { addDoc, collection, doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -52,6 +56,13 @@ interface GradeResult {
   score: number;
   isCorrect: boolean;
   feedback: string;
+}
+
+interface LessonHighlight {
+  id: string;
+  text: string;
+  note?: string;
+  hidden?: boolean;
 }
 
 const optionTone = {
@@ -95,6 +106,7 @@ function normalizeFirestoreModule(id: string, data: any): JourneyModule {
     dueAt: data.dueAt || '',
     antiCheatEnabled: data.antiCheatEnabled ?? true,
     recordFirstAttemptOnly: data.recordFirstAttemptOnly ?? true,
+    attemptPolicy: data.attemptPolicy || undefined,
   };
 }
 
@@ -119,7 +131,11 @@ export default function LearningQuest() {
   const [appealSent, setAppealSent] = useState(false);
   const [proctorMessage, setProctorMessage] = useState('');
   const [lessonNote, setLessonNote] = useState('');
+  const [lessonHighlights, setLessonHighlights] = useState<LessonHighlight[]>([]);
+  const [activeHighlightId, setActiveHighlightId] = useState('');
+  const [selectedText, setSelectedText] = useState('');
   const [isBookmarked, setIsBookmarked] = useState(false);
+  const [lowBandwidth, setLowBandwidth] = useState(() => localStorage.getItem('let-mastery-low-bandwidth') === '1');
   const [loading, setLoading] = useState(true);
   const [sessionStartedAt] = useState(Date.now());
   const [nowTick, setNowTick] = useState(Date.now());
@@ -136,6 +152,16 @@ export default function LearningQuest() {
   const allPartsCompleted = parts.every((part) => progress.partScores[part.id] !== undefined);
   const antiCheatEnabled = (module as any).antiCheatEnabled !== false;
   const recordFirstAttemptOnly = (module as any).recordFirstAttemptOnly !== false;
+  const attemptPolicy = {
+    maxAttempts: 1,
+    scoreMode: recordFirstAttemptOnly ? 'first' : 'latest',
+    showAnswersAfterSubmit: false,
+    timeLimitMinutes: 0,
+    randomizeQuestions: false,
+    ...((module as any).attemptPolicy || {}),
+  };
+  const attemptsUsed = progress.finalAttemptCount || 0;
+  const finalAttemptsLocked = progress.status !== 'completed' && attemptsUsed >= Math.max(1, attemptPolicy.maxAttempts);
   const moduleDueAt = (module as any).dueAt ? new Date((module as any).dueAt) : null;
   const modulePastDue = !!moduleDueAt && moduleDueAt.getTime() < Date.now() && progress.status !== 'completed';
   const learningState = getLearningState(progress, parts.length);
@@ -143,6 +169,36 @@ export default function LearningQuest() {
 
   const progressDocId = user ? `${user.uid}_${module.id}` : '';
   const localProgressKey = `let-mastery-progress:${module.id}`;
+
+  useEffect(() => {
+    const syncLowBandwidth = () => setLowBandwidth(localStorage.getItem('let-mastery-low-bandwidth') === '1');
+    window.addEventListener('storage', syncLowBandwidth);
+    window.addEventListener('let-mastery-low-bandwidth', syncLowBandwidth);
+    return () => {
+      window.removeEventListener('storage', syncLowBandwidth);
+      window.removeEventListener('let-mastery-low-bandwidth', syncLowBandwidth);
+    };
+  }, []);
+
+  useEffect(() => {
+    async function loadLessonNote() {
+      if (!user || !currentPart) return;
+      const noteSnap = await getDoc(doc(db, 'learningNotes', `${user.uid}_${module.id}_${currentPart.id}`));
+      if (noteSnap.exists()) {
+        const data = noteSnap.data() as any;
+        setLessonNote(data.note || '');
+        setIsBookmarked(!!data.bookmarked);
+        setLessonHighlights(data.highlights || []);
+      } else {
+        setLessonNote('');
+        setIsBookmarked(false);
+        setLessonHighlights([]);
+      }
+      setActiveHighlightId('');
+      setSelectedText('');
+    }
+    loadLessonNote();
+  }, [user?.uid, module.id, currentPart?.id]);
 
   const persistProgress = async (nextProgress: QuestProgress) => {
     setProgress(nextProgress);
@@ -280,6 +336,10 @@ export default function LearningQuest() {
 
   const moveToPhase = async (phase: QuestPhase) => {
     if (phase === 'finalExam') {
+      if (finalAttemptsLocked) {
+        setProctorMessage(`Final exam attempts are used up. Your instructor allowed ${attemptPolicy.maxAttempts} attempt${attemptPolicy.maxAttempts === 1 ? '' : 's'}.`);
+        return;
+      }
       if (!allPartsCompleted && progress.status !== 'completed') {
         setProctorMessage('Finish every textbook part and mini check before opening the final exam.');
         return;
@@ -410,9 +470,59 @@ export default function LearningQuest() {
       partTitle: currentPart.title,
       note: lessonNote,
       bookmarked: isBookmarked,
+      highlights: lessonHighlights,
       updatedAt: serverTimestamp(),
     }, { merge: true });
     setProctorMessage('Lesson note saved.');
+  };
+
+  const captureSelectedText = () => {
+    const text = window.getSelection()?.toString().trim() || '';
+    if (text.length >= 2) setSelectedText(text.slice(0, 240));
+  };
+
+  const addHighlight = (hidden = false) => {
+    if (!selectedText || lessonHighlights.some((item) => item.text === selectedText)) return;
+    setLessonHighlights((items) => [...items, { id: `hl-${Date.now()}`, text: selectedText, hidden }]);
+    setSelectedText('');
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const updateHighlight = (id: string, patch: Partial<LessonHighlight>) => {
+    setLessonHighlights((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
+  };
+
+  const downloadStudyGuide = async () => {
+    if (!user) return;
+    const notesSnap = await getDocs(query(collection(db, 'learningNotes'), where('userId', '==', user.uid), where('moduleId', '==', module.id)));
+    const notes = notesSnap.docs.map((noteDoc) => noteDoc.data() as any);
+    const guide = [
+      `Study Guide: ${module.title}`,
+      '',
+      module.description,
+      '',
+      'Learning Objectives',
+      ...parts.map((part, index) => `${index + 1}. ${part.objective}`),
+      '',
+      'Key Textbook Sections',
+      ...parts.map((part, index) => `${index + 1}. ${part.textbookSection.title}\n${part.textbookSection.body}`),
+      '',
+      'My Notes',
+      ...notes.flatMap((note) => [
+        `- ${note.partTitle || 'Lesson'}: ${note.note || ''}`,
+        ...(note.highlights || []).map((highlight: LessonHighlight) => `  Highlight: ${highlight.text}${highlight.note ? ` / Note: ${highlight.note}` : ''}`),
+      ]),
+      '',
+      'Review Questions',
+      ...finalExam.map((question, index) => `${index + 1}. ${question.stem}`),
+    ].join('\n');
+    const blob = new Blob([guide], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${module.title.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-study-guide.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   const completeMiniQuiz = async () => {
@@ -457,6 +567,12 @@ export default function LearningQuest() {
     const score = Math.round(Object.values(grades).reduce((sum, grade) => sum + grade.score, 0) / Math.max(finalExam.length, 1));
     const weakPartIds = getWeakPartIds(finalExam, grades, parts);
     const officialFirstScore = progress.firstFinalScore ?? score;
+    const previousOfficialScore = progress.finalScore ?? officialFirstScore;
+    const officialScore = attemptPolicy.scoreMode === 'highest'
+      ? Math.max(previousOfficialScore, score)
+      : attemptPolicy.scoreMode === 'latest'
+        ? score
+        : officialFirstScore;
     const status = score >= FINAL_PASSING_SCORE ? 'completed' : 'in_progress';
     const phase: QuestPhase = score >= FINAL_PASSING_SCORE ? 'complete' : 'read';
 
@@ -464,7 +580,7 @@ export default function LearningQuest() {
       ...progress,
       phase,
       currentPartIndex: score >= FINAL_PASSING_SCORE ? progress.currentPartIndex : 0,
-      finalScore: recordFirstAttemptOnly ? officialFirstScore : score,
+      finalScore: officialScore,
       firstFinalScore: officialFirstScore,
       latestFinalScore: score,
       finalAttemptCount: (progress.finalAttemptCount || 0) + 1,
@@ -629,7 +745,7 @@ export default function LearningQuest() {
 
   const prepareFinalExam = async (fresh: boolean) => {
     if (!fresh) {
-      setFinalQuestionSet(baseFinalExam);
+      setFinalQuestionSet(attemptPolicy.randomizeQuestions ? shuffleQuestions(baseFinalExam) : baseFinalExam);
       return;
     }
 
@@ -645,9 +761,11 @@ export default function LearningQuest() {
       });
       const data = await response.json();
       const freshQuestions = (data.questions || []).filter((question: JourneyQuestion) => question.stem);
-      setFinalQuestionSet(freshQuestions.length ? freshQuestions : rotateQuestions(baseFinalExam));
+      const nextQuestions = freshQuestions.length ? freshQuestions : rotateQuestions(baseFinalExam);
+      setFinalQuestionSet(attemptPolicy.randomizeQuestions ? shuffleQuestions(nextQuestions) : nextQuestions);
     } catch {
-      setFinalQuestionSet(rotateQuestions(baseFinalExam));
+      const nextQuestions = rotateQuestions(baseFinalExam);
+      setFinalQuestionSet(attemptPolicy.randomizeQuestions ? shuffleQuestions(nextQuestions) : nextQuestions);
     }
     setFinalAnswers({});
     setFinalGrades({});
@@ -722,7 +840,7 @@ export default function LearningQuest() {
         })}
         <button
           onClick={() => moveToPhase('finalExam')}
-          disabled={examLocked || (!allPartsCompleted && progress.status !== 'completed')}
+          disabled={examLocked || finalAttemptsLocked || (!allPartsCompleted && progress.status !== 'completed')}
           className={`w-full text-left rounded-xl border px-3 py-3 transition-colors ${
             progress.phase === 'finalExam' ? 'border-primary bg-primary/10' : 'border-outline-variant/30 bg-surface-container/30 hover:border-primary/40'
           } disabled:opacity-50`}
@@ -736,7 +854,9 @@ export default function LearningQuest() {
             <span>
               <span className="block text-xs font-black uppercase tracking-widest text-on-surface-variant/50">Gate</span>
               <span className="block text-sm font-extrabold text-on-surface">Final module exam</span>
-              <span className="block text-[11px] text-on-surface-variant/60 mt-1">Pass at {FINAL_PASSING_SCORE}% to unlock next module</span>
+              <span className="block text-[11px] text-on-surface-variant/60 mt-1">
+                {finalAttemptsLocked ? 'Attempt limit reached' : `Pass at ${FINAL_PASSING_SCORE}% to unlock next module`}
+              </span>
             </span>
           </div>
         </button>
@@ -809,32 +929,74 @@ export default function LearningQuest() {
                 )}
               </div>
             )}
-            <p className="text-on-surface-variant leading-relaxed mt-5 whitespace-pre-line">{currentPart.textbookSection.body}</p>
-            <div className="rounded-2xl border border-outline-variant/40 bg-surface-container/40 p-4 mt-6">
-              <div className="flex items-center justify-between gap-3 mb-3">
-                <p className="text-xs font-black uppercase tracking-widest text-primary">Personal note</p>
-                <button onClick={() => setIsBookmarked(!isBookmarked)} className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold ${isBookmarked ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface'}`}>
+            <div className="mt-5">
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <button onClick={() => setIsBookmarked(!isBookmarked)} className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-xs font-bold ${isBookmarked ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface'}`}>
                   <Bookmark size={14} />
                   {isBookmarked ? 'Bookmarked' : 'Bookmark'}
                 </button>
+                {selectedText && (
+                  <>
+                    <button onClick={() => addHighlight(false)} className="inline-flex items-center gap-2 rounded-full bg-amber-500/10 text-amber-700 px-3 py-2 text-xs font-bold">
+                      <Highlighter size={14} />
+                      Highlight selection
+                    </button>
+                    <button onClick={() => addHighlight(true)} className="inline-flex items-center gap-2 rounded-full bg-surface-container text-on-surface px-3 py-2 text-xs font-bold">
+                      <EyeOff size={14} />
+                      Hide for recall
+                    </button>
+                  </>
+                )}
+                <button onClick={saveLessonNote} className="inline-flex items-center gap-2 rounded-full bg-primary text-on-primary px-3 py-2 text-xs font-bold">
+                  <Save size={14} />
+                  Save notes
+                </button>
               </div>
-              <textarea
-                value={lessonNote}
-                onChange={(event) => setLessonNote(event.target.value)}
-                rows={3}
-                placeholder="Write a note, memory cue, or question tied to this lesson chunk."
-                className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm outline-none focus:border-primary/40 resize-none"
-              />
-              <button onClick={saveLessonNote} className="mt-3 rounded-xl bg-primary text-on-primary px-4 py-2 text-xs font-bold">Save note</button>
+              <div onMouseUp={captureSelectedText} className="text-on-surface-variant leading-relaxed whitespace-pre-line select-text">
+                {renderHighlightedText(currentPart.textbookSection.body, lessonHighlights, activeHighlightId, setActiveHighlightId)}
+              </div>
+              {activeHighlightId && (
+                <div className="mt-3 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                  <div className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary mb-2">
+                    <MessageCircle size={14} />
+                    Note for this highlight
+                  </div>
+                  <textarea
+                    value={lessonHighlights.find((item) => item.id === activeHighlightId)?.note || ''}
+                    onChange={(event) => updateHighlight(activeHighlightId, { note: event.target.value })}
+                    rows={2}
+                    placeholder="Add a short note for this exact highlighted idea."
+                    className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm outline-none focus:border-primary/40 resize-none"
+                  />
+                </div>
+              )}
+              <details className="mt-4 rounded-2xl border border-outline-variant/40 bg-surface-container/30 p-3">
+                <summary className="cursor-pointer text-xs font-black uppercase tracking-widest text-primary">Whole-section note</summary>
+                <textarea
+                  value={lessonNote}
+                  onChange={(event) => setLessonNote(event.target.value)}
+                  rows={3}
+                  placeholder="Write a note for this lesson chunk."
+                  className="mt-3 w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm outline-none focus:border-primary/40 resize-none"
+                />
+              </details>
             </div>
             {currentPart.textbookSection.mediaUrl && (
               <div className="mt-6 rounded-2xl border border-outline-variant/40 overflow-hidden bg-surface-container">
-                <iframe
-                  src={toEmbeddableUrl(currentPart.textbookSection.mediaUrl)}
-                  title={currentPart.textbookSection.title}
-                  className="w-full aspect-video"
-                  allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
-                />
+                {lowBandwidth ? (
+                  <div className="p-4">
+                    <p className="text-xs font-black uppercase tracking-widest text-primary">Low-bandwidth mode</p>
+                    <p className="text-sm text-on-surface-variant mt-1">Video and slide embeds are paused. Open the media only when your connection is ready.</p>
+                    <a href={currentPart.textbookSection.mediaUrl} target="_blank" rel="noreferrer" className="inline-flex mt-3 rounded-xl bg-primary text-on-primary px-4 py-2 text-sm font-bold">Open media link</a>
+                  </div>
+                ) : (
+                  <iframe
+                    src={toEmbeddableUrl(currentPart.textbookSection.mediaUrl)}
+                    title={currentPart.textbookSection.title}
+                    className="w-full aspect-video"
+                    allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
+                  />
+                )}
               </div>
             )}
             <button onClick={() => moveToPhase('lesson')} className="w-full bg-primary text-on-primary px-6 py-4 rounded-2xl font-bold flex items-center justify-between shadow-sm mt-6">
@@ -962,6 +1124,11 @@ export default function LearningQuest() {
             <HeaderKicker icon={Trophy} label="Final module exam" />
             <h2 className="text-2xl font-extrabold font-headline text-on-surface">Pass this module exam to unlock completion.</h2>
             <p className="text-sm text-on-surface-variant mt-2">Required score: {FINAL_PASSING_SCORE}%. Choices support A/B/C/D and Enter. Written answers are AI-checked with spelling tolerance.</p>
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <Metric label="Attempts" value={`${attemptsUsed}/${attemptPolicy.maxAttempts}`} />
+              <Metric label="Score kept" value={attemptPolicy.scoreMode} />
+              <Metric label="Timer" value={attemptPolicy.timeLimitMinutes ? `${attemptPolicy.timeLimitMinutes} min` : 'None'} />
+            </div>
 
             {examLocked && (
               <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 mt-5 flex gap-3">
@@ -973,6 +1140,12 @@ export default function LearningQuest() {
             {recordFirstAttemptOnly && progress.firstFinalScore !== undefined && progress.status !== 'completed' && (
               <div className="rounded-2xl border border-outline-variant/40 bg-surface-container p-4 mt-5">
                 <p className="text-sm font-bold text-on-surface">Official first attempt: {progress.firstFinalScore}%. Retakes are practice unless your instructor changes the class setting.</p>
+              </div>
+            )}
+
+            {finalAttemptsLocked && (
+              <div className="rounded-2xl border border-error/20 bg-error/10 p-4 mt-5">
+                <p className="font-bold text-error">Attempts used: {attemptsUsed}/{attemptPolicy.maxAttempts}. Ask your instructor if another attempt should be opened.</p>
               </div>
             )}
 
@@ -1024,7 +1197,7 @@ export default function LearningQuest() {
             </div>
 
             <button
-              disabled={examLocked || finalAnsweredCount < finalExam.length || isGrading}
+              disabled={finalAttemptsLocked || examLocked || finalAnsweredCount < finalExam.length || isGrading}
               onClick={submitFinalExam}
               className="w-full bg-primary text-on-primary px-6 py-4 rounded-2xl font-bold flex items-center justify-between shadow-sm mt-6 disabled:opacity-50"
             >
@@ -1052,6 +1225,10 @@ export default function LearningQuest() {
             <div className="flex flex-col sm:flex-row gap-3 justify-center mt-7">
               <button onClick={() => navigate('/student/courses')} className="rounded-xl bg-primary text-on-primary px-6 py-3 font-bold">
                 Back to journey
+              </button>
+              <button onClick={downloadStudyGuide} className="rounded-xl bg-surface-container text-on-surface px-6 py-3 font-bold border border-outline-variant inline-flex items-center justify-center gap-2">
+                <Download size={16} />
+                Download study guide
               </button>
               <button onClick={resetFinalExam} className="rounded-xl bg-surface-container text-on-surface px-6 py-3 font-bold border border-outline-variant inline-flex items-center justify-center gap-2">
                 <RotateCcw size={16} />
@@ -1151,6 +1328,48 @@ function getWeakPartIds(finalExam: JourneyQuestion[], grades: Record<string, Gra
   return [...weak];
 }
 
+function renderHighlightedText(
+  body: string,
+  highlights: LessonHighlight[],
+  activeHighlightId: string,
+  setActiveHighlightId: (id: string) => void,
+) {
+  if (!highlights.length) return body;
+  const usable = highlights.filter((item) => item.text && body.includes(item.text));
+  if (!usable.length) return body;
+  const parts: React.ReactNode[] = [];
+  let remaining = body;
+  let key = 0;
+
+  while (remaining.length) {
+    const next = usable
+      .map((highlight) => ({ highlight, index: remaining.indexOf(highlight.text) }))
+      .filter((item) => item.index >= 0)
+      .sort((a, b) => a.index - b.index)[0];
+    if (!next) {
+      parts.push(remaining);
+      break;
+    }
+    if (next.index > 0) parts.push(remaining.slice(0, next.index));
+    parts.push(
+      <button
+        key={`${next.highlight.id}-${key++}`}
+        type="button"
+        onClick={() => setActiveHighlightId(activeHighlightId === next.highlight.id ? '' : next.highlight.id)}
+        className={`inline rounded px-1 font-semibold transition-colors ${
+          next.highlight.hidden ? 'bg-on-surface text-on-surface hover:text-surface' : 'bg-amber-200/70 text-on-surface hover:bg-amber-300/80'
+        }`}
+        title={next.highlight.note || 'Click to add or view note'}
+      >
+        {next.highlight.hidden ? '______' : next.highlight.text}
+        {next.highlight.note && <sup className="ml-1 text-primary">note</sup>}
+      </button>,
+    );
+    remaining = remaining.slice(next.index + next.highlight.text.length);
+  }
+  return parts;
+}
+
 function formatDuration(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
@@ -1221,6 +1440,26 @@ function rotateQuestions(questions: JourneyQuestion[]) {
       correctOptionId: String.fromCharCode(65 + Math.max(0, newCorrectIndex)),
     };
   });
+}
+
+function shuffleQuestions(questions: JourneyQuestion[]) {
+  return questions
+    .map((question) => ({ question, sort: Math.random() }))
+    .sort((a, b) => a.sort - b.sort)
+    .map(({ question }) => {
+      if (!isChoiceQuestion(question)) return question;
+      const options = normalizeOptions(question);
+      const shuffled = options
+        .map((option) => ({ option, sort: Math.random() }))
+        .sort((a, b) => a.sort - b.sort)
+        .map(({ option }, index) => ({ id: String.fromCharCode(65 + index), text: option.text, was: option.id }));
+      const correct = shuffled.find((option) => option.was === question.correctOptionId)?.id || question.correctOptionId;
+      return {
+        ...question,
+        options: shuffled.map(({ id, text }) => ({ id, text })),
+        correctOptionId: correct,
+      };
+    });
 }
 
 function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {

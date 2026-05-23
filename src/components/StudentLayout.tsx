@@ -1,4 +1,4 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useBranding } from '../context/BrandingContext';
 import { useTheme } from '../context/ThemeContext';
@@ -13,7 +13,8 @@ import {
   Settings, 
   Bell, 
   Search,
-  Target
+  Target,
+  WifiOff
 } from 'lucide-react';
 import HelpSupportButton from './HelpSupportButton';
 import { useNotifications } from '../hooks/useNotifications';
@@ -23,8 +24,14 @@ export default function StudentLayout({ children, title }: { children: ReactNode
   const { settings } = useBranding();
   const { theme, toggleTheme } = useTheme();
   const { unreadCount } = useNotifications();
+  const [lowBandwidth, setLowBandwidth] = useState(() => localStorage.getItem('let-mastery-low-bandwidth') === '1');
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+    localStorage.setItem('let-mastery-low-bandwidth', lowBandwidth ? '1' : '0');
+    window.dispatchEvent(new Event('let-mastery-low-bandwidth'));
+  }, [lowBandwidth]);
 
   const handleSignOut = () => {
     signOut();
@@ -119,8 +126,16 @@ export default function StudentLayout({ children, title }: { children: ReactNode
             <button 
               onClick={toggleTheme}
               className="p-2 text-on-surface-variant hover:bg-surface-container rounded-full transition-colors w-10 h-10 flex items-center justify-center"
+              title="Toggle theme"
             >
               <span className="material-symbols-outlined text-[20px]">{theme === 'light' ? 'dark_mode' : 'light_mode'}</span>
+            </button>
+            <button
+              onClick={() => setLowBandwidth((value) => !value)}
+              className={`p-2 rounded-full transition-colors w-10 h-10 flex items-center justify-center ${lowBandwidth ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:bg-surface-container'}`}
+              title="Low-bandwidth mode"
+            >
+              <WifiOff size={20} />
             </button>
             <button onClick={() => navigate('/notifications')} className="p-2 text-on-surface-variant hover:bg-surface-container rounded-full transition-colors relative">
                {unreadCount > 0 && (

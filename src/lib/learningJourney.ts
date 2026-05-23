@@ -76,6 +76,13 @@ export interface JourneyModule {
   dueAt?: string;
   antiCheatEnabled?: boolean;
   recordFirstAttemptOnly?: boolean;
+  attemptPolicy?: {
+    maxAttempts: number;
+    scoreMode: 'first' | 'highest' | 'latest';
+    showAnswersAfterSubmit: boolean;
+    timeLimitMinutes: number;
+    randomizeQuestions: boolean;
+  };
   authorName?: string;
   authorEmail?: string;
 }

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { addDoc, collection, onSnapshot, query, serverTimestamp, where } from 'firebase/firestore';
-import { ClipboardList, Plus } from 'lucide-react';
+import { addDoc, collection, doc, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import { CheckCircle2, ClipboardList, MessageSquare, Plus, RotateCcw } from 'lucide-react';
 import InstructorLayout from '../components/InstructorLayout';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
@@ -10,6 +10,8 @@ export default function InstructorAssignments() {
   const { user } = useAuth();
   const [classes, setClasses] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
+  const [submissions, setSubmissions] = useState<any[]>([]);
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, { grade: string; comment: string }>>({});
   const [draft, setDraft] = useState({
     title: '',
     instructions: '',
@@ -29,13 +31,48 @@ export default function InstructorAssignments() {
       setDraft((current) => ({ ...current, classId: current.classId || rows[0]?.id || '' }));
     });
     const unsubAssignments = onSnapshot(query(collection(db, 'assignments'), where('instructorId', '==', user.uid)), (snapshot) => {
-      setAssignments(snapshot.docs.map((assignmentDoc) => ({ id: assignmentDoc.id, ...assignmentDoc.data() })));
+      const rows = snapshot.docs.map((assignmentDoc) => ({ id: assignmentDoc.id, ...assignmentDoc.data() }));
+      setAssignments(rows);
+    });
+    const unsubSubmissions = onSnapshot(collection(db, 'assignmentSubmissions'), (snapshot) => {
+      setSubmissions(snapshot.docs.map((submissionDoc) => ({ id: submissionDoc.id, ...submissionDoc.data() })));
     });
     return () => {
       unsubClasses();
       unsubAssignments();
+      unsubSubmissions();
     };
   }, [user]);
+
+  const reviewSubmission = async (submission: any, status: 'graded' | 'returned' | 'complete') => {
+    const draftReview = reviewDrafts[submission.id] || { grade: submission.grade || '', comment: submission.comment || '' };
+    await updateDoc(doc(db, 'assignmentSubmissions', submission.id), {
+      grade: draftReview.grade,
+      comment: draftReview.comment,
+      status,
+      reviewedBy: user?.uid || '',
+      reviewedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    try {
+      await createNotification({
+        title: `Assignment feedback: ${submission.assignmentTitle}`,
+        body: status === 'returned'
+          ? 'Your instructor returned this assignment for revision.'
+          : status === 'complete'
+            ? 'Your instructor marked this assignment complete.'
+            : 'Your instructor posted feedback or a grade.',
+        type: 'assignment_feedback',
+        targetLink: '/student/todo',
+        recipientIds: [submission.userId],
+        classId: submission.classId,
+        createdBy: user?.uid,
+        createdByEmail: user?.email,
+      });
+    } catch (error) {
+      console.warn('Assignment feedback notification was not sent', error);
+    }
+  };
 
   const createAssignment = async () => {
     if (!user || !draft.title.trim() || !draft.classId) return;
@@ -113,13 +150,64 @@ export default function InstructorAssignments() {
         </section>
 
         <section className="space-y-3">
-          {assignments.map((assignment) => (
+          {assignments.map((assignment) => {
+            const assignmentSubmissions = submissions.filter((submission) => submission.assignmentId === assignment.id);
+            return (
             <article key={assignment.id} className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-sm">
               <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">{assignment.dueAt ? `Due ${new Date(assignment.dueAt).toLocaleString()}` : 'No due date'}</p>
               <h2 className="font-extrabold text-on-surface">{assignment.title}</h2>
               <p className="text-sm text-on-surface-variant mt-1">{assignment.instructions}</p>
+              <div className="mt-4 space-y-3">
+                {assignmentSubmissions.map((submission) => {
+                  const draftReview = reviewDrafts[submission.id] || { grade: submission.grade || '', comment: submission.comment || '' };
+                  return (
+                    <div key={submission.id} className="rounded-2xl border border-outline-variant/40 bg-surface-container/30 p-4">
+                      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">{submission.status || 'submitted'} / {submission.type}</p>
+                          <h3 className="font-extrabold text-on-surface mt-1">{submission.studentName || submission.studentEmail}</h3>
+                          <p className="text-sm text-on-surface-variant mt-2 break-words">{submission.content}</p>
+                        </div>
+                        <div className="w-full lg:w-96 space-y-2">
+                          <input
+                            value={draftReview.grade}
+                            onChange={(event) => setReviewDrafts((drafts) => ({ ...drafts, [submission.id]: { ...draftReview, grade: event.target.value } }))}
+                            placeholder="Grade or score"
+                            className="input"
+                          />
+                          <textarea
+                            value={draftReview.comment}
+                            onChange={(event) => setReviewDrafts((drafts) => ({ ...drafts, [submission.id]: { ...draftReview, comment: event.target.value } }))}
+                            rows={3}
+                            placeholder="Feedback, revision notes, or completion comment"
+                            className="input resize-none"
+                          />
+                          <div className="grid grid-cols-3 gap-2">
+                            <button onClick={() => reviewSubmission(submission, 'graded')} className="rounded-xl bg-primary text-on-primary px-3 py-2 text-xs font-bold inline-flex items-center justify-center gap-1">
+                              <MessageSquare size={13} />
+                              Grade
+                            </button>
+                            <button onClick={() => reviewSubmission(submission, 'returned')} className="rounded-xl bg-amber-500/10 text-amber-700 px-3 py-2 text-xs font-bold inline-flex items-center justify-center gap-1">
+                              <RotateCcw size={13} />
+                              Return
+                            </button>
+                            <button onClick={() => reviewSubmission(submission, 'complete')} className="rounded-xl bg-emerald-500/10 text-emerald-700 px-3 py-2 text-xs font-bold inline-flex items-center justify-center gap-1">
+                              <CheckCircle2 size={13} />
+                              Done
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {assignmentSubmissions.length === 0 && (
+                  <p className="rounded-xl bg-surface-container/30 border border-outline-variant/30 px-4 py-3 text-xs font-bold text-on-surface-variant/60">No submissions yet.</p>
+                )}
+              </div>
             </article>
-          ))}
+            );
+          })}
         </section>
       </div>
     </InstructorLayout>
