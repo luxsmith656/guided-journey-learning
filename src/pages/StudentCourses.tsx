@@ -16,6 +16,7 @@ import {
   Search,
 } from 'lucide-react';
 import StudentLayout from '../components/StudentLayout';
+import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
 import { getSubjectModules, getTopicModules, JourneyModule, journeyModules, journeySubjects } from '../lib/learningJourney';
 
@@ -28,10 +29,12 @@ const statusLabel = {
 
 export default function StudentCourses() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [selectedSubjectId, setSelectedSubjectId] = useState(journeySubjects[0].id);
   const [selectedTopicId, setSelectedTopicId] = useState(journeySubjects[0].topics[0].id);
   const [searchTerm, setSearchTerm] = useState('');
   const [remoteModules, setRemoteModules] = useState<JourneyModule[]>([]);
+  const [completedModuleIds, setCompletedModuleIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const modulesQuery = query(collection(db, 'modules'), where('isPublished', '==', true));
@@ -49,6 +52,7 @@ export default function StudentCourses() {
           status: 'available',
           progress: 0,
           lessonBlocks: data.lessonBlocks || [],
+          prerequisiteModuleIds: data.prerequisiteModuleIds || [],
           resources: data.resources?.map((resource: any, index: number) => ({
             id: resource.id || `${moduleDoc.id}-resource-${index}`,
             type: resource.type || 'activity',
@@ -68,6 +72,18 @@ export default function StudentCourses() {
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const progressQuery = query(collection(db, 'moduleProgress'), where('userId', '==', user.uid), where('status', '==', 'completed'));
+    const unsubscribe = onSnapshot(progressQuery, (snapshot) => {
+      setCompletedModuleIds(new Set(snapshot.docs.map((progressDoc) => progressDoc.data().moduleId).filter(Boolean)));
+    }, (error) => {
+      console.warn('Unable to load module completion gates', error);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   const selectedSubject = journeySubjects.find((subject) => subject.id === selectedSubjectId) || journeySubjects[0];
   const selectedTopic = selectedSubject.topics.find((topic) => topic.id === selectedTopicId) || selectedSubject.topics[0];
@@ -263,7 +279,8 @@ export default function StudentCourses() {
                   </div>
                 ) : (
                   topicModules.map((module, index) => {
-                    const isLocked = module.status === 'locked';
+                    const missingPrerequisite = module.prerequisiteModuleIds?.some((id) => !completedModuleIds.has(id));
+                    const isLocked = module.status === 'locked' || !!missingPrerequisite;
                     return (
                       <article
                         key={module.id}
@@ -289,7 +306,7 @@ export default function StudentCourses() {
                             onClick={() => openModule(module.id, isLocked)}
                             className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-on-primary px-5 py-3 text-sm font-bold disabled:bg-surface-container disabled:text-on-surface-variant/40"
                           >
-                            {isLocked ? 'Complete previous' : 'Start module'}
+                            {isLocked ? 'Pass previous final' : module.progress > 0 ? 'Resume module' : 'Start module'}
                             {!isLocked && <ArrowRight size={16} />}
                           </button>
                         </div>

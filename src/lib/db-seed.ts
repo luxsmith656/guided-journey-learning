@@ -105,6 +105,11 @@ export async function seedDatabase() {
       acc[question.stem] = generateStableId(question.stem);
       return acc;
     }, {});
+    const questionById = SEED_QUESTIONS.reduce<Record<string, any>>((acc, question) => {
+      const id = generateStableId(question.stem);
+      acc[id] = { ...question, id };
+      return acc;
+    }, {});
 
     // 6. Seed Starter Modules
     const starterModules = [
@@ -244,7 +249,53 @@ export async function seedDatabase() {
 
     for (const mod of starterModules) {
       try {
-        await setDoc(doc(db, 'modules', mod.id), mod, { merge: true });
+        const linkedQuestions = [
+          ...(mod.checkQuestionIds || []),
+          ...(mod.challengeQuestionIds || [])
+        ].map((questionId) => questionById[questionId]).filter(Boolean);
+
+        const seededParts = [
+          {
+            id: `${mod.id}-part-1`,
+            title: 'Part 1: Read and learn',
+            objective: mod.description,
+            textbookSection: {
+              title: mod.resources.find((resource: any) => resource.type === 'textbook')?.title || `${mod.title} textbook reading`,
+              body: mod.lessonBlocks.map((block: any) => block.content).join('\n\n'),
+              estimatedReadMinutes: 8
+            },
+            lessonBlocks: mod.lessonBlocks,
+            miniQuiz: linkedQuestions.slice(0, 1)
+          },
+          {
+            id: `${mod.id}-part-2`,
+            title: 'Part 2: Apply and check',
+            objective: `Apply ${mod.title} to LET-style decisions.`,
+            textbookSection: {
+              title: `${mod.title}: applied reading`,
+              body: 'Use the concept in a realistic board-exam situation. First, identify the skill being tested. Next, remove answers that are unrelated, too broad, or unsupported. Finally, choose the option that best matches the principle from the lesson.',
+              estimatedReadMinutes: 7
+            },
+            lessonBlocks: [
+              { type: 'heading', content: 'Apply the idea before taking the final exam' },
+              { type: 'text', content: 'This part turns the reading into practice. Learners should explain why the correct answer fits and why each distractor fails.' },
+              { type: 'callout', content: 'A module should not unlock completion until the learner passes the final exam gate.' }
+            ],
+            miniQuiz: linkedQuestions.slice(1, 2),
+            activity: {
+              title: 'Explain the distractor',
+              prompt: 'Choose one wrong option and write why it is tempting but incorrect.'
+            }
+          }
+        ];
+
+        const finalExam = linkedQuestions.slice(1).length ? linkedQuestions.slice(1) : linkedQuestions;
+
+        await setDoc(doc(db, 'modules', mod.id), {
+          ...mod,
+          parts: seededParts,
+          finalExam
+        }, { merge: true });
         console.log(`Seeded module: ${mod.title}`);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `modules/${mod.id}`);

@@ -38,7 +38,11 @@ export const TEXTBOOKS = [
     level: 'Core',
     chapter: 'Chapter 2',
     isPublished: true,
-    offlineReady: true
+    offlineReady: true,
+    sections: [
+      { title: 'Reading for Purpose', minutes: 8, body: 'Identify the question type before reading the full passage.' },
+      { title: 'Evidence Beats Familiarity', minutes: 10, body: 'Reject answers that repeat words but change the supported idea.' }
+    ]
   },
   {
     id: 'book_profed_assessment_alignment',
@@ -52,7 +56,11 @@ export const TEXTBOOKS = [
     level: 'Teaching Practice',
     chapter: 'Chapter 5',
     isPublished: true,
-    offlineReady: true
+    offlineReady: true,
+    sections: [
+      { title: 'Outcomes First', minutes: 9, body: 'Match assessments to the verb and performance named in the learning outcome.' },
+      { title: 'Formative Evidence', minutes: 7, body: 'Use checks during learning before making final achievement judgments.' }
+    ]
   },
   {
     id: 'book_profed_child_development',
@@ -66,7 +74,11 @@ export const TEXTBOOKS = [
     level: 'Teaching Practice',
     chapter: 'Chapter 3',
     isPublished: true,
-    offlineReady: true
+    offlineReady: true,
+    sections: [
+      { title: 'Piaget and Cognitive Readiness', minutes: 8, body: 'Match classroom tasks to learners cognitive development.' },
+      { title: 'Erikson and Identity', minutes: 8, body: 'Use psychosocial stages to interpret learner needs.' }
+    ]
   },
   {
     id: 'book_major_math_number_sense',
@@ -80,7 +92,11 @@ export const TEXTBOOKS = [
     level: 'Specialization',
     chapter: 'Chapter 1',
     isPublished: true,
-    offlineReady: true
+    offlineReady: true,
+    sections: [
+      { title: 'Label the Quantities', minutes: 8, body: 'Name units before writing a proportion.' },
+      { title: 'Estimate Before Solving', minutes: 6, body: 'Predict whether an answer should be larger or smaller before calculating.' }
+    ]
   }
 ];
 

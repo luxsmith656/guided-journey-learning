@@ -18,6 +18,7 @@ interface Textbook {
   chapter: string;
   isPublished: boolean;
   offlineReady: boolean;
+  sections?: { title: string; minutes: number; body: string }[];
 }
 
 const categoryLabels: Record<string, string> = {
@@ -136,6 +137,16 @@ export default function TextbookLibrary() {
                   <h2 className="font-headline font-extrabold text-lg leading-tight text-on-surface">{book.title}</h2>
                   <p className="text-xs text-on-surface-variant/60 mt-1">{book.author}</p>
                   <p className="text-sm text-on-surface-variant mt-4 leading-relaxed">{book.description}</p>
+                  {book.sections && book.sections.length > 0 && (
+                    <div className="mt-4 space-y-2">
+                      {book.sections.slice(0, 2).map((section) => (
+                        <div key={section.title} className="rounded-xl bg-surface-container/50 border border-outline-variant/30 p-3">
+                          <p className="text-xs font-extrabold text-on-surface">{section.title}</p>
+                          <p className="text-[10px] text-on-surface-variant/60 mt-1">{section.minutes} min / {section.body}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="mt-5 pt-4 border-t border-outline-variant/40 flex items-center justify-between gap-3">
