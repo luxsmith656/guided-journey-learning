@@ -1,87 +1,181 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenAI } from '@google/genai';
+
+const AI_GATEWAY = 'https://ai.gateway.lovable.dev/v1/chat/completions';
+const DEFAULT_MODEL = 'google/gemini-3-flash-preview';
+
+async function callAI(body: any) {
+  const apiKey = process.env.LOVABLE_API_KEY;
+  if (!apiKey) throw new Error('LOVABLE_API_KEY is not configured');
+  const res = await fetch(AI_GATEWAY, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: DEFAULT_MODEL, ...body }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    const err: any = new Error(`AI gateway ${res.status}: ${text}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: '2mb' }));
 
-  // Init Gemini
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-  // API route for AI question drafting
-  app.post('/api/draft-questions', async (req, res) => {
+  // AI question drafting (structured output via tool calling)
+  app.post('/api/draft-questions', async (req: any, res: any) => {
     try {
-      const { topic, difficulty, count = 3 } = req.body;
-      
-      const prompt = `You are an expert exam setter for the board exam (LET). 
-Create ${count} multiple choice questions about "${topic}" at a ${difficulty} difficulty level.
-Return JSON ONLY, matching exactly this format:
-[
-  {
-    "stem": "The question text?",
-    "options": [
-      { "id": "A", "text": "Option A" },
-      { "id": "B", "text": "Option B" },
-      { "id": "C", "text": "Option C" },
-      { "id": "D", "text": "Option D" }
-    ],
-    "correctOptionId": "A",
-    "explanation": "Why this is correct."
-  }
-]`;
+      const { topic, difficulty = 'Average', count = 5 } = req.body || {};
+      if (!topic) return res.status(400).json({ success: false, error: 'topic required' });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
+      const data = await callAI({
+        messages: [
+          { role: 'system', content: 'You are an expert item writer for the Philippine Licensure Examination for Teachers (LET). Generate high-quality, board-exam-grade multiple choice questions.' },
+          { role: 'user', content: `Generate ${count} ${difficulty} difficulty LET questions about: ${topic}` },
+        ],
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'return_questions',
+            description: 'Return generated LET questions',
+            parameters: {
+              type: 'object',
+              properties: {
+                questions: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      stem: { type: 'string' },
+                      options: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            id: { type: 'string', enum: ['A', 'B', 'C', 'D'] },
+                            text: { type: 'string' },
+                          },
+                          required: ['id', 'text'],
+                          additionalProperties: false,
+                        },
+                      },
+                      correctOptionId: { type: 'string', enum: ['A', 'B', 'C', 'D'] },
+                      explanation: { type: 'string' },
+                    },
+                    required: ['stem', 'options', 'correctOptionId', 'explanation'],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ['questions'],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: 'function', function: { name: 'return_questions' } },
       });
 
-      const text = response.text || "[]";
-      // Find JSON block
-      const jsonStr = text.replace(/```(?:json)?\n?/g, '').split('```')[0].trim();
-      const parsed = JSON.parse(jsonStr);
-      
-      res.json({ success: true, questions: parsed });
+      const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+      const args = toolCall ? JSON.parse(toolCall.function.arguments) : { questions: [] };
+      res.json({ success: true, questions: args.questions });
     } catch (error: any) {
-      console.error('Gemini API Error:', error);
-      res.status(500).json({ success: false, error: error.message });
+      console.error('draft-questions error:', error);
+      const status = error.status === 429 || error.status === 402 ? error.status : 500;
+      const msg = error.status === 429 ? 'Rate limit exceeded, try again shortly.'
+        : error.status === 402 ? 'AI credits exhausted.'
+        : error.message;
+      res.status(status).json({ success: false, error: msg });
     }
   });
 
-  // API route for AI explanation
-  app.post('/api/explain-answer', async (req, res) => {
+  // AI explanation tutor
+  app.post('/api/explain-answer', async (req: any, res: any) => {
     try {
-      const { questionTitle, options, studentAnswerId, correctAnswerId } = req.body;
+      const { questionTitle, options = [], studentAnswerId, correctAnswerId } = req.body || {};
       const studentOpt = options.find((o: any) => o.id === studentAnswerId);
       const correctOpt = options.find((o: any) => o.id === correctAnswerId);
+      const isCorrect = studentAnswerId === correctAnswerId;
 
-      const prompt = `You are an encouraging and insightful tutor helping a student prepare for the Licensure Examination for Teachers (LET).
-The student encountered this multiple choice question:
+      const prompt = `You are an encouraging LET (Licensure Examination for Teachers) tutor.
 Question: "${questionTitle}"
-
 Options:
 ${options.map((o: any) => `${o.id}: ${o.text}`).join('\n')}
+Correct answer: ${correctAnswerId} (${correctOpt?.text || ''})
+Student answered: ${studentAnswerId ?? 'nothing'} (${studentOpt?.text || ''})
 
-The correct answer is ${correctAnswerId} (${correctOpt?.text || ''}).
-The student answered ${studentAnswerId} (${studentOpt?.text || ''}).
+${isCorrect
+  ? 'Reinforce why the correct answer is right and add one deeper teaching insight.'
+  : 'Gently explain the misconception in the student\'s answer, then teach why the correct answer is right.'}
+Keep the explanation under 4 short sentences. Pedagogical, warm, no markdown.`;
 
-Briefly explain:
-1. Why the correct answer is right.
-2. Why the student's answer is incorrect.
-Keep the explanation under 3-4 sentences, encouraging, pedagogical, and easy to understand. Do not use markdown.`;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
+      const data = await callAI({
+        messages: [{ role: 'user', content: prompt }],
       });
-
-      res.json({ success: true, explanation: response.text });
+      const explanation = data.choices?.[0]?.message?.content ?? 'No explanation generated.';
+      res.json({ success: true, explanation });
     } catch (error: any) {
-      console.error('Gemini Explanation Error:', error);
-      res.status(500).json({ success: false, error: error.message });
+      console.error('explain-answer error:', error);
+      const status = error.status === 429 || error.status === 402 ? error.status : 500;
+      const msg = error.status === 429 ? 'Rate limit exceeded, try again shortly.'
+        : error.status === 402 ? 'AI credits exhausted.'
+        : error.message;
+      res.status(status).json({ success: false, error: msg });
+    }
+  });
+
+  // Adaptive learning: compute weak skills & suggested next topics from a learner profile
+  app.post('/api/adaptive-recommend', async (req: any, res: any) => {
+    try {
+      const { mastery = {}, recentAttempts = [], goals = '' } = req.body || {};
+      const data = await callAI({
+        messages: [
+          { role: 'system', content: 'You are an adaptive learning engine for LET review. Given a learner mastery map and recent attempt history, recommend the next 3-5 topics to study and why.' },
+          { role: 'user', content: `Mastery map: ${JSON.stringify(mastery)}\nRecent attempts: ${JSON.stringify(recentAttempts).slice(0, 4000)}\nGoals: ${goals}` },
+        ],
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'return_plan',
+            description: 'Return adaptive study plan',
+            parameters: {
+              type: 'object',
+              properties: {
+                weaknesses: { type: 'array', items: { type: 'string' } },
+                strengths: { type: 'array', items: { type: 'string' } },
+                recommendations: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      topic: { type: 'string' },
+                      reason: { type: 'string' },
+                      priority: { type: 'string', enum: ['high', 'medium', 'low'] },
+                    },
+                    required: ['topic', 'reason', 'priority'],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ['weaknesses', 'strengths', 'recommendations'],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: 'function', function: { name: 'return_plan' } },
+      });
+      const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+      const args = toolCall ? JSON.parse(toolCall.function.arguments) : null;
+      res.json({ success: true, plan: args });
+    } catch (error: any) {
+      console.error('adaptive-recommend error:', error);
+      const status = error.status === 429 || error.status === 402 ? error.status : 500;
+      res.status(status).json({ success: false, error: error.message });
     }
   });
 
@@ -95,7 +189,7 @@ Keep the explanation under 3-4 sentences, encouraging, pedagogical, and easy to 
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*', (_req: any, res: any) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }

@@ -44,7 +44,7 @@ export default function Flashcards() {
         // 1. Get focus from user profile
         if (user.selectedFocus) {
            const cats = await getDocs(collection(db, 'categories'));
-           const matched = cats.docs.find(d => d.id === user.selectedFocus || d.data().title.toLowerCase().includes(user.selectedFocus.replace('_', ' ')));
+           const matched = cats.docs.find(d => d.id === user.selectedFocus || d.data().title.toLowerCase().includes((user.selectedFocus as string).replace('_', ' ')));
            if (matched) focusCategoryId = matched.id;
         }
 
