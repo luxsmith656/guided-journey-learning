@@ -35,6 +35,8 @@ import ChooseLearningMode from './pages/ChooseLearningMode';
 import ChooseFocus from './pages/ChooseFocus';
 import JoinClass from './pages/JoinClass';
 import Flashcards from './pages/Flashcards';
+import ProfileSettings from './pages/ProfileSettings';
+import StudentTodo from './pages/StudentTodo';
 import { SidebarProvider } from './context/SidebarContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { BrandingProvider, useBranding } from './context/BrandingContext';
@@ -121,12 +123,12 @@ function AppContent() {
             
             {/* Admin Routes */}
             <Route path="/admin/dashboard" element={<ProtectedRoute role="admin"><AdminDashboard /></ProtectedRoute>} />
-            <Route path="/admin/categories" element={<ProtectedRoute role="admin"><CategoryManagement /></ProtectedRoute>} />
-            <Route path="/admin/question/bank" element={<ProtectedRoute role="admin"><QuestionBank /></ProtectedRoute>} />
-            <Route path="/admin/question/new" element={<ProtectedRoute role="admin"><EditQuestion /></ProtectedRoute>} />
-            <Route path="/admin/question/edit/:id" element={<ProtectedRoute role="admin"><EditQuestion /></ProtectedRoute>} />
-            <Route path="/admin/bulk-upload" element={<ProtectedRoute role="admin"><BulkUpload /></ProtectedRoute>} />
-            <Route path="/admin/question/detail" element={<ProtectedRoute role="admin"><QuestionDetail /></ProtectedRoute>} />
+            <Route path="/admin/categories" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />
+            <Route path="/admin/question/bank" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />
+            <Route path="/admin/question/new" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />
+            <Route path="/admin/question/edit/:id" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />
+            <Route path="/admin/bulk-upload" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />
+            <Route path="/admin/question/detail" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />
             <Route path="/admin/curriculum-settings" element={<ProtectedRoute role="admin"><CurriculumSettings /></ProtectedRoute>} />
             <Route path="/admin/analytics" element={<ProtectedRoute role="admin"><Analytics /></ProtectedRoute>} />
             <Route path="/admin/users" element={<ProtectedRoute role="admin"><Users /></ProtectedRoute>} />
@@ -134,7 +136,7 @@ function AppContent() {
             <Route path="/admin/modules" element={<ProtectedRoute role="admin"><InstructorModules /></ProtectedRoute>} />
             <Route path="/admin/notifications" element={<ProtectedRoute role="admin"><Notifications /></ProtectedRoute>} />
             <Route path="/admin/activity-logs" element={<ProtectedRoute role="admin"><ActivityLogs /></ProtectedRoute>} />
-            <Route path="/admin/bulk-upload" element={<ProtectedRoute role="admin"><BulkUpload /></ProtectedRoute>} />
+            <Route path="/admin/bulk-upload" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />
             <Route path="/admin/sync" element={<ProtectedRoute role="admin"><SyncCenter /></ProtectedRoute>} />
             <Route path="/admin/settings" element={<ProtectedRoute role="admin"><Settings /></ProtectedRoute>} />
 
@@ -155,6 +157,7 @@ function AppContent() {
             <Route path="/loading" element={<Loading />} />
             <Route path="/student/dashboard" element={<ProtectedRoute role="student"><StudentDashboard /></ProtectedRoute>} />
             <Route path="/student/courses" element={<ProtectedRoute role="student"><StudentCourses /></ProtectedRoute>} />
+            <Route path="/student/todo" element={<ProtectedRoute role="student"><StudentTodo /></ProtectedRoute>} />
             <Route path="/onboarding" element={<ProtectedRoute role="student"><Onboarding /></ProtectedRoute>} />
             <Route path="/choose-learning-mode" element={<ProtectedRoute role="student"><ChooseLearningMode /></ProtectedRoute>} />
             <Route path="/choose-focus" element={<ProtectedRoute role="student"><ChooseFocus /></ProtectedRoute>} />
@@ -167,6 +170,8 @@ function AppContent() {
             <Route path="/quiz-results" element={<ProtectedRoute role="student"><QuizResults /></ProtectedRoute>} />
             <Route path="/exam" element={<ProtectedRoute role="student"><ExamSimulation /></ProtectedRoute>} />
             <Route path="/flashcards" element={<ProtectedRoute role="student"><Flashcards /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
+            <Route path="/profile" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
             
             <Route path="*" element={<Navigate to="/sign-in" replace />} />
         </Routes>

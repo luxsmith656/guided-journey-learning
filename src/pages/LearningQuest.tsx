@@ -34,6 +34,10 @@ interface QuestProgress {
   phase: QuestPhase;
   partScores: Record<string, number>;
   finalScore?: number;
+  firstFinalScore?: number;
+  latestFinalScore?: number;
+  finalAttemptCount?: number;
+  timeSpentSeconds?: number;
   failedAttempts?: number;
   mustReread?: boolean;
   proctorWarnings?: number;
@@ -82,6 +86,11 @@ function normalizeFirestoreModule(id: string, data: any): JourneyModule {
     questions: [],
     parts: data.parts || undefined,
     finalExam: data.finalExam || undefined,
+    publishScope: data.publishScope || 'public',
+    classIds: data.classIds || [],
+    dueAt: data.dueAt || '',
+    antiCheatEnabled: data.antiCheatEnabled ?? true,
+    recordFirstAttemptOnly: data.recordFirstAttemptOnly ?? true,
   };
 }
 
@@ -106,6 +115,8 @@ export default function LearningQuest() {
   const [appealSent, setAppealSent] = useState(false);
   const [proctorMessage, setProctorMessage] = useState('');
   const [loading, setLoading] = useState(true);
+  const [sessionStartedAt] = useState(Date.now());
+  const [nowTick, setNowTick] = useState(Date.now());
 
   const parts = useMemo(() => getModuleParts(module), [module]);
   const baseFinalExam = useMemo(() => getModuleFinalExam(module), [module]);
@@ -114,9 +125,13 @@ export default function LearningQuest() {
   const currentMiniQuestion = currentPart?.miniQuiz?.[0];
   const finalAnsweredCount = finalExam.filter((question) => !!finalAnswers[question.id]?.trim()).length;
   const finalScorePercent = progress.finalScore ?? 0;
-  const examLocked = !!progress.examLockedUntil && Date.now() < progress.examLockedUntil;
-  const examLockMinutesLeft = examLocked ? Math.max(1, Math.ceil(((progress.examLockedUntil || 0) - Date.now()) / 60000)) : 0;
+  const examLocked = !!progress.examLockedUntil && nowTick < progress.examLockedUntil;
+  const examLockSecondsLeft = examLocked ? Math.max(0, Math.ceil(((progress.examLockedUntil || 0) - nowTick) / 1000)) : 0;
   const allPartsCompleted = parts.every((part) => progress.partScores[part.id] !== undefined);
+  const antiCheatEnabled = (module as any).antiCheatEnabled !== false;
+  const recordFirstAttemptOnly = (module as any).recordFirstAttemptOnly !== false;
+  const moduleDueAt = (module as any).dueAt ? new Date((module as any).dueAt) : null;
+  const modulePastDue = !!moduleDueAt && moduleDueAt.getTime() < Date.now() && progress.status !== 'completed';
 
   const progressDocId = user ? `${user.uid}_${module.id}` : '';
   const localProgressKey = `let-mastery-progress:${module.id}`;
@@ -148,6 +163,10 @@ export default function LearningQuest() {
           phase: nextProgress.phase,
           partScores: nextProgress.partScores,
           finalScore: nextProgress.finalScore ?? null,
+          firstFinalScore: nextProgress.firstFinalScore ?? null,
+          latestFinalScore: nextProgress.latestFinalScore ?? nextProgress.finalScore ?? null,
+          finalAttemptCount: nextProgress.finalAttemptCount || 0,
+          timeSpentSeconds: nextProgress.timeSpentSeconds || 0,
           failedAttempts: nextProgress.failedAttempts || 0,
           mustReread: !!nextProgress.mustReread,
           proctorWarnings: nextProgress.proctorWarnings || 0,
@@ -214,6 +233,10 @@ export default function LearningQuest() {
               phase: data.phase || 'intro',
               partScores: data.partScores || {},
               finalScore: data.finalScore ?? undefined,
+              firstFinalScore: data.firstFinalScore ?? undefined,
+              latestFinalScore: data.latestFinalScore ?? undefined,
+              finalAttemptCount: data.finalAttemptCount || 0,
+              timeSpentSeconds: data.timeSpentSeconds || 0,
               failedAttempts: data.failedAttempts || 0,
               mustReread: !!data.mustReread,
               proctorWarnings: data.proctorWarnings || 0,
@@ -252,10 +275,10 @@ export default function LearningQuest() {
         return;
       }
       if (examLocked) {
-        setProctorMessage(`Final exam is locked for ${examLockMinutesLeft} more minute${examLockMinutesLeft === 1 ? '' : 's'} after repeated warnings.`);
+        setProctorMessage(`Final exam is locked for ${formatDuration(examLockSecondsLeft)} after repeated warnings.`);
         return;
       }
-      await requestExamFullscreen();
+      if (antiCheatEnabled) await requestExamFullscreen();
       await prepareFinalExam(!!progress.mustReread || (progress.failedAttempts || 0) > 0);
     }
     persistProgress({ ...progress, phase, status: phase === 'complete' ? 'completed' : 'in_progress' });
@@ -398,6 +421,7 @@ export default function LearningQuest() {
     }
     setFinalGrades(grades);
     const score = Math.round(Object.values(grades).reduce((sum, grade) => sum + grade.score, 0) / Math.max(finalExam.length, 1));
+    const officialFirstScore = progress.firstFinalScore ?? score;
     const status = score >= FINAL_PASSING_SCORE ? 'completed' : 'in_progress';
     const phase: QuestPhase = score >= FINAL_PASSING_SCORE ? 'complete' : 'read';
 
@@ -405,7 +429,11 @@ export default function LearningQuest() {
       ...progress,
       phase,
       currentPartIndex: score >= FINAL_PASSING_SCORE ? progress.currentPartIndex : 0,
-      finalScore: score,
+      finalScore: recordFirstAttemptOnly ? officialFirstScore : score,
+      firstFinalScore: officialFirstScore,
+      latestFinalScore: score,
+      finalAttemptCount: (progress.finalAttemptCount || 0) + 1,
+      timeSpentSeconds: (progress.timeSpentSeconds || 0) + Math.round((Date.now() - sessionStartedAt) / 1000),
       status,
       mustReread: score < FINAL_PASSING_SCORE,
       failedAttempts: score >= FINAL_PASSING_SCORE ? progress.failedAttempts || 0 : (progress.failedAttempts || 0) + 1,
@@ -512,10 +540,10 @@ export default function LearningQuest() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [progress.phase, currentMiniQuestion, selectedAnswer, writtenAnswer, finalAnswers, finalExam, lastFeedback]);
+  }, [progress.phase, currentMiniQuestion, selectedAnswer, writtenAnswer, finalAnswers, finalExam, lastFeedback, examLockSecondsLeft, antiCheatEnabled]);
 
   useEffect(() => {
-    if (progress.phase !== 'finalExam') return;
+    if (progress.phase !== 'finalExam' || !antiCheatEnabled) return;
 
     const warn = (reason: string) => {
       registerProctorWarning(reason);
@@ -551,7 +579,13 @@ export default function LearningQuest() {
       document.removeEventListener('paste', blockClipboard);
       document.removeEventListener('contextmenu', blockContextMenu);
     };
-  }, [progress.phase, progress.proctorWarnings, finalAnswers]);
+  }, [progress.phase, progress.proctorWarnings, finalAnswers, antiCheatEnabled]);
+
+  useEffect(() => {
+    if (!examLocked) return;
+    const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [examLocked]);
 
   const prepareFinalExam = async (fresh: boolean) => {
     if (!fresh) {
@@ -673,6 +707,17 @@ export default function LearningQuest() {
   const renderContent = () => {
     if (!currentPart && progress.phase !== 'finalExam' && progress.phase !== 'complete') {
       return <EmptyState onBack={() => navigate('/student/courses')} />;
+    }
+
+    if (modulePastDue) {
+      return (
+        <Card>
+          <HeaderKicker icon={Clock} label="Module closed" />
+          <h2 className="text-2xl font-extrabold font-headline text-on-surface">This module is past its due date.</h2>
+          <p className="text-on-surface-variant mt-3">Due date was {moduleDueAt?.toLocaleString()}. Ask your instructor if you need the module reopened.</p>
+          <button onClick={() => navigate('/student/todo')} className="mt-6 rounded-xl bg-primary text-on-primary px-6 py-3 font-bold">Back to To Do</button>
+        </Card>
+      );
     }
 
     switch (progress.phase) {
@@ -856,7 +901,13 @@ export default function LearningQuest() {
             {examLocked && (
               <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 mt-5 flex gap-3">
                 <Clock size={18} className="text-amber-700 shrink-0" />
-                <p className="font-bold text-amber-700">This exam is paused after repeated proctor warnings. Retry in about {examLockMinutesLeft} minute{examLockMinutesLeft === 1 ? '' : 's'}.</p>
+                <p className="font-bold text-amber-700">This exam is paused after repeated proctor warnings. Retry in {formatDuration(examLockSecondsLeft)}.</p>
+              </div>
+            )}
+
+            {recordFirstAttemptOnly && progress.firstFinalScore !== undefined && progress.status !== 'completed' && (
+              <div className="rounded-2xl border border-outline-variant/40 bg-surface-container p-4 mt-5">
+                <p className="text-sm font-bold text-on-surface">Official first attempt: {progress.firstFinalScore}%. Retakes are practice unless your instructor changes the class setting.</p>
               </div>
             )}
 
@@ -1009,6 +1060,13 @@ function normalizeOptions(question: JourneyQuestion) {
 function questionTypeLabel(question: JourneyQuestion) {
   const type = question.type || 'multiple_choice';
   return type.replace('_', ' ');
+}
+
+function formatDuration(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes <= 0) return `${seconds}s`;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 function toEmbeddableUrl(url: string) {

@@ -48,10 +48,33 @@ export default function InstructorClasses() {
     try {
       const byUid = query(collection(db, 'classes'), where('instructorId', '==', user.uid), where('status', '==', 'active'));
       const byEmail = query(collection(db, 'classes'), where('instructorEmail', '==', user.email), where('status', '==', 'active'));
-      const [uidSnap, emailSnap] = await Promise.all([getDocs(byUid), getDocs(byEmail)]);
+      const [uidSnap, emailSnap, enrollSnap, progressSnap] = await Promise.all([
+        getDocs(byUid),
+        getDocs(byEmail),
+        getDocs(collection(db, 'classEnrollments')),
+        getDocs(collection(db, 'moduleProgress')),
+      ]);
       const merged = new Map<string, any>();
       [...uidSnap.docs, ...emailSnap.docs].forEach(d => merged.set(d.id, {id: d.id, ...d.data()}));
-      setClasses(Array.from(merged.values()));
+      const enrollments = enrollSnap.docs.map(d => d.data());
+      const progressRows = progressSnap.docs.map(d => d.data());
+      setClasses(Array.from(merged.values()).map((classItem: any) => {
+        const studentIds = enrollments.filter((row: any) => row.classId === classItem.id).map((row: any) => row.studentId);
+        const relevantProgress = progressRows.filter((row: any) => {
+          const studentMatch = studentIds.length === 0 || studentIds.includes(row.userId);
+          const moduleMatch = !classItem.assignedModuleIds?.length || classItem.assignedModuleIds.includes(row.moduleId);
+          return studentMatch && moduleMatch;
+        });
+        const scoredRows = relevantProgress.filter((row: any) => row.finalScore != null || row.firstFinalScore != null);
+        return {
+          ...classItem,
+          studentCount: studentIds.length || classItem.studentCount || 0,
+          moduleCount: classItem.assignedModuleIds?.length || 0,
+          avgProgress: relevantProgress.length ? Math.round(relevantProgress.reduce((sum: number, row: any) => sum + (row.progressPercent || 0), 0) / relevantProgress.length) : 0,
+          avgScore: scoredRows.length ? Math.round(scoredRows.reduce((sum: number, row: any) => sum + (row.firstFinalScore ?? row.finalScore ?? 0), 0) / scoredRows.length) : 0,
+          warnings: relevantProgress.reduce((sum: number, row: any) => sum + (row.proctorWarnings || 0), 0),
+        };
+      }));
     } catch (e) {
       console.error(e);
     } finally {
@@ -170,6 +193,21 @@ export default function InstructorClasses() {
                        <Users size={16} className="text-on-surface-variant/40" />
                        {cls.studentCount} Enrolled
                      </span>
+                     <span className="text-xs font-black text-primary">{cls.moduleCount} modules</span>
+                   </div>
+                   <div className="grid grid-cols-3 gap-2 mt-5">
+                     <div className="rounded-xl bg-surface-container p-3 border border-outline-variant/20">
+                       <p className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant/40">Progress</p>
+                       <p className="font-black text-on-surface">{cls.avgProgress || 0}%</p>
+                     </div>
+                     <div className="rounded-xl bg-surface-container p-3 border border-outline-variant/20">
+                       <p className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant/40">Score</p>
+                       <p className="font-black text-on-surface">{cls.avgScore || 0}%</p>
+                     </div>
+                     <div className="rounded-xl bg-surface-container p-3 border border-outline-variant/20">
+                       <p className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant/40">Flags</p>
+                       <p className={`font-black ${(cls.warnings || 0) > 0 ? 'text-error' : 'text-on-surface'}`}>{cls.warnings || 0}</p>
+                     </div>
                    </div>
                  </div>
                  <div className="bg-surface-container/30 p-4 flex items-center justify-between">
@@ -183,6 +221,13 @@ export default function InstructorClasses() {
                      title="Copy Invite Link"
                    >
                      <Copy size={16} /> <span className="text-xs font-bold sm:hidden md:inline">Link</span>
+                   </button>
+                   <button
+                     onClick={() => navigate(`/instructor/grades?class=${cls.id}`)}
+                     className="p-2 bg-primary text-on-primary rounded-lg shadow-sm flex items-center gap-2"
+                     title="Open gradebook"
+                   >
+                     <ArrowRight size={16} /> <span className="text-xs font-bold sm:hidden md:inline">Grades</span>
                    </button>
                  </div>
                </div>

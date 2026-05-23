@@ -33,8 +33,9 @@ export default function StudentLayout({ children, title }: { children: ReactNode
   const navItems = [
     { name: 'Dashboard', path: '/student/dashboard', icon: LayoutDashboard },
     { name: 'My Courses', path: '/student/courses', icon: Library },
+    { name: 'To Do', path: '/student/todo', icon: CheckSquare },
     { name: 'Flashcards', path: '/flashcards', icon: BookOpen },
-    { name: 'Assessments', path: '/exam?type=mock', icon: CheckSquare },
+    { name: 'Assessments', path: '/exam?type=mock', icon: Target },
     { name: 'Performance', path: '/quiz-results', icon: BarChart },
   ];
 
@@ -124,7 +125,7 @@ export default function StudentLayout({ children, title }: { children: ReactNode
                <span className="absolute top-2 right-2 w-2 h-2 bg-error rounded-full pointer-events-none"></span>
                <Bell size={20} />
             </button>
-            <button onClick={() => navigate('/settings')} className="p-2 text-on-surface-variant hover:bg-surface-container rounded-full transition-colors hidden md:block">
+            <button onClick={() => navigate('/profile')} className="p-2 text-on-surface-variant hover:bg-surface-container rounded-full transition-colors hidden md:block">
               <Settings size={20} />
             </button>
             <button 

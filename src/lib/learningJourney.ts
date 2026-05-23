@@ -53,6 +53,13 @@ export interface JourneyModule {
   parts?: JourneyModulePart[];
   finalExam?: JourneyQuestion[];
   prerequisiteModuleIds?: string[];
+  publishScope?: 'public' | 'classes';
+  classIds?: string[];
+  dueAt?: string;
+  antiCheatEnabled?: boolean;
+  recordFirstAttemptOnly?: boolean;
+  authorName?: string;
+  authorEmail?: string;
 }
 
 export interface JourneyTopic {

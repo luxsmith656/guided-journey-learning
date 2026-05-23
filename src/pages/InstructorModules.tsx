@@ -15,7 +15,7 @@ import {
   Wand2,
   X,
 } from 'lucide-react';
-import { addDoc, collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from 'firebase/firestore';
 import DashboardLayout from '../components/DashboardLayout';
 import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
@@ -31,6 +31,13 @@ interface BuilderModule {
   level: number;
   duration: string;
   isPublished: boolean;
+  publishScope: 'public' | 'classes';
+  classIds: string[];
+  dueAt?: string;
+  antiCheatEnabled: boolean;
+  recordFirstAttemptOnly: boolean;
+  authorName?: string;
+  authorEmail?: string;
   parts: JourneyModulePart[];
   finalExam: JourneyQuestion[];
 }
@@ -76,6 +83,13 @@ const emptyModule: BuilderModule = {
   level: 1,
   duration: '45 min',
   isPublished: false,
+  publishScope: 'public',
+  classIds: [],
+  dueAt: '',
+  antiCheatEnabled: true,
+  recordFirstAttemptOnly: true,
+  authorName: '',
+  authorEmail: '',
   parts: [blankPart(0)],
   finalExam: [blankQuestion('final-q1')],
 };
@@ -90,6 +104,13 @@ function fromSeedModule(module: (typeof journeyModules)[number]): BuilderModule 
     level: module.level,
     duration: module.duration,
     isPublished: module.status !== 'locked',
+    publishScope: 'public',
+    classIds: [],
+    dueAt: '',
+    antiCheatEnabled: true,
+    recordFirstAttemptOnly: true,
+    authorName: 'Preset curriculum',
+    authorEmail: '',
     parts: module.parts?.length ? module.parts : [blankPart(0)],
     finalExam: module.finalExam?.length ? module.finalExam : module.questions.slice(0, 2),
   };
@@ -119,6 +140,13 @@ function fromFirestoreModule(id: string, data: any): BuilderModule {
     level: data.level || 1,
     duration: data.duration || '45 min',
     isPublished: data.isPublished ?? false,
+    publishScope: data.publishScope || (data.classIds?.length ? 'classes' : 'public'),
+    classIds: data.classIds || [],
+    dueAt: data.dueAt || '',
+    antiCheatEnabled: data.antiCheatEnabled ?? true,
+    recordFirstAttemptOnly: data.recordFirstAttemptOnly ?? true,
+    authorName: data.authorName || data.createdByName || data.instructorName || 'Instructor',
+    authorEmail: data.authorEmail || '',
     parts: data.parts?.length ? data.parts : [legacyPart],
     finalExam: data.finalExam?.length ? data.finalExam : [blankQuestion('final-q1')],
   };
@@ -136,6 +164,7 @@ type BuilderStep = typeof builderSteps[number]['id'];
 export default function InstructorModules() {
   const { user } = useAuth();
   const [modules, setModules] = useState<BuilderModule[]>(journeyModules.map(fromSeedModule));
+  const [classes, setClasses] = useState<any[]>([]);
   const [selectedModuleId, setSelectedModuleId] = useState(journeyModules[0].id);
   const [draft, setDraft] = useState<BuilderModule>(fromSeedModule(journeyModules[0]));
   const [activeStep, setActiveStep] = useState<BuilderStep>('outline');
@@ -174,6 +203,19 @@ export default function InstructorModules() {
     return () => unsubscribe();
   }, [selectedModuleId, isCreatingNew]);
 
+  useEffect(() => {
+    if (!user) return;
+    const unsubscribe = onSnapshot(collection(db, 'classes'), (snapshot) => {
+      const rows = snapshot.docs.map((classDoc) => ({ id: classDoc.id, ...classDoc.data() }));
+      setClasses(rows.filter((classItem: any) => (
+        user.role === 'admin' ||
+        classItem.instructorId === user.uid ||
+        classItem.instructorEmail === user.email
+      )));
+    });
+    return () => unsubscribe();
+  }, [user]);
+
   const selectedSubject = journeySubjects.find((subject) => subject.id === draft.subjectId) || journeySubjects[0];
   const activePart = draft.parts[Math.min(activePartIndex, Math.max(draft.parts.length - 1, 0))];
 
@@ -194,7 +236,7 @@ export default function InstructorModules() {
     });
   }, [modules, searchTerm, moduleFilter]);
 
-  const updateDraft = (field: keyof BuilderModule, value: string | number | boolean | JourneyModulePart[] | JourneyQuestion[]) => {
+  const updateDraft = (field: keyof BuilderModule, value: string | number | boolean | JourneyModulePart[] | JourneyQuestion[] | string[]) => {
     setDraft((current) => {
       if (field === 'subjectId') {
         const nextSubject = journeySubjects.find((subject) => subject.id === value) || journeySubjects[0];
@@ -206,6 +248,24 @@ export default function InstructorModules() {
 
   const updatePart = (patch: Partial<JourneyModulePart>) => {
     updateDraft('parts', draft.parts.map((part, index) => index === activePartIndex ? { ...part, ...patch } : part));
+  };
+
+  const updatePartAtIndex = (partIndex: number, patch: Partial<JourneyModulePart>) => {
+    updateDraft('parts', draft.parts.map((part, index) => index === partIndex ? { ...part, ...patch } : part));
+  };
+
+  const updateMiniQuestionAtPart = (partIndex: number, patch: Partial<JourneyQuestion>) => {
+    const part = draft.parts[partIndex];
+    const currentQuestion = part?.miniQuiz?.[0] || blankQuestion(`${part?.id || `part-${partIndex + 1}`}-q1`);
+    updatePartAtIndex(partIndex, { miniQuiz: [{ ...currentQuestion, ...patch }] });
+  };
+
+  const updateMiniOptionAtPart = (partIndex: number, optionId: string, text: string) => {
+    const part = draft.parts[partIndex];
+    const currentQuestion = part?.miniQuiz?.[0] || blankQuestion(`${part?.id || `part-${partIndex + 1}`}-q1`);
+    updateMiniQuestionAtPart(partIndex, {
+      options: currentQuestion.options.map((option) => option.id === optionId ? { ...option, text } : option),
+    });
   };
 
   const updatePartLessonBlock = (blockIndex: number, content: string) => {
@@ -274,6 +334,29 @@ export default function InstructorModules() {
 
   const addFinalQuestion = () => {
     updateDraft('finalExam', [...draft.finalExam, blankQuestion(`final-q${draft.finalExam.length + 1}`)]);
+  };
+
+  const deleteModule = async () => {
+    if (!draft.id || isCreatingNew) {
+      createNewDraft();
+      return;
+    }
+    if (journeyModules.some((module) => module.id === draft.id)) {
+      setToastMsg('Preset sample modules cannot be deleted. Create or edit your own module instead.');
+      setShowToast(true);
+      return;
+    }
+    if (!window.confirm(`Delete "${draft.title}"? This removes it from assigned classes and student journeys.`)) return;
+    try {
+      await deleteDoc(doc(db, 'modules', draft.id));
+      setToastMsg('Module deleted');
+      setShowToast(true);
+      createNewDraft();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `modules/${draft.id}`);
+      setToastMsg('Unable to delete module');
+      setShowToast(true);
+    }
   };
 
   const generateAIDraft = async () => {
@@ -389,7 +472,15 @@ export default function InstructorModules() {
       level: draft.level,
       duration: draft.duration,
       isPublished: draft.isPublished,
+      publishScope: draft.publishScope,
+      classIds: draft.publishScope === 'classes' ? draft.classIds : [],
+      dueAt: draft.dueAt || '',
+      antiCheatEnabled: draft.antiCheatEnabled,
+      recordFirstAttemptOnly: draft.recordFirstAttemptOnly,
       createdBy: user?.uid || 'instructor',
+      authorId: user?.uid || 'instructor',
+      authorName: user?.fullName || user?.email || 'Instructor',
+      authorEmail: user?.email || '',
       parts: draft.parts,
       finalExam: draft.finalExam,
       lessonBlocks: draft.parts.flatMap((part) => part.lessonBlocks),
@@ -514,6 +605,7 @@ export default function InstructorModules() {
                     >
                       <p className="font-extrabold text-on-surface leading-tight">{module.title}</p>
                       <p className="text-[11px] text-on-surface-variant/60 mt-1 line-clamp-2">{subject?.title || 'Subject'} / {topic?.title || 'Topic'}</p>
+                      <p className="text-[11px] text-on-surface-variant/50 mt-1 line-clamp-1">Author: {module.authorName || 'Instructor'}</p>
                       <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/40 mt-2">
                         {module.parts.length} parts / {module.finalExam.length} exam items / {module.isPublished ? 'Published' : 'Draft'}
                       </p>
@@ -556,12 +648,24 @@ export default function InstructorModules() {
                   <Save size={16} />
                   Save module
                 </button>
+                <button onClick={deleteModule} className="inline-flex items-center justify-center gap-2 rounded-xl bg-error/10 text-error px-5 py-3 font-bold text-sm border border-error/20">
+                  <Trash2 size={16} />
+                  Delete
+                </button>
               </div>
             </div>
 
             <div className="p-5 md:p-6">
               {builderMode === 'preview' && (
-                <ModuleStudentPreview draft={draft} />
+                <ModuleStudentPreview
+                  draft={draft}
+                  updateDraft={updateDraft}
+                  updatePartAtIndex={updatePartAtIndex}
+                  updateMiniQuestionAtPart={updateMiniQuestionAtPart}
+                  updateMiniOptionAtPart={updateMiniOptionAtPart}
+                  updateFinalQuestion={updateFinalQuestion}
+                  updateFinalOption={updateFinalOption}
+                />
               )}
 
               {builderMode === 'edit' && activeStep === 'outline' && (
@@ -596,7 +700,7 @@ export default function InstructorModules() {
               )}
 
               {builderMode === 'edit' && activeStep === 'publish' && (
-                <PublishStep draft={draft} updateDraft={updateDraft} saveModule={saveModule} />
+                <PublishStep draft={draft} classes={classes} updateDraft={updateDraft} saveModule={saveModule} />
               )}
             </div>
           </main>
@@ -664,10 +768,23 @@ function OutlineStep({
   );
 }
 
-function ModuleStudentPreview({ draft }: { draft: BuilderModule }) {
-  const firstPart = draft.parts[0] || blankPart(0);
-  const firstQuiz = firstPart.miniQuiz[0] || blankQuestion('preview-q1');
-
+function ModuleStudentPreview({
+  draft,
+  updateDraft,
+  updatePartAtIndex,
+  updateMiniQuestionAtPart,
+  updateMiniOptionAtPart,
+  updateFinalQuestion,
+  updateFinalOption,
+}: {
+  draft: BuilderModule;
+  updateDraft: (field: keyof BuilderModule, value: any) => void;
+  updatePartAtIndex: (partIndex: number, patch: Partial<JourneyModulePart>) => void;
+  updateMiniQuestionAtPart: (partIndex: number, patch: Partial<JourneyQuestion>) => void;
+  updateMiniOptionAtPart: (partIndex: number, optionId: string, text: string) => void;
+  updateFinalQuestion: (questionIndex: number, patch: Partial<JourneyQuestion>) => void;
+  updateFinalOption: (questionIndex: number, optionId: string, text: string) => void;
+}) {
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[260px_1fr] gap-5">
       <aside className="rounded-2xl border border-outline-variant/40 bg-surface-container/30 p-4 h-fit">
@@ -689,32 +806,46 @@ function ModuleStudentPreview({ draft }: { draft: BuilderModule }) {
       <section className="space-y-5">
         <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-6">
           <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Guided module preview</p>
-          <h2 className="text-2xl font-extrabold font-headline text-on-surface">{draft.title || 'Untitled module'}</h2>
-          <p className="text-sm text-on-surface-variant mt-2">{draft.description || 'Student-facing description will appear here.'}</p>
+          <input value={draft.title} onChange={(event) => updateDraft('title', event.target.value)} placeholder="Untitled module" className="w-full bg-transparent text-2xl font-extrabold font-headline text-on-surface outline-none border-b border-transparent focus:border-primary/30" />
+          <textarea value={draft.description} onChange={(event) => updateDraft('description', event.target.value)} rows={2} placeholder="Student-facing description will appear here." className="mt-2 w-full bg-transparent text-sm text-on-surface-variant outline-none resize-none border-b border-transparent focus:border-primary/30" />
         </div>
 
-        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-6">
-          <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Part 1 textbook</p>
-          <h3 className="text-xl font-extrabold text-on-surface">{firstPart.textbookSection.title}</h3>
-          <p className="text-xs font-bold text-on-surface-variant/50 mt-1">{firstPart.textbookSection.estimatedReadMinutes} min read</p>
-          <p className="text-sm text-on-surface-variant leading-relaxed whitespace-pre-line mt-4">{firstPart.textbookSection.body}</p>
-          {firstPart.textbookSection.mediaUrl && (
-            <div className="mt-5 rounded-xl border border-outline-variant/40 bg-surface-container p-4 text-xs font-bold text-on-surface-variant">
-              Embedded media: {firstPart.textbookSection.mediaUrl}
-            </div>
-          )}
-        </div>
-
-        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-6">
-          <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Mini quiz preview</p>
-          <h3 className="font-extrabold text-on-surface mb-4">{firstQuiz.stem}</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {(firstQuiz.options || []).map((option) => (
-              <div key={option.id} className="rounded-xl border border-outline-variant/30 bg-surface-container/40 p-3 text-sm font-semibold text-on-surface">
-                {option.id}. {option.text}
+        {draft.parts.map((part, partIndex) => {
+          const quiz = part.miniQuiz[0] || blankQuestion(`${part.id}-preview`);
+          return (
+            <div key={part.id} className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-6 space-y-4">
+              <p className="text-xs font-black uppercase tracking-widest text-primary">Lesson {partIndex + 1} live edit</p>
+              <input value={part.title} onChange={(event) => updatePartAtIndex(partIndex, { title: event.target.value })} className="w-full bg-transparent text-xl font-extrabold text-on-surface outline-none border-b border-outline-variant/20 focus:border-primary/40" />
+              <textarea value={part.objective} onChange={(event) => updatePartAtIndex(partIndex, { objective: event.target.value })} rows={2} className="w-full bg-surface-container border border-outline-variant/30 rounded-xl p-3 text-sm font-medium outline-none focus:border-primary/40 resize-none" />
+              <input value={part.textbookSection.title} onChange={(event) => updatePartAtIndex(partIndex, { textbookSection: { ...part.textbookSection, title: event.target.value } })} className="w-full bg-transparent font-extrabold text-on-surface outline-none border-b border-outline-variant/20 focus:border-primary/40" />
+              <textarea value={part.textbookSection.body} onChange={(event) => updatePartAtIndex(partIndex, { textbookSection: { ...part.textbookSection, body: event.target.value } })} rows={6} className="w-full bg-surface-container border border-outline-variant/30 rounded-xl p-4 text-sm text-on-surface-variant leading-relaxed outline-none focus:border-primary/40 resize-y" />
+              <div className="rounded-xl border border-outline-variant/30 bg-surface-container/40 p-4 space-y-3">
+                <p className="text-xs font-black uppercase tracking-widest text-primary">Mini quiz</p>
+                <textarea value={quiz.stem} onChange={(event) => updateMiniQuestionAtPart(partIndex, { stem: event.target.value })} rows={2} className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm font-bold outline-none focus:border-primary/40 resize-none" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {(quiz.options || []).map((option) => (
+                    <input key={option.id} value={option.text} onChange={(event) => updateMiniOptionAtPart(partIndex, option.id, event.target.value)} className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-3 text-sm font-semibold text-on-surface outline-none focus:border-primary/40" />
+                  ))}
+                </div>
+                <textarea value={quiz.explanation} onChange={(event) => updateMiniQuestionAtPart(partIndex, { explanation: event.target.value })} rows={2} className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-xs font-medium outline-none focus:border-primary/40 resize-none" />
               </div>
-            ))}
-          </div>
+            </div>
+          );
+        })}
+
+        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-6 space-y-4">
+          <p className="text-xs font-black uppercase tracking-widest text-primary">Final exam live edit</p>
+          {draft.finalExam.map((question, questionIndex) => (
+            <div key={question.id} className="rounded-xl border border-outline-variant/30 bg-surface-container/30 p-4 space-y-3">
+              <textarea value={question.stem} onChange={(event) => updateFinalQuestion(questionIndex, { stem: event.target.value })} rows={2} className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm font-bold outline-none focus:border-primary/40 resize-none" />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {(question.options || []).map((option) => (
+                  <input key={option.id} value={option.text} onChange={(event) => updateFinalOption(questionIndex, option.id, event.target.value)} className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-3 text-sm font-semibold text-on-surface outline-none focus:border-primary/40" />
+                ))}
+              </div>
+              <textarea value={question.explanation} onChange={(event) => updateFinalQuestion(questionIndex, { explanation: event.target.value })} rows={2} className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-xs font-medium outline-none focus:border-primary/40 resize-none" />
+            </div>
+          ))}
         </div>
       </section>
     </div>
@@ -939,10 +1070,12 @@ function AssessmentsStep({
 
 function PublishStep({
   draft,
+  classes,
   updateDraft,
   saveModule,
 }: {
   draft: BuilderModule;
+  classes: any[];
   updateDraft: (field: keyof BuilderModule, value: any) => void;
   saveModule: () => void;
 }) {
@@ -969,6 +1102,60 @@ function PublishStep({
         </span>
         <input type="checkbox" checked={draft.isPublished} disabled={!canPublish} onChange={(event) => updateDraft('isPublished', event.target.checked)} className="w-5 h-5 accent-primary disabled:opacity-40" />
       </label>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Field label="Available to">
+          <select value={draft.publishScope} onChange={(event) => updateDraft('publishScope', event.target.value)} className="input font-bold">
+            <option value="public">Public / self-study learners</option>
+            <option value="classes">Specific classes only</option>
+          </select>
+        </Field>
+        <Field label="Due date">
+          <input type="datetime-local" value={draft.dueAt || ''} onChange={(event) => updateDraft('dueAt', event.target.value)} className="input" />
+        </Field>
+      </div>
+      {draft.publishScope === 'classes' && (
+        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container/30 p-4">
+          <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50 mb-3">Choose classes</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {classes.map((classItem) => {
+              const checked = draft.classIds.includes(classItem.id);
+              return (
+                <label key={classItem.id} className="flex items-center gap-3 rounded-xl bg-surface-container-lowest border border-outline-variant/30 p-3">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => {
+                      const nextIds = event.target.checked
+                        ? [...draft.classIds, classItem.id]
+                        : draft.classIds.filter((id) => id !== classItem.id);
+                      updateDraft('classIds', nextIds);
+                    }}
+                    className="w-4 h-4 accent-primary"
+                  />
+                  <span className="text-sm font-bold text-on-surface">{classItem.className}</span>
+                </label>
+              );
+            })}
+            {classes.length === 0 && <p className="text-sm font-bold text-on-surface-variant/40">No classes yet. Create a class first.</p>}
+          </div>
+        </div>
+      )}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <label className="flex items-center justify-between gap-4 bg-surface-container rounded-xl px-4 py-4">
+          <span>
+            <span className="block text-sm font-extrabold text-on-surface">Anti-cheat for exam/assignment</span>
+            <span className="block text-xs text-on-surface-variant/60">Fullscreen, tab focus, and copy/paste warnings.</span>
+          </span>
+          <input type="checkbox" checked={draft.antiCheatEnabled} onChange={(event) => updateDraft('antiCheatEnabled', event.target.checked)} className="w-5 h-5 accent-primary" />
+        </label>
+        <label className="flex items-center justify-between gap-4 bg-surface-container rounded-xl px-4 py-4">
+          <span>
+            <span className="block text-sm font-extrabold text-on-surface">Record first attempt only</span>
+            <span className="block text-xs text-on-surface-variant/60">Retakes can practice, but first score remains official.</span>
+          </span>
+          <input type="checkbox" checked={draft.recordFirstAttemptOnly} onChange={(event) => updateDraft('recordFirstAttemptOnly', event.target.checked)} className="w-5 h-5 accent-primary" />
+        </label>
+      </div>
       <button onClick={saveModule} className="rounded-xl bg-primary text-on-primary px-6 py-3 font-bold">Save module</button>
     </div>
   );

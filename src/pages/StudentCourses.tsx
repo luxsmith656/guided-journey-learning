@@ -54,6 +54,11 @@ export default function StudentCourses() {
           progress: 0,
           lessonBlocks: data.lessonBlocks || [],
           prerequisiteModuleIds: data.prerequisiteModuleIds || [],
+          publishScope: data.publishScope || (data.classIds?.length ? 'classes' : 'public'),
+          classIds: data.classIds || [],
+          dueAt: data.dueAt || '',
+          antiCheatEnabled: data.antiCheatEnabled ?? true,
+          recordFirstAttemptOnly: data.recordFirstAttemptOnly ?? true,
           resources: data.resources?.map((resource: any, index: number) => ({
             id: resource.id || `${moduleDoc.id}-resource-${index}`,
             type: resource.type || 'activity',
@@ -96,7 +101,10 @@ export default function StudentCourses() {
   const selectedTopic = selectedSubject.topics.find((topic) => topic.id === selectedTopicId) || selectedSubject.topics[0];
   const allModules = useMemo(() => {
     const remoteIds = new Set(remoteModules.map((module) => module.id));
-    return [...remoteModules, ...journeyModules.filter((module) => !remoteIds.has(module.id))].map((module) => {
+    return [...remoteModules, ...journeyModules.filter((module) => !remoteIds.has(module.id))].filter((module: any) => {
+      if (!module.publishScope || module.publishScope === 'public') return true;
+      return !!user?.activeClassId && (module.classIds || []).includes(user.activeClassId);
+    }).map((module) => {
       const progress = progressByModule[module.id];
       return {
         ...module,

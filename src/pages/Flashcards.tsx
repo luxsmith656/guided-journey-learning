@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { collection, query, limit, getDocs, doc, getDoc, updateDoc, arrayUnion, where, serverTimestamp, increment } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
+import { journeyModules } from '../lib/learningJourney';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ChevronLeft, 
@@ -22,6 +23,7 @@ interface Flashcard {
   correctAnswer: string;
   explanation?: string;
   categoryName?: string;
+  topicId?: string;
 }
 
 export default function Flashcards() {
@@ -39,7 +41,7 @@ export default function Flashcards() {
         if (!user) return;
         
         let focusCategoryId = '';
-        let focusTopicId = '';
+        const targetTopicIds = new Set<string>();
         
         // 1. Get focus from user profile
         if (user.selectedFocus) {
@@ -48,7 +50,25 @@ export default function Flashcards() {
            if (matched) focusCategoryId = matched.id;
         }
 
-        // 2. Fetch questions - prioritize weak topics if available
+        const progressSnap = await getDocs(query(collection(db, 'moduleProgress'), where('userId', '==', user.uid)));
+        const moduleIds = new Set(progressSnap.docs.map((progressDoc) => progressDoc.data().moduleId).filter(Boolean));
+        if (user.activeClassId) {
+          const classSnap = await getDoc(doc(db, 'classes', user.activeClassId));
+          (classSnap.data()?.assignedModuleIds || []).forEach((moduleId: string) => moduleIds.add(moduleId));
+        }
+        for (const moduleId of moduleIds) {
+          const localModule = journeyModules.find((module) => module.id === moduleId);
+          if (localModule?.topicId) targetTopicIds.add(localModule.topicId);
+          try {
+            const moduleSnap = await getDoc(doc(db, 'modules', moduleId));
+            const topicId = moduleSnap.data()?.topicId;
+            if (topicId) targetTopicIds.add(topicId);
+          } catch {
+            // Local sample module may not exist in Firestore.
+          }
+        }
+
+        // 2. Fetch questions - prioritize weak topics and assigned/taken modules.
         let q = query(
           collection(db, 'questions'), 
           where('isPublished', '==', true),
@@ -69,6 +89,7 @@ export default function Flashcards() {
 
         for (const d of snap.docs) {
           const data = d.data();
+          if (targetTopicIds.size > 0 && data.topicId && !targetTopicIds.has(data.topicId)) continue;
           const correctOption = data.options?.find((o: any) => o.id === data.correctOptionId);
           fetchedCards.push({
             id: d.id,

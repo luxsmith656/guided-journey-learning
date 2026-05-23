@@ -37,7 +37,15 @@ export default function DiagnosticAssessment() {
             where('isPublished', '==', true),
             where('approved', '==', true)
         );
-        const qSnap = await getDocs(q);
+        let qSnap = await getDocs(q);
+        if (qSnap.empty) {
+          const fallbackQuery = query(
+            collection(db, 'questions'),
+            where('isPublished', '==', true),
+            where('approved', '==', true)
+          );
+          qSnap = await getDocs(fallbackQuery);
+        }
         
         let allQuestions: Question[] = [];
         qSnap.forEach(snap => {
@@ -68,6 +76,18 @@ export default function DiagnosticAssessment() {
   }, [user]);
 
   // ... (no changes to mapFocusToCategories) ...
+
+  const skipAssessment = async () => {
+    if (user) {
+      await setDoc(doc(db, 'users', user.uid), {
+        diagnosticCompleted: true,
+        diagnosticSkipped: true,
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      await refreshUser();
+    }
+    navigate('/student/dashboard');
+  };
 
   const handleNext = async (optionId: string) => {
     const newAnswers = { ...answers, [questions[currentIndex].id]: optionId };
@@ -228,7 +248,7 @@ export default function DiagnosticAssessment() {
       <div className="p-12 text-center max-w-md mx-auto mt-20">
         <h2 className="text-xl font-bold mb-4">No content available</h2>
         <p className="text-slate-500 mb-6">We don't have enough data to generate a diagnostic test. Talk to your instructor.</p>
-        <button onClick={() => navigate('/student/dashboard')} className="bg-[#1b366a] text-white px-6 py-2 rounded-xl font-bold">Skip for now</button>
+        <button onClick={skipAssessment} className="bg-[#1b366a] text-white px-6 py-2 rounded-xl font-bold">Skip for now</button>
       </div>
     );
   }
@@ -273,6 +293,9 @@ export default function DiagnosticAssessment() {
           >
             Start Assessment <span className="material-symbols-outlined text-lg">arrow_forward</span>
           </button>
+          <button onClick={skipAssessment} className="w-full mt-3 text-on-surface-variant text-xs font-black uppercase tracking-widest py-3 rounded-xl hover:bg-surface-container">
+            Skip for now
+          </button>
         </div>
       </div>
     );
@@ -283,6 +306,7 @@ export default function DiagnosticAssessment() {
   return (
      <div className="bg-surface text-on-surface font-body min-h-screen flex flex-col antialiased">
        <header className="px-5 py-4 flex items-center justify-between bg-surface-container-lowest border-b border-outline-variant sticky top-0 z-20">
+          <button onClick={skipAssessment} className="text-xs font-black uppercase tracking-widest text-on-surface-variant hover:text-primary">Exit</button>
           <div className="font-bold text-primary">Diagnostic Assessment {isSubmitting && '- Saving...'}</div>
           <div className="text-xs font-bold text-on-surface-variant/40">Question {currentIndex + 1} of {questions.length}</div>
        </header>

@@ -10,13 +10,10 @@ export default function Sidebar() {
 
   const navItems = [
     { name: 'Dashboard', path: '/admin/dashboard', icon: 'dashboard' },
-    { name: 'Curriculum', path: '/admin/categories', icon: 'menu_book' },
     { name: 'Modules', path: '/admin/modules', icon: 'view_timeline' },
     { name: 'Classes', path: '/admin/classes', icon: 'groups' },
-    { name: 'Question Bank', path: '/admin/question/bank', icon: 'quiz' },
     { name: 'Analytics', path: '/admin/analytics', icon: 'bar_chart' },
     { name: 'Users', path: '/admin/users', icon: 'group' },
-    { name: 'Uploads', path: '/admin/bulk-upload', icon: 'upload_file' },
     { name: 'Settings', path: '/admin/settings', icon: 'settings' },
   ];
 

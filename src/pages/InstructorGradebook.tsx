@@ -1,17 +1,22 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, getDocs, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
-import { Award, Eye, EyeOff, Trophy, Users } from 'lucide-react';
+import { Award, BookOpen, Clock, Eye, EyeOff, ShieldAlert, Trophy, Users } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import InstructorLayout from '../components/InstructorLayout';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
+import { journeyModules } from '../lib/learningJourney';
 
 export default function InstructorGradebook() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [classes, setClasses] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
   const [enrollments, setEnrollments] = useState<any[]>([]);
   const [progressRows, setProgressRows] = useState<any[]>([]);
+  const [modules, setModules] = useState<any[]>(journeyModules);
   const [selectedClassId, setSelectedClassId] = useState('');
+  const [selectedModuleId, setSelectedModuleId] = useState('all');
 
   useEffect(() => {
     if (!user) return;
@@ -24,7 +29,8 @@ export default function InstructorGradebook() {
       [...snapshots.uid, ...snapshots.email].forEach((classDoc) => merged.set(classDoc.id, { id: classDoc.id, ...classDoc.data() }));
       const nextClasses = Array.from(merged.values());
       setClasses(nextClasses);
-      setSelectedClassId((current) => current || nextClasses[0]?.id || '');
+      const requestedClassId = searchParams.get('class');
+      setSelectedClassId((current) => current || requestedClassId || nextClasses[0]?.id || '');
     };
 
     const unsubUid = onSnapshot(byUid, (snap) => {
@@ -41,6 +47,11 @@ export default function InstructorGradebook() {
     const unsubEnrollments = onSnapshot(collection(db, 'classEnrollments'), (snap) => {
       setEnrollments(snap.docs.map((enrollmentDoc) => ({ id: enrollmentDoc.id, ...enrollmentDoc.data() })));
     });
+    const unsubModules = onSnapshot(collection(db, 'modules'), (snap) => {
+      const remoteModules = snap.docs.map((moduleDoc) => ({ id: moduleDoc.id, ...moduleDoc.data() }));
+      const remoteIds = new Set(remoteModules.map((module) => module.id));
+      setModules([...remoteModules, ...journeyModules.filter((module) => !remoteIds.has(module.id))]);
+    });
 
     getDocs(collection(db, 'users')).then((snap) => {
       setStudents(snap.docs.map((userDoc) => ({ uid: userDoc.id, ...userDoc.data() })).filter((row: any) => row.role === 'student'));
@@ -51,8 +62,9 @@ export default function InstructorGradebook() {
       unsubEmail();
       unsubProgress();
       unsubEnrollments();
+      unsubModules();
     };
-  }, [user]);
+  }, [user, searchParams]);
 
   const selectedClass = classes.find((classItem) => classItem.id === selectedClassId) || classes[0];
   const classStudentIds = useMemo(() => {
@@ -61,16 +73,28 @@ export default function InstructorGradebook() {
     return new Set([...fromClassDoc, ...fromEnrollments]);
   }, [selectedClass, enrollments]);
   const visibleStudents = students.filter((student) => classStudentIds.size === 0 || classStudentIds.has(student.uid));
+  const classModules = modules.filter((module: any) => (
+    selectedClass?.assignedModuleIds?.includes(module.id) ||
+    module.classIds?.includes(selectedClass?.id) ||
+    (module.publishScope === 'public' && selectedClass)
+  ));
   const gradeRows = visibleStudents.map((student) => {
-    const studentProgress = progressRows.filter((row) => row.userId === student.uid);
+    const studentProgress = progressRows.filter((row) => (
+      row.userId === student.uid &&
+      (selectedModuleId === 'all' || row.moduleId === selectedModuleId)
+    ));
     const avgProgress = studentProgress.length
       ? Math.round(studentProgress.reduce((sum, row) => sum + (row.progressPercent || 0), 0) / studentProgress.length)
       : 0;
-    const avgScore = studentProgress.filter((row) => row.finalScore != null).length
-      ? Math.round(studentProgress.filter((row) => row.finalScore != null).reduce((sum, row) => sum + (row.finalScore || 0), 0) / studentProgress.filter((row) => row.finalScore != null).length)
+    const scoredRows = studentProgress.filter((row) => row.finalScore != null || row.firstFinalScore != null);
+    const avgScore = scoredRows.length
+      ? Math.round(scoredRows.reduce((sum, row) => sum + (row.firstFinalScore ?? row.finalScore ?? 0), 0) / scoredRows.length)
       : 0;
     const completed = studentProgress.filter((row) => row.status === 'completed' && (row.finalScore ?? 0) >= 85).length;
-    return { student, avgProgress, avgScore, completed, modules: studentProgress.length };
+    const attempts = studentProgress.reduce((sum, row) => sum + (row.finalAttemptCount || row.failedAttempts || 0), 0);
+    const warnings = studentProgress.reduce((sum, row) => sum + (row.proctorWarnings || 0), 0);
+    const timeSpentSeconds = studentProgress.reduce((sum, row) => sum + (row.timeSpentSeconds || 0), 0);
+    return { student, avgProgress, avgScore, completed, modules: studentProgress.length, attempts, warnings, timeSpentSeconds };
   }).sort((a, b) => b.avgScore - a.avgScore);
 
   const updateClassSetting = async (field: 'showGradesToStudents' | 'leaderboardEnabled', value: boolean) => {
@@ -117,6 +141,19 @@ export default function InstructorGradebook() {
           </div>
         </section>
 
+        <section className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-sm">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div>
+              <h2 className="font-headline font-extrabold text-xl flex items-center gap-2"><BookOpen size={20} className="text-primary" /> Class modules</h2>
+              <p className="text-sm text-on-surface-variant/60 mt-1">Filter progress by the modules posted to this class.</p>
+            </div>
+            <select value={selectedModuleId} onChange={(event) => setSelectedModuleId(event.target.value)} className="bg-surface-container border border-outline-variant/30 rounded-xl px-4 py-3 text-sm font-bold outline-none">
+              <option value="all">All class modules</option>
+              {classModules.map((module: any) => <option key={module.id} value={module.id}>{module.title}</option>)}
+            </select>
+          </div>
+        </section>
+
         <section className="bg-surface-container-lowest border border-outline-variant rounded-2xl shadow-sm overflow-hidden">
           <div className="p-5 border-b border-outline-variant flex items-center justify-between">
             <h2 className="font-headline font-extrabold text-xl">Gradebook rows</h2>
@@ -130,6 +167,9 @@ export default function InstructorGradebook() {
                   <th className="px-5 py-4">Avg Score</th>
                   <th className="px-5 py-4">Progress</th>
                   <th className="px-5 py-4">Completed</th>
+                  <th className="px-5 py-4">Attempts</th>
+                  <th className="px-5 py-4">Time</th>
+                  <th className="px-5 py-4">Warnings</th>
                   <th className="px-5 py-4">Rank</th>
                 </tr>
               </thead>
@@ -143,6 +183,14 @@ export default function InstructorGradebook() {
                     <td className="px-5 py-4 font-black text-primary">{row.avgScore}%</td>
                     <td className="px-5 py-4">{row.avgProgress}%</td>
                     <td className="px-5 py-4">{row.completed} / {row.modules}</td>
+                    <td className="px-5 py-4">{row.attempts}</td>
+                    <td className="px-5 py-4 inline-flex items-center gap-1"><Clock size={13} /> {formatDuration(row.timeSpentSeconds)}</td>
+                    <td className="px-5 py-4">
+                      <span className={`inline-flex items-center gap-1 ${row.warnings > 0 ? 'text-error font-black' : 'text-on-surface-variant'}`}>
+                        <ShieldAlert size={13} />
+                        {row.warnings}
+                      </span>
+                    </td>
                     <td className="px-5 py-4">
                       <span className="inline-flex items-center gap-1 rounded-full bg-surface-container px-3 py-1 text-xs font-black">
                         <Award size={13} />
@@ -153,7 +201,7 @@ export default function InstructorGradebook() {
                 ))}
                 {gradeRows.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-5 py-12 text-center text-on-surface-variant/40 font-bold">No student progress yet.</td>
+                    <td colSpan={8} className="px-5 py-12 text-center text-on-surface-variant/40 font-bold">No student progress yet.</td>
                   </tr>
                 )}
               </tbody>
@@ -184,4 +232,12 @@ function ControlCard({ icon: Icon, title, body, enabled, onToggle }: { icon: Rea
       </p>
     </div>
   );
+}
+
+function formatDuration(totalSeconds: number) {
+  if (!totalSeconds) return '0m';
+  const minutes = Math.round(totalSeconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
 }

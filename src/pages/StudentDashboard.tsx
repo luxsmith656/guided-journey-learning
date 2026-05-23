@@ -105,6 +105,11 @@ export default function StudentDashboard() {
     fetchData();
   }, [user]);
 
+  const weakTopicLabel = profile?.weakTopics?.[0]
+    || Object.entries(profile?.masteryByTopic || {}).sort((a: any, b: any) => a[1] - b[1])[0]?.[0]
+    || 'your weakest topic';
+  const nextModule = assignedModules.find((module) => module.progress < 100) || assignedModules[0];
+
   return (
     <StudentLayout title="Dashboard">
       <div className="space-y-8">
@@ -216,16 +221,16 @@ export default function StudentDashboard() {
                           <span className="text-[10px] font-bold bg-amber-500/10 text-amber-600 px-2 py-0.5 rounded uppercase tracking-widest">Review Needed</span>
                           <Brain size={14} className="text-amber-500" />
                        </div>
-                       <h4 className="font-bold text-sm text-on-surface mb-1">Child Development</h4>
-                       <p className="text-[11px] text-on-surface-variant leading-relaxed">You struggled with this topic in your last quiz. Review these 15 AI-generated flashcards.</p>
+                       <h4 className="font-bold text-sm text-on-surface mb-1">{weakTopicLabel}</h4>
+                       <p className="text-[11px] text-on-surface-variant leading-relaxed">Based on your diagnostic and module scores, review flashcards tied to your class modules and weak topics.</p>
                     </div>
-                    <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant shadow-sm hover:border-emerald-500/30 transition-colors cursor-pointer" onClick={() => navigate('/exam?type=practice')}>
+                    <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant shadow-sm hover:border-emerald-500/30 transition-colors cursor-pointer" onClick={() => navigate(nextModule ? `/quest?moduleId=${nextModule.id}` : '/student/courses')}>
                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-[10px] font-bold bg-emerald-500/10 text-emerald-600 px-2 py-0.5 rounded uppercase tracking-widest">Ready to Test</span>
+                          <span className="text-[10px] font-bold bg-emerald-500/10 text-emerald-600 px-2 py-0.5 rounded uppercase tracking-widest">Next Best Step</span>
                           <Target size={14} className="text-emerald-500" />
                        </div>
-                       <h4 className="font-bold text-sm text-on-surface mb-1">Foundations of Ed.</h4>
-                       <p className="text-[11px] text-on-surface-variant leading-relaxed">You have high mastery in this topic. Take a adaptive practice test to lock it in.</p>
+                       <h4 className="font-bold text-sm text-on-surface mb-1">{nextModule?.title || 'Continue your learning journey'}</h4>
+                       <p className="text-[11px] text-on-surface-variant leading-relaxed">Continue the module that best matches your current class path and progress.</p>
                     </div>
                  </div>
               </section>
