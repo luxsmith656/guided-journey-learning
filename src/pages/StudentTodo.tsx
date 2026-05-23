@@ -10,6 +10,7 @@ export default function StudentTodo() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [modules, setModules] = useState<any[]>([]);
+  const [assignments, setAssignments] = useState<any[]>([]);
   const [progressByModule, setProgressByModule] = useState<Record<string, any>>({});
 
   useEffect(() => {
@@ -18,6 +19,13 @@ export default function StudentTodo() {
       setModules(snapshot.docs.map((moduleDoc) => ({ id: moduleDoc.id, ...moduleDoc.data() })));
     });
     return () => unsubModules();
+  }, []);
+
+  useEffect(() => {
+    const unsubAssignments = onSnapshot(collection(db, 'assignments'), (snapshot) => {
+      setAssignments(snapshot.docs.map((assignmentDoc) => ({ id: assignmentDoc.id, ...assignmentDoc.data() })));
+    });
+    return () => unsubAssignments();
   }, []);
 
   useEffect(() => {
@@ -41,6 +49,9 @@ export default function StudentTodo() {
     })
     .filter((module) => progressByModule[module.id]?.status !== 'completed')
     .sort((a, b) => new Date(a.dueAt || '2999-12-31').getTime() - new Date(b.dueAt || '2999-12-31').getTime()), [modules, progressByModule, user]);
+  const assignmentItems = assignments
+    .filter((assignment) => !assignment.classId || assignment.classId === user?.activeClassId)
+    .sort((a, b) => new Date(a.dueAt || '2999-12-31').getTime() - new Date(b.dueAt || '2999-12-31').getTime());
 
   return (
     <StudentLayout title="To Do">
@@ -55,6 +66,22 @@ export default function StudentTodo() {
         </section>
 
         <section className="space-y-3">
+          {assignmentItems.map((assignment) => {
+            const dueDate = assignment.dueAt ? new Date(assignment.dueAt) : null;
+            const isOverdue = dueDate ? dueDate.getTime() < Date.now() : false;
+            return (
+              <article key={assignment.id} className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <p className={`text-xs font-black uppercase tracking-widest mb-2 ${isOverdue ? 'text-error' : 'text-primary'}`}>
+                    Assignment {dueDate ? `/ ${isOverdue ? 'Overdue' : 'Due'} ${dueDate.toLocaleString()}` : '/ No due date'}
+                  </p>
+                  <h2 className="text-lg font-extrabold text-on-surface">{assignment.title}</h2>
+                  <p className="text-sm text-on-surface-variant mt-1">{assignment.instructions}</p>
+                  <p className="text-xs text-on-surface-variant/50 mt-2">Submit a Drive/external link with access enabled.</p>
+                </div>
+              </article>
+            );
+          })}
           {todoItems.map((module) => {
             const dueDate = module.dueAt ? new Date(module.dueAt) : null;
             const isOverdue = dueDate ? dueDate.getTime() < Date.now() : false;
@@ -74,7 +101,7 @@ export default function StudentTodo() {
               </article>
             );
           })}
-          {todoItems.length === 0 && (
+          {todoItems.length === 0 && assignmentItems.length === 0 && (
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-10 text-center shadow-sm">
               <CheckCircle2 className="mx-auto text-emerald-500 mb-3" size={40} />
               <h2 className="font-extrabold text-on-surface">Nothing due right now.</h2>

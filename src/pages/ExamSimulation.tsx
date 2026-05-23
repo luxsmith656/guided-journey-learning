@@ -18,7 +18,7 @@ export default function ExamSimulation() {
   const [searchParams] = useSearchParams();
   const categoryId = searchParams.get('category');
   const navigate = useNavigate();
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -280,7 +280,7 @@ export default function ExamSimulation() {
     <div className="bg-surface text-on-surface font-body min-h-[100dvh] flex flex-col antialiased relative">
        <header className="px-5 py-4 flex items-center justify-between bg-surface-container-lowest border-b border-outline-variant sticky top-0 z-20">
           <div className="flex items-center gap-3">
-             <button onClick={() => navigate('/focus')} className="text-on-surface-variant/40 hover:text-on-surface transition-colors hover:scale-110 active:scale-95">
+             <button onClick={() => navigate('/student/dashboard')} className="text-on-surface-variant/40 hover:text-on-surface transition-colors hover:scale-110 active:scale-95">
                 <span className="material-symbols-outlined">close</span>
              </button>
              <div className="bg-surface-container px-3 py-1.5 rounded-xl text-xs font-bold font-mono text-on-surface-variant flex items-center gap-1.5 border border-outline-variant/30">
@@ -291,15 +291,12 @@ export default function ExamSimulation() {
           <div className="font-bold text-[11px] tracking-widest text-primary uppercase">
              Question <span className="text-lg tabular-nums">{currentIndex + 1}</span> / {questions.length}
           </div>
-          <button 
-            onClick={() => {
-              signOut();
-              navigate('/sign-in');
-            }}
+          <button
+            onClick={() => navigate('/student/dashboard')}
             className="w-10 h-10 flex items-center justify-center rounded-full text-on-surface-variant/40 hover:bg-surface-container transition-colors"
-            title="Sign Out"
+            title="Exit assessment"
           >
-             <span className="material-symbols-outlined">logout</span>
+             <span className="material-symbols-outlined">home</span>
           </button>
        </header>
 

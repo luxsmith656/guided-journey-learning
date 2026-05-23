@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import {
   ArrowRight,
   BookOpen,
@@ -29,7 +29,7 @@ const statusLabel = {
 
 export default function StudentCourses() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [selectedSubjectId, setSelectedSubjectId] = useState(journeySubjects[0].id);
   const [selectedTopicId, setSelectedTopicId] = useState(journeySubjects[0].topics[0].id);
   const [searchTerm, setSearchTerm] = useState('');
@@ -102,6 +102,7 @@ export default function StudentCourses() {
   const allModules = useMemo(() => {
     const remoteIds = new Set(remoteModules.map((module) => module.id));
     return [...remoteModules, ...journeyModules.filter((module) => !remoteIds.has(module.id))].filter((module: any) => {
+      if ((user as any)?.archivedModuleIds?.includes(module.id)) return false;
       if (!module.publishScope || module.publishScope === 'public') return true;
       return !!user?.activeClassId && (module.classIds || []).includes(user.activeClassId);
     }).map((module) => {
@@ -137,6 +138,26 @@ export default function StudentCourses() {
 
   const openModule = (moduleId: string, locked: boolean) => {
     if (!locked) navigate(`/quest?moduleId=${moduleId}`);
+  };
+
+  const archiveModule = async (moduleId: string) => {
+    if (!user) return;
+    const archived = new Set((user as any).archivedModuleIds || []);
+    archived.add(moduleId);
+    await updateDoc(doc(db, 'users', user.uid), { archivedModuleIds: Array.from(archived) });
+    await refreshUser();
+  };
+
+  const archiveClass = async () => {
+    if (!user?.activeClassId) return;
+    const archived = new Set((user as any).archivedClassIds || []);
+    archived.add(user.activeClassId);
+    await updateDoc(doc(db, 'users', user.uid), {
+      archivedClassIds: Array.from(archived),
+      activeClassId: null,
+      learningMode: 'self_review',
+    });
+    await refreshUser();
   };
 
   return (
@@ -247,6 +268,14 @@ export default function StudentCourses() {
                   <Plus size={16} />
                   Join class
                 </button>
+                {user?.activeClassId && (
+                  <button
+                    onClick={archiveClass}
+                    className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-surface-container text-on-surface font-bold text-sm border border-outline-variant hover:border-error/40 transition-colors"
+                  >
+                    Archive class
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
@@ -331,6 +360,14 @@ export default function StudentCourses() {
                             {isLocked ? 'Pass previous final at 85%' : module.progress > 0 ? 'Resume module' : 'Start module'}
                             {!isLocked && <ArrowRight size={16} />}
                           </button>
+                          {module.status === 'completed' && (
+                            <button
+                              onClick={() => archiveModule(module.id)}
+                              className="inline-flex items-center justify-center gap-2 rounded-xl bg-surface-container text-on-surface px-5 py-3 text-sm font-bold border border-outline-variant/40"
+                            >
+                              Archive
+                            </button>
+                          )}
                         </div>
 
                         <div className="mt-5">

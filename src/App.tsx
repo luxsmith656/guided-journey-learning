@@ -30,6 +30,7 @@ import LearningQuest from './pages/LearningQuest';
 import AdminClasses from './pages/AdminClasses';
 import InstructorClasses from './pages/InstructorClasses';
 import InstructorGradebook from './pages/InstructorGradebook';
+import InstructorAssignments from './pages/InstructorAssignments';
 import TextbookLibrary from './pages/TextbookLibrary';
 import ChooseLearningMode from './pages/ChooseLearningMode';
 import ChooseFocus from './pages/ChooseFocus';
@@ -147,6 +148,7 @@ function AppContent() {
             <Route path="/instructor/question/edit/:id" element={<ProtectedRoute role="instructor"><Navigate to="/instructor/modules" replace /></ProtectedRoute>} />
             <Route path="/instructor/bulk-upload" element={<ProtectedRoute role="instructor"><Navigate to="/instructor/modules" replace /></ProtectedRoute>} />
             <Route path="/instructor/modules" element={<ProtectedRoute role="instructor"><InstructorModules /></ProtectedRoute>} />
+            <Route path="/instructor/assignments" element={<ProtectedRoute role="instructor"><InstructorAssignments /></ProtectedRoute>} />
             <Route path="/instructor/grades" element={<ProtectedRoute role="instructor"><InstructorGradebook /></ProtectedRoute>} />
             <Route path="/instructor/students" element={<ProtectedRoute role="instructor"><Users /></ProtectedRoute>} />
             <Route path="/instructor/ai-drafts" element={<ProtectedRoute role="instructor"><AIDrafts /></ProtectedRoute>} />
@@ -155,6 +157,7 @@ function AppContent() {
 
             {/* Mobile / App Routes */}
             <Route path="/loading" element={<Loading />} />
+            <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
             <Route path="/student/dashboard" element={<ProtectedRoute role="student"><StudentDashboard /></ProtectedRoute>} />
             <Route path="/student/courses" element={<ProtectedRoute role="student"><StudentCourses /></ProtectedRoute>} />
             <Route path="/student/todo" element={<ProtectedRoute role="student"><StudentTodo /></ProtectedRoute>} />

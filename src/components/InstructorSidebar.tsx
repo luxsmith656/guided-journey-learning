@@ -12,6 +12,7 @@ export default function InstructorSidebar() {
     { name: 'Dashboard', path: '/instructor/dashboard', icon: 'dashboard' },
     { name: 'Classes', path: '/instructor/classes', icon: 'groups' },
     { name: 'Modules', path: '/instructor/modules', icon: 'book' },
+    { name: 'Assignments', path: '/instructor/assignments', icon: 'assignment' },
     { name: 'Gradebook', path: '/instructor/grades', icon: 'grade' },
     { name: 'Students', path: '/instructor/students', icon: 'person_search' },
     { name: 'Analytics', path: '/instructor/analytics', icon: 'bar_chart' },

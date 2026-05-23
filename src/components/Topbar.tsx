@@ -23,13 +23,13 @@ export default function Topbar({ title = 'LET Mastery' }: TopbarProps) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (user?.role === 'admin') {
-      const q = query(collection(db, 'reports'), where('status', '==', 'open'));
-      const unsub = onSnapshot(q, (snapshot) => {
-        setOpenReports(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      });
-      return () => unsub();
-    }
+    if (!user) return;
+    const notificationsQuery = query(collection(db, 'notifications'), where('recipientIds', 'array-contains', user.uid));
+    const unsubNotifications = onSnapshot(notificationsQuery, (snapshot) => {
+      const notifications = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setOpenReports(notifications.filter((item: any) => item.status !== 'read'));
+    });
+    return () => unsubNotifications();
   }, [user]);
 
   const handleSignOut = () => {
@@ -94,16 +94,16 @@ export default function Topbar({ title = 'LET Mastery' }: TopbarProps) {
           <div className="absolute top-12 right-0 w-80 bg-surface-container-lowest rounded-2xl shadow-xl border border-outline-variant py-2 z-50 transition-all">
             <div className="px-4 py-2 border-b border-outline-variant/10 font-bold text-on-surface flex justify-between items-center text-sm">
               <span>Notifications</span>
-              <Link to="/admin/notifications" className="text-[10px] text-primary font-bold uppercase tracking-widest hover:underline">View All</Link>
+              <Link to="/notifications" className="text-[10px] text-primary font-bold uppercase tracking-widest hover:underline">View All</Link>
             </div>
             <div className="p-2 space-y-1 max-h-[300px] overflow-y-auto">
               {openReports.length === 0 ? (
                 <p className="text-xs text-on-surface-variant/40 px-3 py-2">No new notifications</p>
               ) : (
                 openReports.map(report => (
-                  <Link to="/admin/notifications" key={report.id} className="block px-3 py-2 hover:bg-surface-container rounded-xl transition-colors cursor-pointer">
-                    <p className="text-xs font-bold text-on-surface truncate">New Report: {report.subject}</p>
-                    <p className="text-[10px] text-on-surface-variant/40 font-medium">By: {report.userEmail}</p>
+                  <Link to="/notifications" key={report.id} className="block px-3 py-2 hover:bg-surface-container rounded-xl transition-colors cursor-pointer">
+                    <p className="text-xs font-bold text-on-surface truncate">{report.title || report.subject}</p>
+                    <p className="text-[10px] text-on-surface-variant/40 font-medium">{report.body || report.description}</p>
                   </Link>
                 ))
               )}

@@ -21,6 +21,8 @@ interface UserProfile {
   streak?: number;
   lastLoginDate?: string;
   earnedBadges?: string[];
+  archivedModuleIds?: string[];
+  archivedClassIds?: string[];
   xp?: number;
   level?: number;
 }

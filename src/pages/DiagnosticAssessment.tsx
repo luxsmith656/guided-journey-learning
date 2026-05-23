@@ -27,10 +27,22 @@ export default function DiagnosticAssessment() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [lastAttemptAt, setLastAttemptAt] = useState<Date | null>(null);
+  const [attemptCount, setAttemptCount] = useState(0);
   
   useEffect(() => {
     const loadQuestions = async () => {
       try {
+        if (user) {
+          const attemptsSnap = await getDocs(query(collection(db, 'diagnosticAttempts'), where('userId', '==', user.uid)));
+          const attempts = attemptsSnap.docs.map((attemptDoc) => attemptDoc.data());
+          setAttemptCount(attempts.length);
+          const latest = attempts
+            .map((attempt: any) => attempt.completedAt?.toDate?.() || (attempt.completedAt ? new Date(attempt.completedAt) : null))
+            .filter(Boolean)
+            .sort((a: Date, b: Date) => b.getTime() - a.getTime())[0];
+          if (latest) setLastAttemptAt(latest);
+        }
         const q = query(
             collection(db, 'questions'), 
             where('type', '==', 'diagnostic'),
@@ -142,6 +154,7 @@ export default function DiagnosticAssessment() {
           strongTopics: analysis.strongTopics,
           recommendedModuleIds: scorePercent < 50 ? ['mod_intro_profed'] : [],
           diagnosticAttemptId: attemptId,
+          diagnosticAttemptCount: attemptCount + 1,
           streak: user?.streak || 0,
           badges: user?.earnedBadges || [],
           lastUpdatedAt: serverTimestamp()
@@ -235,6 +248,9 @@ export default function DiagnosticAssessment() {
     };
   };
 
+  const cooldownEndsAt = lastAttemptAt ? new Date(lastAttemptAt.getTime() + 3 * 24 * 60 * 60 * 1000) : null;
+  const isCooldownActive = !!cooldownEndsAt && cooldownEndsAt.getTime() > Date.now();
+
   if (isLoading) return (
     <div className="min-h-screen bg-surface flex flex-col items-center justify-center p-6 text-center">
        <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-6"></div>
@@ -260,11 +276,17 @@ export default function DiagnosticAssessment() {
           <div className="w-16 h-16 bg-primary/10 text-primary rounded-2xl flex items-center justify-center mb-6">
             <span className="material-symbols-outlined text-3xl">psychology</span>
           </div>
-          <h1 className="text-3xl font-black font-headline text-on-surface mb-4">Diagnostic Assessment</h1>
+          <h1 className="text-3xl font-black font-headline text-on-surface mb-4">{attemptCount > 0 ? 'Reassessment' : 'Diagnostic Assessment'}</h1>
           <p className="text-on-surface-variant font-medium mb-8 leading-relaxed">
-            Welcome to the Let Mastery review process! Before you begin, we need to understand your current baseline.
-            This diagnostic exam helps the AI tailor your learning path.
+            {attemptCount > 0
+              ? 'This reassessment updates your learning profile and tracks how your mastery changes over time.'
+              : 'Welcome to the Let Mastery review process. This diagnostic helps the AI tailor your learning path.'}
           </p>
+          {isCooldownActive && (
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm font-bold text-amber-700 mb-6">
+              You can reassess every 3 days. Next available: {cooldownEndsAt?.toLocaleString()}.
+            </div>
+          )}
           
           <div className="space-y-4 mb-10">
             <div className="bg-surface-container p-4 rounded-2xl border border-outline-variant/30 flex gap-4 items-start">
@@ -289,7 +311,8 @@ export default function DiagnosticAssessment() {
 
           <button 
             onClick={() => setHasStarted(true)}
-            className="w-full bg-primary text-on-primary font-bold py-4 px-6 rounded-2xl shadow-lg hover:-translate-y-0.5 transition-transform uppercase tracking-widest text-sm flex items-center justify-center gap-2"
+            disabled={isCooldownActive}
+            className="w-full bg-primary text-on-primary font-bold py-4 px-6 rounded-2xl shadow-lg hover:-translate-y-0.5 transition-transform uppercase tracking-widest text-sm flex items-center justify-center gap-2 disabled:opacity-50"
           >
             Start Assessment <span className="material-symbols-outlined text-lg">arrow_forward</span>
           </button>

@@ -134,6 +134,22 @@ service cloud.firestore {
       allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
       allow create, update: if isSignedIn() && (incoming().userId == request.auth.uid || (resource != null && existing().userId == request.auth.uid));
     }
+
+    match /assignments/{assignmentId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isInstructor();
+    }
+
+    match /assignmentSubmissions/{submissionId} {
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
+      allow update: if isInstructor() || (isSignedIn() && existing().userId == request.auth.uid);
+    }
+
+    match /learningNotes/{noteId} {
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow read, update, delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
+    }
     
     match /aiDrafts/{draftId} {
       allow read, write: if isInstructor();
@@ -151,6 +167,16 @@ service cloud.firestore {
     match /reports/{reportId} {
       allow create: if isSignedIn();
       allow read, list, update, delete: if isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow create: if isInstructor() || isAdmin();
+      allow read, update: if isSignedIn() && (
+        resource.data.get('recipientIds', []).hasAny([request.auth.uid]) ||
+        resource.data.get('roleRecipients', []).hasAny([getUserData().get('role', 'student')]) ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
     }
     
     match /activityLogs/{logId} {

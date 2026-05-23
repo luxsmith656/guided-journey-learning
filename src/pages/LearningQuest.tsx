@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
   ArrowLeft,
+  Bookmark,
   BookOpen,
   CheckCircle2,
   ChevronRight,
@@ -114,6 +115,8 @@ export default function LearningQuest() {
   const [appealComment, setAppealComment] = useState('');
   const [appealSent, setAppealSent] = useState(false);
   const [proctorMessage, setProctorMessage] = useState('');
+  const [lessonNote, setLessonNote] = useState('');
+  const [isBookmarked, setIsBookmarked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sessionStartedAt] = useState(Date.now());
   const [nowTick, setNowTick] = useState(Date.now());
@@ -132,6 +135,7 @@ export default function LearningQuest() {
   const recordFirstAttemptOnly = (module as any).recordFirstAttemptOnly !== false;
   const moduleDueAt = (module as any).dueAt ? new Date((module as any).dueAt) : null;
   const modulePastDue = !!moduleDueAt && moduleDueAt.getTime() < Date.now() && progress.status !== 'completed';
+  const learningState = getLearningState(progress, parts.length);
 
   const progressDocId = user ? `${user.uid}_${module.id}` : '';
   const localProgressKey = `let-mastery-progress:${module.id}`;
@@ -379,6 +383,21 @@ export default function LearningQuest() {
       console.warn('Unable to submit grade review request', error);
       setProctorMessage('Could not send the review request. Please try again.');
     }
+  };
+
+  const saveLessonNote = async () => {
+    if (!user || !currentPart) return;
+    await setDoc(doc(db, 'learningNotes', `${user.uid}_${module.id}_${currentPart.id}`), {
+      userId: user.uid,
+      moduleId: module.id,
+      moduleTitle: module.title,
+      partId: currentPart.id,
+      partTitle: currentPart.title,
+      note: lessonNote,
+      bookmarked: isBookmarked,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    setProctorMessage('Lesson note saved.');
   };
 
   const completeMiniQuiz = async () => {
@@ -762,6 +781,23 @@ export default function LearningQuest() {
               </div>
             )}
             <p className="text-on-surface-variant leading-relaxed mt-5 whitespace-pre-line">{currentPart.textbookSection.body}</p>
+            <div className="rounded-2xl border border-outline-variant/40 bg-surface-container/40 p-4 mt-6">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <p className="text-xs font-black uppercase tracking-widest text-primary">Personal note</p>
+                <button onClick={() => setIsBookmarked(!isBookmarked)} className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-bold ${isBookmarked ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface'}`}>
+                  <Bookmark size={14} />
+                  {isBookmarked ? 'Bookmarked' : 'Bookmark'}
+                </button>
+              </div>
+              <textarea
+                value={lessonNote}
+                onChange={(event) => setLessonNote(event.target.value)}
+                rows={3}
+                placeholder="Write a note, memory cue, or question tied to this lesson chunk."
+                className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm outline-none focus:border-primary/40 resize-none"
+              />
+              <button onClick={saveLessonNote} className="mt-3 rounded-xl bg-primary text-on-primary px-4 py-2 text-xs font-bold">Save note</button>
+            </div>
             {currentPart.textbookSection.mediaUrl && (
               <div className="mt-6 rounded-2xl border border-outline-variant/40 overflow-hidden bg-surface-container">
                 <iframe
@@ -1011,7 +1047,7 @@ export default function LearningQuest() {
         </div>
         <div className="hidden sm:flex items-center gap-2 rounded-full bg-surface-container px-3 py-2 text-xs font-bold text-on-surface-variant">
           <Save size={14} />
-          Auto-saved
+          {learningState}
         </div>
       </header>
 
@@ -1040,6 +1076,17 @@ function computeProgressPercent(progress: QuestProgress, partCount: number) {
   const base = Math.round((completedParts / Math.max(partCount + 1, 1)) * 100);
   if (progress.phase === 'finalExam') return Math.max(base, 85);
   return Math.min(95, base);
+}
+
+function getLearningState(progress: QuestProgress, partCount: number) {
+  if (progress.status === 'completed' && (progress.finalScore || 0) >= 95) return 'MASTERED';
+  if (progress.status === 'completed') return 'COMPLETED';
+  if (progress.phase === 'finalExam') return 'READY_FOR_ASSESSMENT';
+  if (progress.mustReread || (progress.failedAttempts || 0) > 0) return 'REVIEWING';
+  if (progress.phase === 'miniQuiz' || progress.phase === 'activity') return 'PRACTICING';
+  if (Object.keys(progress.partScores || {}).length === 0 && progress.phase === 'intro') return 'NOT_STARTED';
+  if (partCount > 0 && Object.keys(progress.partScores || {}).length < partCount) return 'IN_PROGRESS';
+  return 'PAUSED';
 }
 
 function isChoiceQuestion(question?: JourneyQuestion) {
