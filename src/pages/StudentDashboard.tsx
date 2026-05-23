@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { journeyModules } from '../lib/learningJourney';
+import { buildStudyPlan, getRecallInsights } from '../lib/learningInsights';
 
 export default function StudentDashboard() {
   const { user } = useAuth();
@@ -109,6 +110,8 @@ export default function StudentDashboard() {
     || Object.entries(profile?.masteryByTopic || {}).sort((a: any, b: any) => a[1] - b[1])[0]?.[0]
     || 'your weakest topic';
   const nextModule = assignedModules.find((module) => module.progress < 100) || assignedModules[0];
+  const recallInsights = getRecallInsights(profile);
+  const studyPlan = buildStudyPlan({ modules: assignedModules, recallInsights, weakTopicLabel });
 
   return (
     <StudentLayout title="Dashboard">
@@ -216,6 +219,16 @@ export default function StudentDashboard() {
                  </div>
                  
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {recallInsights[0] && (
+                      <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant shadow-sm hover:border-primary/30 transition-colors cursor-pointer md:col-span-2" onClick={() => navigate('/flashcards')}>
+                         <div className="flex items-center justify-between mb-2">
+                            <span className="text-[10px] font-bold bg-primary/10 text-primary px-2 py-0.5 rounded uppercase tracking-widest">Recall Due</span>
+                            <Clock size={14} className="text-primary" />
+                         </div>
+                         <h4 className="font-bold text-sm text-on-surface mb-1">Your mastery in {recallInsights[0].topicId} is getting weaker.</h4>
+                         <p className="text-[11px] text-on-surface-variant leading-relaxed">Mastery faded from {recallInsights[0].mastery}% to about {recallInsights[0].decayedMastery}% after {recallInsights[0].daysSinceReview} days without review. Take a quick recall challenge.</p>
+                      </div>
+                    )}
                     <div className="bg-surface-container-lowest rounded-xl p-4 border border-outline-variant shadow-sm hover:border-amber-500/30 transition-colors cursor-pointer" onClick={() => navigate('/flashcards')}>
                        <div className="flex items-center justify-between mb-2">
                           <span className="text-[10px] font-bold bg-amber-500/10 text-amber-600 px-2 py-0.5 rounded uppercase tracking-widest">Review Needed</span>
@@ -270,26 +283,18 @@ export default function StudentDashboard() {
                     <Clock size={18} className="text-on-surface-variant/60" /> Schedule
                  </h3>
                  <div className="space-y-4">
-                    <div className="flex gap-4">
-                       <div className="flex flex-col items-center min-w-10">
-                          <span className="text-[10px] font-bold uppercase tracking-widest text-error">Today</span>
-                          <span className="text-xl font-extrabold text-on-surface">24</span>
-                       </div>
-                       <div className="bg-error/5 border border-error/10 p-3 rounded-xl flex-1">
-                          <p className="text-xs font-bold text-on-surface leading-tight mb-1">Module 1 Quiz Due</p>
-                          <p className="text-[10px] text-on-surface-variant font-medium">Closes at 11:59 PM</p>
-                       </div>
-                    </div>
-                    <div className="flex gap-4">
-                       <div className="flex flex-col items-center min-w-10">
-                          <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/40">Wed</span>
-                          <span className="text-xl font-extrabold text-on-surface">26</span>
-                       </div>
-                       <div className="bg-surface-container p-3 rounded-xl flex-1 border border-outline-variant/10">
-                          <p className="text-xs font-bold text-on-surface leading-tight mb-1">Read: Curriculum Theory</p>
-                          <p className="text-[10px] text-on-surface-variant font-medium">Lesson 3.1</p>
-                       </div>
-                    </div>
+                    {studyPlan.map((item, index) => (
+                      <button key={`${item.title}-${index}`} onClick={() => navigate(item.targetLink)} className="w-full flex gap-4 text-left">
+                         <div className="flex flex-col items-center min-w-10">
+                            <span className={`text-[10px] font-bold uppercase tracking-widest ${item.priority === 'high' ? 'text-error' : item.priority === 'medium' ? 'text-primary' : 'text-on-surface-variant/50'}`}>{index === 0 ? 'Today' : index === 1 ? 'Next' : 'Later'}</span>
+                            <span className="text-xl font-extrabold text-on-surface">{index + 1}</span>
+                         </div>
+                         <div className="bg-surface-container border border-outline-variant/40 p-3 rounded-xl flex-1 hover:border-primary/40 transition-colors">
+                            <p className="text-xs font-bold text-on-surface leading-tight mb-1">{item.title}</p>
+                            <p className="text-[10px] text-on-surface-variant font-medium">{item.body}</p>
+                         </div>
+                      </button>
+                    ))}
                  </div>
               </div>
 

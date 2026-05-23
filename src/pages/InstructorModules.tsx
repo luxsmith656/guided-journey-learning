@@ -21,6 +21,7 @@ import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
 import { JourneyModulePart, JourneyQuestion, journeyModules, journeySubjects } from '../lib/learningJourney';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { createNotification, getClassRecipientIds } from '../lib/notifications';
 
 interface BuilderModule {
   id: string;
@@ -493,6 +494,7 @@ export default function InstructorModules() {
     };
 
     try {
+      let savedModuleId = draft.id;
       if (draft.id && !journeyModules.some((module) => module.id === draft.id)) {
         await updateDoc(doc(db, 'modules', draft.id), payload);
         setToastMsg('Module updated');
@@ -501,10 +503,27 @@ export default function InstructorModules() {
           ...payload,
           createdAt: serverTimestamp(),
         });
+        savedModuleId = newDoc.id;
         setSelectedModuleId(newDoc.id);
         setDraft((current) => ({ ...current, id: newDoc.id }));
         setIsCreatingNew(false);
         setToastMsg('Module created');
+      }
+      if (draft.isPublished && draft.publishScope === 'classes' && draft.classIds.length) {
+        await Promise.all(draft.classIds.map(async (classId) => {
+          const recipientIds = await getClassRecipientIds(classId);
+          if (!recipientIds.length) return;
+          await createNotification({
+            title: `Module published: ${draft.title}`,
+            body: `A module is available in your class journey${draft.dueAt ? ` and is due ${new Date(draft.dueAt).toLocaleString()}` : ''}.`,
+            type: 'module_published',
+            targetLink: `/quest?moduleId=${savedModuleId}`,
+            recipientIds,
+            classId,
+            createdBy: user?.uid,
+            createdByEmail: user?.email,
+          });
+        }));
       }
       setShowToast(true);
     } catch (error) {

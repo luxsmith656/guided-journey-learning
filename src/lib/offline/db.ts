@@ -34,6 +34,21 @@ interface LetMasteryDB extends DBSchema {
     key: string;
     value: any;
   };
+  localNotes: {
+    key: string;
+    value: any;
+    indexes: { 'by-module': string; 'by-synced': number };
+  };
+  localRecallChallenges: {
+    key: string;
+    value: any;
+    indexes: { 'by-topic': string; 'by-synced': number };
+  };
+  localStudyPlan: {
+    key: string;
+    value: any;
+    indexes: { 'by-user': string };
+  };
   syncQueue: {
     key: string;
     value: any;
@@ -46,7 +61,7 @@ interface LetMasteryDB extends DBSchema {
 }
 
 export async function initDB(): Promise<IDBPDatabase<LetMasteryDB>> {
-  return openDB<LetMasteryDB>('LetMasteryDB', 1, {
+  return openDB<LetMasteryDB>('LetMasteryDB', 2, {
     upgrade(db) {
       if (!db.objectStoreNames.contains('localQuestions')) {
         const store = db.createObjectStore('localQuestions', { keyPath: 'id' });
@@ -74,6 +89,20 @@ export async function initDB(): Promise<IDBPDatabase<LetMasteryDB>> {
       }
       if (!db.objectStoreNames.contains('localProgress')) {
         db.createObjectStore('localProgress', { keyPath: 'userId' });
+      }
+      if (!db.objectStoreNames.contains('localNotes')) {
+        const store = db.createObjectStore('localNotes', { keyPath: 'id' });
+        store.createIndex('by-module', 'moduleId');
+        store.createIndex('by-synced', 'synced');
+      }
+      if (!db.objectStoreNames.contains('localRecallChallenges')) {
+        const store = db.createObjectStore('localRecallChallenges', { keyPath: 'id' });
+        store.createIndex('by-topic', 'topicId');
+        store.createIndex('by-synced', 'synced');
+      }
+      if (!db.objectStoreNames.contains('localStudyPlan')) {
+        const store = db.createObjectStore('localStudyPlan', { keyPath: 'id' });
+        store.createIndex('by-user', 'userId');
       }
       if (!db.objectStoreNames.contains('syncQueue')) {
         const store = db.createObjectStore('syncQueue', { keyPath: 'id' });

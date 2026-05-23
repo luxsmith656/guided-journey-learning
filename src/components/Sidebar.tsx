@@ -12,6 +12,7 @@ export default function Sidebar() {
     { name: 'Dashboard', path: '/admin/dashboard', icon: 'dashboard' },
     { name: 'Modules', path: '/admin/modules', icon: 'view_timeline' },
     { name: 'Classes', path: '/admin/classes', icon: 'groups' },
+    { name: 'Certificates', path: '/admin/certificates', icon: 'workspace_premium' },
     { name: 'Analytics', path: '/admin/analytics', icon: 'bar_chart' },
     { name: 'Users', path: '/admin/users', icon: 'group' },
     { name: 'Settings', path: '/admin/settings', icon: 'settings' },

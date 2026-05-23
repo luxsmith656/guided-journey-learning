@@ -13,15 +13,16 @@ import {
   Settings, 
   Bell, 
   Search,
-  BookText,
   Target
 } from 'lucide-react';
 import HelpSupportButton from './HelpSupportButton';
+import { useNotifications } from '../hooks/useNotifications';
 
 export default function StudentLayout({ children, title }: { children: ReactNode, title?: string }) {
   const { user, signOut } = useAuth();
   const { settings } = useBranding();
   const { theme, toggleTheme } = useTheme();
+  const { unreadCount } = useNotifications();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -121,8 +122,12 @@ export default function StudentLayout({ children, title }: { children: ReactNode
             >
               <span className="material-symbols-outlined text-[20px]">{theme === 'light' ? 'dark_mode' : 'light_mode'}</span>
             </button>
-            <button onClick={() => alert('No new notifications')} className="p-2 text-on-surface-variant hover:bg-surface-container rounded-full transition-colors relative">
-               <span className="absolute top-2 right-2 w-2 h-2 bg-error rounded-full pointer-events-none"></span>
+            <button onClick={() => navigate('/notifications')} className="p-2 text-on-surface-variant hover:bg-surface-container rounded-full transition-colors relative">
+               {unreadCount > 0 && (
+                 <span className="absolute top-1 right-1 min-w-4 h-4 px-1 bg-error rounded-full text-[9px] leading-4 text-white font-black pointer-events-none text-center">
+                   {unreadCount > 9 ? '9+' : unreadCount}
+                 </span>
+               )}
                <Bell size={20} />
             </button>
             <button onClick={() => navigate('/profile')} className="p-2 text-on-surface-variant hover:bg-surface-container rounded-full transition-colors hidden md:block">

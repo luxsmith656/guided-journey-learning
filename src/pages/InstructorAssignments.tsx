@@ -4,6 +4,7 @@ import { ClipboardList, Plus } from 'lucide-react';
 import InstructorLayout from '../components/InstructorLayout';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
+import { createNotification, getClassRecipientIds } from '../lib/notifications';
 
 export default function InstructorAssignments() {
   const { user } = useAuth();
@@ -49,6 +50,25 @@ export default function InstructorAssignments() {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+    try {
+      const recipientIds = await getClassRecipientIds(draft.classId);
+      if (recipientIds.length) {
+        await createNotification({
+          title: `New assignment: ${draft.title.trim()}`,
+          body: draft.dueAt
+            ? `Your instructor posted an assignment due ${new Date(draft.dueAt).toLocaleString()}. Submit a Drive or external link with access enabled.`
+            : 'Your instructor posted a new assignment. Submit a Drive or external link with access enabled.',
+          type: 'assignment_created',
+          targetLink: '/student/todo',
+          recipientIds,
+          classId: draft.classId,
+          createdBy: user.uid,
+          createdByEmail: user.email,
+        });
+      }
+    } catch (error) {
+      console.warn('Assignment notification was not sent', error);
+    }
     setDraft((current) => ({ ...current, title: '', instructions: '', dueAt: '' }));
   };
 

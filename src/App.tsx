@@ -31,6 +31,7 @@ import AdminClasses from './pages/AdminClasses';
 import InstructorClasses from './pages/InstructorClasses';
 import InstructorGradebook from './pages/InstructorGradebook';
 import InstructorAssignments from './pages/InstructorAssignments';
+import AdminCertificates from './pages/AdminCertificates';
 import TextbookLibrary from './pages/TextbookLibrary';
 import ChooseLearningMode from './pages/ChooseLearningMode';
 import ChooseFocus from './pages/ChooseFocus';
@@ -135,6 +136,7 @@ function AppContent() {
             <Route path="/admin/users" element={<ProtectedRoute role="admin"><Users /></ProtectedRoute>} />
             <Route path="/admin/classes" element={<ProtectedRoute role="admin"><AdminClasses /></ProtectedRoute>} />
             <Route path="/admin/modules" element={<ProtectedRoute role="admin"><InstructorModules /></ProtectedRoute>} />
+            <Route path="/admin/certificates" element={<ProtectedRoute role="admin"><AdminCertificates /></ProtectedRoute>} />
             <Route path="/admin/notifications" element={<ProtectedRoute role="admin"><Notifications /></ProtectedRoute>} />
             <Route path="/admin/activity-logs" element={<ProtectedRoute role="admin"><ActivityLogs /></ProtectedRoute>} />
             <Route path="/admin/bulk-upload" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />

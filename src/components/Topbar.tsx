@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useSidebar } from '../context/SidebarContext';
 import { useAuth } from '../context/AuthContext';
 import { seedDatabase } from '../lib/db-seed';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { useNotifications } from '../hooks/useNotifications';
 
 interface TopbarProps {
   title?: string;
@@ -16,21 +15,11 @@ export default function Topbar({ title = 'LET Mastery' }: TopbarProps) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [openReports, setOpenReports] = useState<any[]>([]);
+  const { unreadItems, unreadCount } = useNotifications();
   const { toggle } = useSidebar();
   const { signOut, user } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
-
-  useEffect(() => {
-    if (!user) return;
-    const notificationsQuery = query(collection(db, 'notifications'), where('recipientIds', 'array-contains', user.uid));
-    const unsubNotifications = onSnapshot(notificationsQuery, (snapshot) => {
-      const notifications = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setOpenReports(notifications.filter((item: any) => item.status !== 'read'));
-    });
-    return () => unsubNotifications();
-  }, [user]);
 
   const handleSignOut = () => {
     signOut();
@@ -87,7 +76,7 @@ export default function Topbar({ title = 'LET Mastery' }: TopbarProps) {
           className="p-2 rounded-full text-on-surface-variant hover:bg-surface-container transition-colors duration-200 relative w-10 h-10 flex items-center justify-center"
         >
           <span className="material-symbols-outlined">notifications</span>
-          {openReports.length > 0 && <span className="absolute top-2 right-2 w-2 h-2 bg-error rounded-full border-2 border-surface"></span>}
+          {unreadCount > 0 && <span className="absolute top-2 right-2 min-w-4 h-4 px-1 bg-error rounded-full border-2 border-surface text-[9px] leading-3 text-white font-black">{unreadCount > 9 ? '9+' : unreadCount}</span>}
         </button>
 
         {notificationsOpen && (
@@ -97,11 +86,11 @@ export default function Topbar({ title = 'LET Mastery' }: TopbarProps) {
               <Link to="/notifications" className="text-[10px] text-primary font-bold uppercase tracking-widest hover:underline">View All</Link>
             </div>
             <div className="p-2 space-y-1 max-h-[300px] overflow-y-auto">
-              {openReports.length === 0 ? (
+              {unreadItems.length === 0 ? (
                 <p className="text-xs text-on-surface-variant/40 px-3 py-2">No new notifications</p>
               ) : (
-                openReports.map(report => (
-                  <Link to="/notifications" key={report.id} className="block px-3 py-2 hover:bg-surface-container rounded-xl transition-colors cursor-pointer">
+                unreadItems.slice(0, 5).map(report => (
+                  <Link to={report.targetLink || '/notifications'} key={report.id} className="block px-3 py-2 hover:bg-surface-container rounded-xl transition-colors cursor-pointer">
                     <p className="text-xs font-bold text-on-surface truncate">{report.title || report.subject}</p>
                     <p className="text-[10px] text-on-surface-variant/40 font-medium">{report.body || report.description}</p>
                   </Link>

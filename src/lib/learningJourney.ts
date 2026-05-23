@@ -11,6 +11,10 @@ export interface JourneyQuestion {
   id: string;
   stem: string;
   type?: 'multiple_choice' | 'true_false' | 'enumeration' | 'short_answer' | 'essay';
+  partId?: string;
+  topicId?: string;
+  competencyId?: string;
+  difficulty?: 'easy' | 'medium' | 'hard';
   options: { id: string; text: string }[];
   correctOptionId: string;
   explanation: string;
@@ -52,6 +56,16 @@ export interface JourneyModule {
   questions: JourneyQuestion[];
   parts?: JourneyModulePart[];
   finalExam?: JourneyQuestion[];
+  examBlueprint?: {
+    questionCount: number;
+    sectionDistribution: Record<string, number>;
+    competencyDistribution: Record<string, number>;
+    difficultyMix: Record<'easy' | 'medium' | 'hard', number>;
+  };
+  competencies?: { id: string; label: string; description?: string }[];
+  rubric?: { criterion: string; points: number; description: string }[];
+  unlockRules?: { minScorePercent?: number; requireAllParts?: boolean; motivationalQuote?: string };
+  templateSourceId?: string;
   prerequisiteModuleIds?: string[];
   publishScope?: 'public' | 'classes';
   classIds?: string[];

@@ -27,6 +27,7 @@ import {
   JourneyModulePart,
   JourneyQuestion,
 } from '../lib/learningJourney';
+import { createNotification } from '../lib/notifications';
 
 type QuestPhase = 'intro' | 'read' | 'lesson' | 'miniQuiz' | 'activity' | 'finalExam' | 'complete';
 
@@ -41,6 +42,7 @@ interface QuestProgress {
   timeSpentSeconds?: number;
   failedAttempts?: number;
   mustReread?: boolean;
+  weakPartIds?: string[];
   proctorWarnings?: number;
   examLockedUntil?: number;
   status: 'in_progress' | 'completed';
@@ -62,6 +64,7 @@ const defaultProgress: QuestProgress = {
   currentPartIndex: 0,
   phase: 'intro',
   partScores: {},
+  weakPartIds: [],
   status: 'in_progress',
 };
 
@@ -136,6 +139,7 @@ export default function LearningQuest() {
   const moduleDueAt = (module as any).dueAt ? new Date((module as any).dueAt) : null;
   const modulePastDue = !!moduleDueAt && moduleDueAt.getTime() < Date.now() && progress.status !== 'completed';
   const learningState = getLearningState(progress, parts.length);
+  const weakReviewParts = parts.filter((part) => progress.weakPartIds?.includes(part.id));
 
   const progressDocId = user ? `${user.uid}_${module.id}` : '';
   const localProgressKey = `let-mastery-progress:${module.id}`;
@@ -173,6 +177,7 @@ export default function LearningQuest() {
           timeSpentSeconds: nextProgress.timeSpentSeconds || 0,
           failedAttempts: nextProgress.failedAttempts || 0,
           mustReread: !!nextProgress.mustReread,
+          weakPartIds: nextProgress.weakPartIds || [],
           proctorWarnings: nextProgress.proctorWarnings || 0,
           examLockedUntil: nextProgress.examLockedUntil || null,
           progressPercent: computeProgressPercent(nextProgress, parts.length),
@@ -243,6 +248,7 @@ export default function LearningQuest() {
               timeSpentSeconds: data.timeSpentSeconds || 0,
               failedAttempts: data.failedAttempts || 0,
               mustReread: !!data.mustReread,
+              weakPartIds: data.weakPartIds || [],
               proctorWarnings: data.proctorWarnings || 0,
               examLockedUntil: data.examLockedUntil || undefined,
               status: data.status === 'completed' ? 'completed' : 'in_progress',
@@ -377,6 +383,15 @@ export default function LearningQuest() {
         lastFeedback: lastFeedback || null,
         createdAt: serverTimestamp(),
       });
+      await createNotification({
+        title: `Grade review requested: ${module.title}`,
+        body: `${user.fullName || user.email} asked for an instructor review on ${scope === 'final_exam' ? 'the final exam' : 'a mini quiz'}.`,
+        type: 'grade_appeal',
+        targetLink: '/instructor/grades',
+        roleRecipients: ['instructor', 'admin'],
+        createdBy: user.uid,
+        createdByEmail: user.email,
+      });
       setAppealComment('');
       setAppealSent(true);
     } catch (error) {
@@ -440,6 +455,7 @@ export default function LearningQuest() {
     }
     setFinalGrades(grades);
     const score = Math.round(Object.values(grades).reduce((sum, grade) => sum + grade.score, 0) / Math.max(finalExam.length, 1));
+    const weakPartIds = getWeakPartIds(finalExam, grades, parts);
     const officialFirstScore = progress.firstFinalScore ?? score;
     const status = score >= FINAL_PASSING_SCORE ? 'completed' : 'in_progress';
     const phase: QuestPhase = score >= FINAL_PASSING_SCORE ? 'complete' : 'read';
@@ -455,6 +471,7 @@ export default function LearningQuest() {
       timeSpentSeconds: (progress.timeSpentSeconds || 0) + Math.round((Date.now() - sessionStartedAt) / 1000),
       status,
       mustReread: score < FINAL_PASSING_SCORE,
+      weakPartIds: score < FINAL_PASSING_SCORE ? weakPartIds : [],
       failedAttempts: score >= FINAL_PASSING_SCORE ? progress.failedAttempts || 0 : (progress.failedAttempts || 0) + 1,
       proctorWarnings: 0,
       examLockedUntil: undefined,
@@ -474,6 +491,10 @@ export default function LearningQuest() {
           const currentMastery = profile.masteryByTopic?.[module.topicId] || 0;
           await updateDoc(profileRef, {
             [`masteryByTopic.${module.topicId}`]: Math.min(100, currentMastery + 12),
+            [`masteryFreshnessByTopic.${module.topicId}.lastReviewedAt`]: serverTimestamp(),
+            [`masteryFreshnessByTopic.${module.topicId}.lastMasteredAt`]: serverTimestamp(),
+            [`masteryFreshnessByTopic.${module.topicId}.decayedMastery`]: Math.min(100, currentMastery + 12),
+            [`masteryFreshnessByTopic.${module.topicId}.recallDueAt`]: new Date(Date.now() + 14 * 86_400_000).toISOString(),
             nextRecommendedModuleId: null,
             lastUpdatedAt: serverTimestamp(),
           });
@@ -770,6 +791,14 @@ export default function LearningQuest() {
             {progress.mustReread && (
               <div className="rounded-2xl border border-error/20 bg-error/10 p-4 mt-5">
                 <p className="font-bold text-error">Final exam not passed yet. Reread this section first; your next exam attempt will use fresh questions from this textbook.</p>
+                {weakReviewParts.length > 0 && (
+                  <div className="mt-3 rounded-xl bg-surface-container-lowest/70 border border-error/10 p-3">
+                    <p className="text-xs font-black uppercase tracking-widest text-error mb-2">Review route</p>
+                    <ul className="space-y-1 text-sm font-semibold text-on-surface">
+                      {weakReviewParts.map((part) => <li key={part.id}>- {part.title}</li>)}
+                    </ul>
+                  </div>
+                )}
                 {progress.finalScore !== undefined && (
                   <GradeAppealBox
                     comment={appealComment}
@@ -950,6 +979,9 @@ export default function LearningQuest() {
             {progress.finalScore !== undefined && progress.finalScore < FINAL_PASSING_SCORE && (
               <div className="rounded-2xl border border-error/20 bg-error/10 p-4 mt-5">
                 <p className="font-bold text-error">Last score: {progress.finalScore}%. You must reread the textbook before retrying. The next attempt uses fresh questions from the same reading.</p>
+                {weakReviewParts.length > 0 && (
+                  <p className="text-sm text-error/80 mt-2">Focus review: {weakReviewParts.map((part) => part.title).join(', ')}.</p>
+                )}
               </div>
             )}
 
@@ -1107,6 +1139,16 @@ function normalizeOptions(question: JourneyQuestion) {
 function questionTypeLabel(question: JourneyQuestion) {
   const type = question.type || 'multiple_choice';
   return type.replace('_', ' ');
+}
+
+function getWeakPartIds(finalExam: JourneyQuestion[], grades: Record<string, GradeResult>, parts: JourneyModulePart[]) {
+  const weak = new Set<string>();
+  finalExam.forEach((question, index) => {
+    if ((grades[question.id]?.score || 0) >= 70) return;
+    const partId = question.partId || parts[index % Math.max(parts.length, 1)]?.id;
+    if (partId) weak.add(partId);
+  });
+  return [...weak];
 }
 
 function formatDuration(totalSeconds: number) {

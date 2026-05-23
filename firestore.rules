@@ -170,13 +170,32 @@ service cloud.firestore {
     }
 
     match /notifications/{notificationId} {
-      allow create: if isInstructor() || isAdmin();
-      allow read, update: if isSignedIn() && (
+      allow create: if isInstructor() || isAdmin() || (
+        isSignedIn() &&
+        incoming().createdBy == request.auth.uid &&
+        incoming().get('type', '') == 'grade_appeal'
+      );
+      allow read: if isSignedIn() && (
         resource.data.get('recipientIds', []).hasAny([request.auth.uid]) ||
         resource.data.get('roleRecipients', []).hasAny([getUserData().get('role', 'student')]) ||
         isAdmin()
       );
+      allow update: if isSignedIn() && (
+        resource.data.get('recipientIds', []).hasAny([request.auth.uid]) ||
+        resource.data.get('roleRecipients', []).hasAny([getUserData().get('role', 'student')]) ||
+        isAdmin()
+      ) && incoming().diff(existing()).affectedKeys().hasOnly(['readBy', 'status']);
       allow delete: if isAdmin();
+    }
+
+    match /certificateTemplates/{templateId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /certificates/{certificateId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
     }
     
     match /activityLogs/{logId} {
