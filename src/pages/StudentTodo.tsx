@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
-import { CheckCircle2, ChevronRight, ClipboardList } from 'lucide-react';
+import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
+import { CalendarDays, CheckCircle2, ChevronRight, ClipboardList } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import StudentLayout from '../components/StudentLayout';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
+import { buildStudyPlan, getRecallInsights } from '../lib/learningInsights';
 
 export default function StudentTodo() {
   const { user } = useAuth();
@@ -12,6 +13,7 @@ export default function StudentTodo() {
   const [modules, setModules] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
   const [progressByModule, setProgressByModule] = useState<Record<string, any>>({});
+  const [profile, setProfile] = useState<any>(null);
 
   useEffect(() => {
     const moduleQuery = query(collection(db, 'modules'), where('isPublished', '==', true));
@@ -30,6 +32,9 @@ export default function StudentTodo() {
 
   useEffect(() => {
     if (!user) return;
+    const unsubProfile = onSnapshot(doc(db, 'learnerProfiles', user.uid), (snapshot) => {
+      setProfile(snapshot.exists() ? snapshot.data() : null);
+    });
     const progressQuery = query(collection(db, 'moduleProgress'), where('userId', '==', user.uid));
     const unsubProgress = onSnapshot(progressQuery, (snapshot) => {
       const rows: Record<string, any> = {};
@@ -39,7 +44,10 @@ export default function StudentTodo() {
       });
       setProgressByModule(rows);
     });
-    return () => unsubProgress();
+    return () => {
+      unsubProfile();
+      unsubProgress();
+    };
   }, [user]);
 
   const todoItems = useMemo(() => modules
@@ -52,6 +60,16 @@ export default function StudentTodo() {
   const assignmentItems = assignments
     .filter((assignment) => !assignment.classId || assignment.classId === user?.activeClassId)
     .sort((a, b) => new Date(a.dueAt || '2999-12-31').getTime() - new Date(b.dueAt || '2999-12-31').getTime());
+  const weakTopicLabel = profile?.weakTopics?.[0]
+    || Object.entries(profile?.masteryByTopic || {}).sort((a: any, b: any) => a[1] - b[1])[0]?.[0]
+    || 'your weakest topic';
+  const studyPlan = buildStudyPlan({
+    modules: todoItems.map((module) => ({ ...module, progress: progressByModule[module.id]?.progressPercent || 0 })),
+    assignments: assignmentItems,
+    recallInsights: getRecallInsights(profile),
+    weakTopicLabel,
+    progressByModule,
+  });
 
   return (
     <StudentLayout title="To Do">
@@ -63,6 +81,22 @@ export default function StudentTodo() {
           </div>
           <h1 className="text-3xl font-extrabold font-headline">Your module to-do list</h1>
           <p className="text-sm text-on-surface-variant mt-2">Due dates set by your instructor appear here. Modules without due dates stay available.</p>
+        </section>
+
+        <section className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center gap-3 mb-4">
+            <CalendarDays size={18} className="text-primary" />
+            <h2 className="text-xl font-extrabold font-headline">Personal study planner</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {studyPlan.map((item, index) => (
+              <button key={`${item.title}-${index}`} onClick={() => navigate(item.targetLink)} className="rounded-2xl border border-outline-variant/40 bg-surface-container/30 p-4 text-left hover:border-primary/40 transition-colors">
+                <p className={`text-[10px] font-black uppercase tracking-widest mb-2 ${item.priority === 'high' ? 'text-error' : 'text-primary'}`}>{item.dayLabel || 'This week'} {item.minutes ? `/ ${item.minutes} min` : ''}</p>
+                <h3 className="font-extrabold text-on-surface">{item.title}</h3>
+                <p className="text-xs text-on-surface-variant/60 mt-1">{item.body}</p>
+              </button>
+            ))}
+          </div>
         </section>
 
         <section className="space-y-3">

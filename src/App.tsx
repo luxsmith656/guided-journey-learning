@@ -32,6 +32,8 @@ import InstructorClasses from './pages/InstructorClasses';
 import InstructorGradebook from './pages/InstructorGradebook';
 import InstructorAssignments from './pages/InstructorAssignments';
 import AdminCertificates from './pages/AdminCertificates';
+import InstructorCertificates from './pages/InstructorCertificates';
+import CertificateVerify from './pages/CertificateVerify';
 import TextbookLibrary from './pages/TextbookLibrary';
 import ChooseLearningMode from './pages/ChooseLearningMode';
 import ChooseFocus from './pages/ChooseFocus';
@@ -121,6 +123,7 @@ function AppContent() {
             <Route path="/" element={<Navigate to="/sign-in" replace />} />
             <Route path="/sign-in" element={<SignIn />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/verify/:certificateId" element={<CertificateVerify />} />
             <Route path="/debug" element={<DevIndex />} />
             
             {/* Admin Routes */}
@@ -152,6 +155,7 @@ function AppContent() {
             <Route path="/instructor/modules" element={<ProtectedRoute role="instructor"><InstructorModules /></ProtectedRoute>} />
             <Route path="/instructor/assignments" element={<ProtectedRoute role="instructor"><InstructorAssignments /></ProtectedRoute>} />
             <Route path="/instructor/grades" element={<ProtectedRoute role="instructor"><InstructorGradebook /></ProtectedRoute>} />
+            <Route path="/instructor/certificates" element={<ProtectedRoute role="instructor"><InstructorCertificates /></ProtectedRoute>} />
             <Route path="/instructor/students" element={<ProtectedRoute role="instructor"><Users /></ProtectedRoute>} />
             <Route path="/instructor/ai-drafts" element={<ProtectedRoute role="instructor"><AIDrafts /></ProtectedRoute>} />
             <Route path="/instructor/analytics" element={<ProtectedRoute role="instructor"><Analytics /></ProtectedRoute>} />

@@ -25,6 +25,8 @@ export default function StudentDashboard() {
   const [profile, setProfile] = useState<any>(null);
   const [classData, setClassData] = useState<any>(null);
   const [assignedModules, setAssignedModules] = useState<any[]>([]);
+  const [assignments, setAssignments] = useState<any[]>([]);
+  const [progressByModuleState, setProgressByModuleState] = useState<Record<string, any>>({});
   const [gradeSummary, setGradeSummary] = useState({ avgScore: 0, completed: 0, rank: 0 });
   const [analytics, setAnalytics] = useState({
     mastery: 0,
@@ -52,6 +54,7 @@ export default function StudentDashboard() {
         // Simulating fetching active courses/modules workflow
         const progressSnap = await getDocs(query(collection(db, 'moduleProgress'), where('userId', '==', user.uid)));
         const progressByModule = new Map(progressSnap.docs.map((progressDoc) => [progressDoc.data().moduleId, progressDoc.data()]));
+        setProgressByModuleState(Object.fromEntries(progressByModule));
         const scoredRows = progressSnap.docs.map((progressDoc) => progressDoc.data()).filter((row) => row.finalScore != null);
         setGradeSummary({
           avgScore: scoredRows.length ? Math.round(scoredRows.reduce((sum, row) => sum + (row.finalScore || 0), 0) / scoredRows.length) : 0,
@@ -75,6 +78,10 @@ export default function StudentDashboard() {
                    mods.push({
                      id: mid,
                      title: moduleData?.title || localModule?.title || `Module ${mid.substring(0,4)}`,
+                     duration: moduleData?.duration || localModule?.duration,
+                     dueAt: moduleData?.dueAt || '',
+                     parts: moduleData?.parts || localModule?.parts || [],
+                     examBlueprint: moduleData?.examBlueprint || localModule?.examBlueprint,
                      status: progressByModule.get(mid)?.status === 'completed' && (progressByModule.get(mid)?.finalScore ?? 0) >= 85 ? 'Completed' : progressByModule.get(mid)?.phase === 'finalExam' ? 'Final Exam' : 'In Progress',
                      progress: progressByModule.get(mid)?.progressPercent ?? localModule?.progress ?? 0
                    });
@@ -96,9 +103,16 @@ export default function StudentDashboard() {
              id: module.id,
              title: module.title,
              status: progressByModule.get(module.id)?.status === 'completed' && (progressByModule.get(module.id)?.finalScore ?? 0) >= 85 ? 'Completed' : module.status === 'available' ? 'Ready' : 'In Progress',
+             duration: module.duration,
+             dueAt: (module as any).dueAt || '',
+             parts: module.parts || [],
+             examBlueprint: (module as any).examBlueprint,
              progress: progressByModule.get(module.id)?.progressPercent ?? module.progress
            })));
         }
+        const assignmentSnap = await getDocs(collection(db, 'assignments'));
+        setAssignments(assignmentSnap.docs.map((assignmentDoc) => ({ id: assignmentDoc.id, ...assignmentDoc.data() }))
+          .filter((assignment: any) => !assignment.classId || assignment.classId === user.activeClassId));
       } catch (e) {
         console.error('Failed to fetch dashboard data', e);
       }
@@ -111,7 +125,7 @@ export default function StudentDashboard() {
     || 'your weakest topic';
   const nextModule = assignedModules.find((module) => module.progress < 100) || assignedModules[0];
   const recallInsights = getRecallInsights(profile);
-  const studyPlan = buildStudyPlan({ modules: assignedModules, recallInsights, weakTopicLabel });
+  const studyPlan = buildStudyPlan({ modules: assignedModules, recallInsights, weakTopicLabel, assignments, progressByModule: progressByModuleState });
 
   return (
     <StudentLayout title="Dashboard">
@@ -277,21 +291,23 @@ export default function StudentDashboard() {
                 </div>
               )}
               
-              {/* Upcoming Deadlines / Schedule */}
+              {/* Personal Study Planner */}
               <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-sm">
                  <h3 className="font-extrabold font-headline text-on-surface mb-4 flex items-center gap-2">
-                    <Clock size={18} className="text-on-surface-variant/60" /> Schedule
+                    <Clock size={18} className="text-on-surface-variant/60" /> Weekly study plan
                  </h3>
+                 <p className="text-xs text-on-surface-variant/60 mb-4">Built from deadlines, module length, quiz difficulty, weak areas, and your current pace.</p>
                  <div className="space-y-4">
                     {studyPlan.map((item, index) => (
                       <button key={`${item.title}-${index}`} onClick={() => navigate(item.targetLink)} className="w-full flex gap-4 text-left">
                          <div className="flex flex-col items-center min-w-10">
-                            <span className={`text-[10px] font-bold uppercase tracking-widest ${item.priority === 'high' ? 'text-error' : item.priority === 'medium' ? 'text-primary' : 'text-on-surface-variant/50'}`}>{index === 0 ? 'Today' : index === 1 ? 'Next' : 'Later'}</span>
+                            <span className={`text-[10px] font-bold uppercase tracking-widest ${item.priority === 'high' ? 'text-error' : item.priority === 'medium' ? 'text-primary' : 'text-on-surface-variant/50'}`}>{item.dayLabel || (index === 0 ? 'Today' : index === 1 ? 'Next' : 'Later')}</span>
                             <span className="text-xl font-extrabold text-on-surface">{index + 1}</span>
                          </div>
                          <div className="bg-surface-container border border-outline-variant/40 p-3 rounded-xl flex-1 hover:border-primary/40 transition-colors">
                             <p className="text-xs font-bold text-on-surface leading-tight mb-1">{item.title}</p>
                             <p className="text-[10px] text-on-surface-variant font-medium">{item.body}</p>
+                            {item.minutes && <p className="text-[10px] text-primary font-black uppercase tracking-widest mt-2">{item.minutes} min</p>}
                          </div>
                       </button>
                     ))}

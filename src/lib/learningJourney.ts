@@ -53,6 +53,7 @@ export interface JourneyModule {
   progress: number;
   lessonBlocks: { type: 'heading' | 'text' | 'callout'; content: string }[];
   resources: JourneyResource[];
+  flowItems?: { id: string; type: 'textbook' | 'lesson' | 'quiz' | 'activity' | 'exam'; refId: string; title: string }[];
   questions: JourneyQuestion[];
   parts?: JourneyModulePart[];
   finalExam?: JourneyQuestion[];
@@ -66,6 +67,9 @@ export interface JourneyModule {
   rubric?: { criterion: string; points: number; description: string }[];
   unlockRules?: { minScorePercent?: number; requireAllParts?: boolean; motivationalQuote?: string };
   templateSourceId?: string;
+  certificateEnabled?: boolean;
+  certificateTemplateId?: string;
+  certificateRequirementNote?: string;
   prerequisiteModuleIds?: string[];
   publishScope?: 'public' | 'classes';
   classIds?: string[];
