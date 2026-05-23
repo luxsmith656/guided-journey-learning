@@ -48,14 +48,14 @@ export default function LearningQuest() {
         if (mid) {
           const modSnap = await getDoc(doc(db, 'modules', mid));
           if (modSnap.exists()) {
-            activeModule = { id: modSnap.id, ...modSnap.data() };
+            activeModule = { id: modSnap.id, ...modSnap.data() } as any;
             setModule(activeModule);
             setTopicName(activeModule.title);
             
             // Load questions for challenge
             if (activeModule.questionIds && activeModule.questionIds.length > 0) {
               const qs: any[] = [];
-              for (const qid of activeModule.questionIds) {
+              for (const qid of activeModule.questionIds as string[]) {
                 const qSnap = await getDoc(doc(db, 'questions', qid));
                 if (qSnap.exists()) qs.push({ id: qSnap.id, ...qSnap.data() });
               }
