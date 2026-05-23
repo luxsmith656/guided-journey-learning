@@ -2,10 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-export default function Loading() {
+export default function Loading({ redirect = true }: { redirect?: boolean }) {
   const [progress, setProgress] = useState(0);
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -13,8 +13,16 @@ export default function Loading() {
         if (prev >= 100) {
           clearInterval(interval);
           setTimeout(() => {
-            if (user?.role === 'admin') navigate('/admin/dashboard');
-            else navigate('/focus'); // Goes to focus choice first after login
+            if (!redirect) return;
+            if (isLoading) return;
+            if (!user) {
+              navigate('/sign-in', { replace: true });
+              return;
+            }
+            if (user.role === 'admin') navigate('/admin/dashboard', { replace: true });
+            else if (user.role === 'instructor') navigate('/instructor/dashboard', { replace: true });
+            else if (!user.onboarded) navigate('/onboarding', { replace: true });
+            else navigate('/student/dashboard', { replace: true });
           }, 500);
           return 100;
         }
@@ -22,7 +30,7 @@ export default function Loading() {
       });
     }, 200);
     return () => clearInterval(interval);
-  }, [navigate, user]);
+  }, [navigate, user, isLoading, redirect]);
 
   return (
     <div className="bg-primary text-on-primary font-body min-h-[100dvh] flex flex-col items-center justify-center relative overflow-hidden antialiased">

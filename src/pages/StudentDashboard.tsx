@@ -67,7 +67,7 @@ export default function StudentDashboard() {
                    mods.push({
                      id: mid,
                      title: moduleData?.title || localModule?.title || `Module ${mid.substring(0,4)}`,
-                     status: progressByModule.get(mid)?.status === 'completed' ? 'Completed' : progressByModule.get(mid)?.phase === 'finalExam' ? 'Final Exam' : 'In Progress',
+                     status: progressByModule.get(mid)?.status === 'completed' && (progressByModule.get(mid)?.finalScore ?? 0) >= 85 ? 'Completed' : progressByModule.get(mid)?.phase === 'finalExam' ? 'Final Exam' : 'In Progress',
                      progress: progressByModule.get(mid)?.progressPercent ?? localModule?.progress ?? 0
                    });
                  } catch {
@@ -87,7 +87,7 @@ export default function StudentDashboard() {
            setAssignedModules(journeyModules.slice(0, 3).map(module => ({
              id: module.id,
              title: module.title,
-             status: progressByModule.get(module.id)?.status === 'completed' ? 'Completed' : module.status === 'available' ? 'Ready' : 'In Progress',
+             status: progressByModule.get(module.id)?.status === 'completed' && (progressByModule.get(module.id)?.finalScore ?? 0) >= 85 ? 'Completed' : module.status === 'available' ? 'Ready' : 'In Progress',
              progress: progressByModule.get(module.id)?.progressPercent ?? module.progress
            })));
         }

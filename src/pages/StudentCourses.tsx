@@ -84,7 +84,7 @@ export default function StudentCourses() {
         if (data.moduleId) progressMap[data.moduleId] = data;
       });
       setProgressByModule(progressMap);
-      setCompletedModuleIds(new Set(Object.values(progressMap).filter((data: any) => data.status === 'completed').map((data: any) => data.moduleId)));
+      setCompletedModuleIds(new Set(Object.values(progressMap).filter((data: any) => data.status === 'completed' && (data.finalScore ?? 0) >= 85).map((data: any) => data.moduleId)));
     }, (error) => {
       console.warn('Unable to load module completion gates', error);
     });
@@ -100,7 +100,7 @@ export default function StudentCourses() {
       const progress = progressByModule[module.id];
       return {
         ...module,
-        status: progress?.status === 'completed' ? 'completed' : progress ? 'in_progress' : module.status,
+        status: progress?.status === 'completed' && (progress.finalScore ?? 0) >= 85 ? 'completed' : progress ? 'in_progress' : module.status,
         progress: progress?.progressPercent ?? module.progress,
       } as JourneyModule;
     });
@@ -320,7 +320,7 @@ export default function StudentCourses() {
                             onClick={() => openModule(module.id, isLocked)}
                             className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-on-primary px-5 py-3 text-sm font-bold disabled:bg-surface-container disabled:text-on-surface-variant/40"
                           >
-                            {isLocked ? 'Pass previous final' : module.progress > 0 ? 'Resume module' : 'Start module'}
+                            {isLocked ? 'Pass previous final at 85%' : module.progress > 0 ? 'Resume module' : 'Start module'}
                             {!isLocked && <ArrowRight size={16} />}
                           </button>
                         </div>
@@ -338,7 +338,7 @@ export default function StudentCourses() {
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-5">
                           {module.resources.map((resource) => {
                             const Icon = resource.type === 'textbook' ? Library : resource.type === 'quiz' ? FileQuestion : resource.type === 'exam' ? ClipboardCheck : BookOpen;
-                            const target = resource.type === 'textbook' ? '/library' : resource.type === 'exam' ? `/exam?category=${module.subjectId}` : `/exam?type=practice&category=${module.subjectId}`;
+                            const target = resource.type === 'textbook' ? `/quest?moduleId=${module.id}` : resource.type === 'exam' ? `/exam?category=${module.subjectId}` : `/exam?type=practice&category=${module.subjectId}`;
                             return (
                               <button
                                 key={resource.id}
@@ -366,7 +366,7 @@ export default function StudentCourses() {
                     { title: 'Learn', body: 'Short module lesson with examples and a quick check.' },
                     { title: 'Read', body: 'Textbook chapter linked to the exact topic.' },
                     { title: 'Practice', body: 'Adaptive quiz pulls questions from weak skills.' },
-                    { title: 'Prove', body: 'Exam simulation unlocks after topic modules.' },
+                    { title: 'Prove', body: 'Pass each module final at 85% to unlock the next module.' },
                   ].map((item) => (
                     <div key={item.title} className="flex gap-3">
                       <div className="w-7 h-7 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-black text-xs shrink-0">

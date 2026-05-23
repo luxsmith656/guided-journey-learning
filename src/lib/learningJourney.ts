@@ -27,6 +27,7 @@ export interface JourneyModulePart {
     title: string;
     body: string;
     estimatedReadMinutes: number;
+    mediaUrl?: string;
   };
   lessonBlocks: { type: 'heading' | 'text' | 'callout'; content: string }[];
   miniQuiz: JourneyQuestion[];

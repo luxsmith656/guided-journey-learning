@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import InstructorLayout from '../components/InstructorLayout';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Users, BookOpen, BrainCircuit, Activity } from 'lucide-react';
+import { Users, BookOpen, BrainCircuit, Activity, ClipboardCheck } from 'lucide-react';
 import { motion } from 'motion/react';
 import { addDoc, collection, serverTimestamp, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -17,6 +17,7 @@ export default function InstructorDashboard() {
     aiDrafts: 0,
   });
   const [classes, setClasses] = useState<any[]>([]);
+  const [reviewRequests, setReviewRequests] = useState<any[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -42,7 +43,7 @@ export default function InstructorDashboard() {
           ? Math.round(relevantProgress.reduce((sum, progress) => sum + (progress.progressPercent || 0), 0) / relevantProgress.length)
           : 0;
         const passRate = relevantProgress.length
-          ? Math.round((relevantProgress.filter((progress) => progress.status === 'completed').length / relevantProgress.length) * 100)
+          ? Math.round((relevantProgress.filter((progress) => progress.status === 'completed' && (progress.finalScore ?? 0) >= 85).length / relevantProgress.length) * 100)
           : 0;
         return { ...classData, studentCount: eSnap.size || classData.studentCount || 0, avgProgress, passRate };
       });
@@ -75,12 +76,18 @@ export default function InstructorDashboard() {
     const unsubDrafts = onSnapshot(qDrafts, (s) => {
       setStats(prev => ({ ...prev, aiDrafts: s.size }));
     });
+
+    const qReviews = query(collection(db, 'submissions'), where('type', '==', 'grade_review'), where('status', '==', 'pending'));
+    const unsubReviews = onSnapshot(qReviews, (s) => {
+      setReviewRequests(s.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() })));
+    });
     
     return () => {
       unsubClassesByUid();
       unsubClassesByEmail();
       unsubQuestions();
       unsubDrafts();
+      unsubReviews();
     };
   }, [user]);
   
@@ -181,6 +188,27 @@ export default function InstructorDashboard() {
                 <div className="hidden md:block w-32 h-32 opacity-20">
                    <BrainCircuit size={128} className="text-white" />
                 </div>
+              </div>
+            </div>
+
+            <div className="bg-surface-container-lowest p-8 rounded-2xl border border-outline-variant shadow-sm">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-bold font-headline text-on-surface flex items-center gap-2">
+                  <ClipboardCheck className="text-primary" /> AI Grade Reviews
+                </h3>
+                <span className="text-xs font-black text-primary bg-primary/10 rounded-full px-3 py-1">{reviewRequests.length} pending</span>
+              </div>
+              <div className="space-y-3">
+                {reviewRequests.slice(0, 4).map((request) => (
+                  <div key={request.id} className="rounded-xl border border-outline-variant/30 bg-surface-container/30 p-4">
+                    <p className="text-sm font-extrabold text-on-surface">{request.moduleTitle || 'Module review'}</p>
+                    <p className="text-xs text-on-surface-variant/60 mt-1">{request.studentEmail || 'Student'} / {request.scope?.replace('_', ' ') || 'AI grade'}</p>
+                    <p className="text-xs font-medium text-on-surface mt-3 line-clamp-3">{request.comment}</p>
+                  </div>
+                ))}
+                {reviewRequests.length === 0 && (
+                  <p className="text-sm font-bold text-on-surface-variant/40">No student grade review requests yet.</p>
+                )}
               </div>
             </div>
 

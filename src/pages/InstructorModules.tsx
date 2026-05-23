@@ -54,6 +54,7 @@ const blankPart = (index: number): JourneyModulePart => ({
     title: 'Textbook section title',
     body: 'Write the reading section here. Keep it focused and connected to the mini lesson.',
     estimatedReadMinutes: 8,
+    mediaUrl: '',
   },
   lessonBlocks: [
     { type: 'heading', content: 'Mini lesson heading' },
@@ -238,9 +239,12 @@ export default function InstructorModules() {
   const createNewDraft = () => {
     const topicId = selectedSubject.topics[0]?.id || journeySubjects[0].topics[0].id;
     setSelectedModuleId('');
-    setDraft({ ...emptyModule, subjectId: selectedSubject.id, topicId, parts: [blankPart(0)], finalExam: [blankQuestion('final-q1')] });
+    setSearchTerm('');
+    setDraft({ ...emptyModule, title: 'New module draft', subjectId: selectedSubject.id, topicId, parts: [blankPart(0)], finalExam: [blankQuestion('final-q1')] });
     setActiveStep('outline');
     setActivePartIndex(0);
+    setToastMsg('New module draft created. Fill Step 1, then save it.');
+    setShowToast(true);
   };
 
   const addPart = () => {
@@ -427,6 +431,13 @@ export default function InstructorModules() {
               </div>
 
               <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+                {!selectedModuleId && (
+                  <button className="w-full text-left rounded-xl border p-4 transition-all border-primary bg-primary/10">
+                    <p className="font-extrabold text-on-surface leading-tight">{draft.title || 'New module draft'}</p>
+                    <p className="text-[11px] text-on-surface-variant/60 mt-1 line-clamp-2">Unsaved module / Step 1 ready</p>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-primary mt-2">Fill the outline, parts, quizzes, then save</p>
+                  </button>
+                )}
                 {filteredModules.map((module) => {
                   const subject = journeySubjects.find((item) => item.id === module.subjectId);
                   const topic = subject?.topics.find((item) => item.id === module.topicId);
@@ -635,6 +646,14 @@ function PartsStep({
               <input type="number" min={1} value={activePart.textbookSection.estimatedReadMinutes} onChange={(event) => updatePart({ textbookSection: { ...activePart.textbookSection, estimatedReadMinutes: Number(event.target.value) } })} className="input" />
             </Field>
           </div>
+          <Field label="Video or Canva embed link">
+            <input
+              value={activePart.textbookSection.mediaUrl || ''}
+              onChange={(event) => updatePart({ textbookSection: { ...activePart.textbookSection, mediaUrl: event.target.value } })}
+              placeholder="Paste a YouTube, Canva, or slide embed URL without uploading the file"
+              className="input"
+            />
+          </Field>
           <Field label="Textbook reading body">
             <textarea value={activePart.textbookSection.body} onChange={(event) => updatePart({ textbookSection: { ...activePart.textbookSection, body: event.target.value } })} rows={7} className="input resize-y leading-relaxed" />
           </Field>

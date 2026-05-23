@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useBranding } from '../context/BrandingContext';
 import { signInWithGoogle, loginWithEmail, registerWithEmail } from '../lib/firebase';
+import Loading from './Loading';
 
 export default function SignIn() {
   const [email, setEmail] = useState('');
@@ -18,30 +19,21 @@ export default function SignIn() {
 
   useEffect(() => {
     if (!authLoading && user) {
-      if (user.role === 'admin') navigate('/admin/dashboard');
-      else if (user.role === 'instructor') navigate('/instructor/dashboard');
-      else {
-        if (!user.onboarded) navigate('/onboarding');
-        else navigate('/student/dashboard');
-      }
+      navigate('/loading', { replace: true });
     }
   }, [user, authLoading, navigate]);
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <span className="w-10 h-10 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
-      </div>
-    );
+    return <Loading redirect={false} />;
   }
 
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
     try {
       await signInWithGoogle();
+      navigate('/loading', { replace: true });
     } catch (err: any) {
       setError(err.message);
-    } finally {
       setIsLoading(false);
     }
   };
@@ -68,10 +60,10 @@ export default function SignIn() {
           throw loginErr;
         }
       }
+      navigate('/loading', { replace: true });
     } catch (err: any) {
       console.error('Demo Auth error:', err.code, err.message);
       setError(`Demo login failed: ${err.message}`);
-    } finally {
       setIsLoading(false);
     }
   };
@@ -108,6 +100,7 @@ export default function SignIn() {
             }
           }
         }
+        navigate('/loading', { replace: true });
       } catch (err: any) {
       console.error('Auth error:', err.code, err.message);
       if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
@@ -119,7 +112,6 @@ export default function SignIn() {
       } else {
         setError(err.message);
       }
-    } finally {
       setIsLoading(false);
     }
   };

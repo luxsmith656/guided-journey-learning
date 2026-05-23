@@ -76,7 +76,7 @@ export default function Dashboard() {
       const avgProgress = progressRows.length
         ? Math.round(progressRows.reduce((sum, row) => sum + (row.progressPercent || 0), 0) / progressRows.length)
         : 0;
-      const completedModules = progressRows.filter((row) => row.status === 'completed').length;
+      const completedModules = progressRows.filter((row) => row.status === 'completed' && (row.finalScore ?? 0) >= 85).length;
       setCounts(prev => ({ ...prev, avgProgress, completedModules }));
     });
     

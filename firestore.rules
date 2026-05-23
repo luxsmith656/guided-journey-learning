@@ -160,7 +160,8 @@ service cloud.firestore {
     
     match /submissions/{submissionId} {
       allow create: if isSignedIn();
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
+      allow update: if isInstructor();
     }
   }
 }

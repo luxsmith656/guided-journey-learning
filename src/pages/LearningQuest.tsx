@@ -6,14 +6,16 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronRight,
+  Clock,
   FileQuestion,
   Gamepad2,
   Library,
   RotateCcw,
   Save,
+  ShieldAlert,
   Trophy,
 } from 'lucide-react';
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -34,6 +36,8 @@ interface QuestProgress {
   finalScore?: number;
   failedAttempts?: number;
   mustReread?: boolean;
+  proctorWarnings?: number;
+  examLockedUntil?: number;
   status: 'in_progress' | 'completed';
 }
 
@@ -55,6 +59,10 @@ const defaultProgress: QuestProgress = {
   partScores: {},
   status: 'in_progress',
 };
+
+const FINAL_PASSING_SCORE = 85;
+const MAX_PROCTOR_WARNINGS = 5;
+const EXAM_LOCK_MINUTES = 5;
 
 function normalizeFirestoreModule(id: string, data: any): JourneyModule {
   return {
@@ -94,6 +102,9 @@ export default function LearningQuest() {
   const [finalGrades, setFinalGrades] = useState<Record<string, GradeResult>>({});
   const [finalQuestionSet, setFinalQuestionSet] = useState<JourneyQuestion[]>([]);
   const [isGrading, setIsGrading] = useState(false);
+  const [appealComment, setAppealComment] = useState('');
+  const [appealSent, setAppealSent] = useState(false);
+  const [proctorMessage, setProctorMessage] = useState('');
   const [loading, setLoading] = useState(true);
 
   const parts = useMemo(() => getModuleParts(module), [module]);
@@ -103,6 +114,9 @@ export default function LearningQuest() {
   const currentMiniQuestion = currentPart?.miniQuiz?.[0];
   const finalAnsweredCount = finalExam.filter((question) => !!finalAnswers[question.id]?.trim()).length;
   const finalScorePercent = progress.finalScore ?? 0;
+  const examLocked = !!progress.examLockedUntil && Date.now() < progress.examLockedUntil;
+  const examLockMinutesLeft = examLocked ? Math.max(1, Math.ceil(((progress.examLockedUntil || 0) - Date.now()) / 60000)) : 0;
+  const allPartsCompleted = parts.every((part) => progress.partScores[part.id] !== undefined);
 
   const progressDocId = user ? `${user.uid}_${module.id}` : '';
   const localProgressKey = `let-mastery-progress:${module.id}`;
@@ -136,6 +150,8 @@ export default function LearningQuest() {
           finalScore: nextProgress.finalScore ?? null,
           failedAttempts: nextProgress.failedAttempts || 0,
           mustReread: !!nextProgress.mustReread,
+          proctorWarnings: nextProgress.proctorWarnings || 0,
+          examLockedUntil: nextProgress.examLockedUntil || null,
           progressPercent: computeProgressPercent(nextProgress, parts.length),
           lastAccessedAt: serverTimestamp(),
           completedAt: nextProgress.status === 'completed' ? serverTimestamp() : null,
@@ -200,6 +216,8 @@ export default function LearningQuest() {
               finalScore: data.finalScore ?? undefined,
               failedAttempts: data.failedAttempts || 0,
               mustReread: !!data.mustReread,
+              proctorWarnings: data.proctorWarnings || 0,
+              examLockedUntil: data.examLockedUntil || undefined,
               status: data.status === 'completed' ? 'completed' : 'in_progress',
             };
           }
@@ -229,6 +247,15 @@ export default function LearningQuest() {
 
   const moveToPhase = async (phase: QuestPhase) => {
     if (phase === 'finalExam') {
+      if (!allPartsCompleted && progress.status !== 'completed') {
+        setProctorMessage('Finish every textbook part and mini check before opening the final exam.');
+        return;
+      }
+      if (examLocked) {
+        setProctorMessage(`Final exam is locked for ${examLockMinutesLeft} more minute${examLockMinutesLeft === 1 ? '' : 's'} after repeated warnings.`);
+        return;
+      }
+      await requestExamFullscreen();
       await prepareFinalExam(!!progress.mustReread || (progress.failedAttempts || 0) > 0);
     }
     persistProgress({ ...progress, phase, status: phase === 'complete' ? 'completed' : 'in_progress' });
@@ -272,6 +299,65 @@ export default function LearningQuest() {
     }
   };
 
+  const requestExamFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch (error) {
+      console.warn('Fullscreen request was blocked by the browser', error);
+      setProctorMessage('Fullscreen could not start automatically. Keep this exam tab active.');
+    }
+  };
+
+  const registerProctorWarning = async (reason: string) => {
+    const nextCount = (progress.proctorWarnings || 0) + 1;
+    if (nextCount >= MAX_PROCTOR_WARNINGS) {
+      const lockedUntil = Date.now() + EXAM_LOCK_MINUTES * 60 * 1000;
+      setProctorMessage(`Exam paused after ${MAX_PROCTOR_WARNINGS} warnings. You can retry in ${EXAM_LOCK_MINUTES} minutes.`);
+      setFinalAnswers({});
+      setFinalGrades({});
+      await persistProgress({
+        ...progress,
+        phase: 'read',
+        currentPartIndex: 0,
+        status: 'in_progress',
+        mustReread: true,
+        proctorWarnings: nextCount,
+        examLockedUntil: lockedUntil,
+      });
+      return;
+    }
+
+    setProctorMessage(`${reason} Warning ${nextCount}/${MAX_PROCTOR_WARNINGS}. Keep the exam full-screen and active.`);
+    await persistProgress({ ...progress, proctorWarnings: nextCount });
+  };
+
+  const submitGradeAppeal = async (scope: 'mini_quiz' | 'final_exam') => {
+    if (!user || !appealComment.trim()) return;
+    try {
+      await addDoc(collection(db, 'submissions'), {
+        type: 'grade_review',
+        status: 'pending',
+        userId: user.uid,
+        studentEmail: user.email,
+        moduleId: module.id,
+        moduleTitle: module.title,
+        partId: currentPart?.id || null,
+        scope,
+        comment: appealComment.trim(),
+        finalScore: progress.finalScore ?? null,
+        lastFeedback: lastFeedback || null,
+        createdAt: serverTimestamp(),
+      });
+      setAppealComment('');
+      setAppealSent(true);
+    } catch (error) {
+      console.warn('Unable to submit grade review request', error);
+      setProctorMessage('Could not send the review request. Please try again.');
+    }
+  };
+
   const completeMiniQuiz = async () => {
     const answer = isChoiceQuestion(currentMiniQuestion) ? selectedAnswer || '' : writtenAnswer;
     const grade = lastGradeScore != null
@@ -312,25 +398,27 @@ export default function LearningQuest() {
     }
     setFinalGrades(grades);
     const score = Math.round(Object.values(grades).reduce((sum, grade) => sum + grade.score, 0) / Math.max(finalExam.length, 1));
-    const status = score >= 70 ? 'completed' : 'in_progress';
-    const phase: QuestPhase = score >= 70 ? 'complete' : 'read';
+    const status = score >= FINAL_PASSING_SCORE ? 'completed' : 'in_progress';
+    const phase: QuestPhase = score >= FINAL_PASSING_SCORE ? 'complete' : 'read';
 
     await persistProgress({
       ...progress,
       phase,
-      currentPartIndex: score >= 70 ? progress.currentPartIndex : 0,
+      currentPartIndex: score >= FINAL_PASSING_SCORE ? progress.currentPartIndex : 0,
       finalScore: score,
       status,
-      mustReread: score < 70,
-      failedAttempts: score >= 70 ? progress.failedAttempts || 0 : (progress.failedAttempts || 0) + 1,
+      mustReread: score < FINAL_PASSING_SCORE,
+      failedAttempts: score >= FINAL_PASSING_SCORE ? progress.failedAttempts || 0 : (progress.failedAttempts || 0) + 1,
+      proctorWarnings: 0,
+      examLockedUntil: undefined,
     });
     setIsGrading(false);
-    if (score < 70) {
+    if (score < FINAL_PASSING_SCORE) {
       setFinalAnswers({});
       setFinalGrades({});
     }
 
-    if (score >= 70 && user) {
+    if (score >= FINAL_PASSING_SCORE && user) {
       try {
         const profileRef = doc(db, 'learnerProfiles', user.uid);
         const profileSnap = await getDoc(profileRef);
@@ -352,7 +440,16 @@ export default function LearningQuest() {
   const resetFinalExam = () => {
     setFinalAnswers({});
     setFinalGrades({});
-    persistProgress({ ...progress, finalScore: undefined, phase: 'read', currentPartIndex: 0, status: 'in_progress', mustReread: true });
+    persistProgress({ ...progress, finalScore: undefined, phase: 'read', currentPartIndex: 0, status: 'in_progress', mustReread: true, proctorWarnings: 0, examLockedUntil: undefined });
+  };
+
+  const jumpToPart = (index: number) => {
+    persistProgress({
+      ...progress,
+      currentPartIndex: index,
+      phase: 'read',
+      status: progress.status === 'completed' ? 'completed' : 'in_progress',
+    });
   };
 
   const answerMiniQuiz = (optionId: string) => {
@@ -379,7 +476,7 @@ export default function LearningQuest() {
       if (progress.phase === 'miniQuiz' && currentMiniQuestion && !isTyping) {
         if (isChoiceQuestion(currentMiniQuestion) && ['A', 'B', 'C', 'D', 'T', 'F'].includes(key)) {
           const optionId = key === 'T' ? 'A' : key === 'F' ? 'B' : key;
-          const hasOption = currentMiniQuestion.options.some((option) => option.id === optionId);
+          const hasOption = normalizeOptions(currentMiniQuestion).some((option) => option.id === optionId);
           if (hasOption && !selectedAnswer) answerMiniQuiz(optionId);
         }
         if (event.key === 'Enter' && (selectedAnswer || (!isChoiceQuestion(currentMiniQuestion) && writtenAnswer.trim()))) {
@@ -393,11 +490,15 @@ export default function LearningQuest() {
       }
 
       if (progress.phase === 'finalExam' && !isTyping) {
+        if (event.key.length === 1 && !['A', 'B', 'C', 'D', 'T', 'F'].includes(key)) {
+          event.preventDefault();
+          setProctorMessage('Written answers must be typed inside the answer box.');
+        }
         if (['A', 'B', 'C', 'D', 'T', 'F'].includes(key)) {
           const nextQuestion = finalExam.find((question) => isChoiceQuestion(question) && !finalAnswers[question.id]);
           if (nextQuestion) {
             const optionId = key === 'T' ? 'A' : key === 'F' ? 'B' : key;
-            if (nextQuestion.options.some((option) => option.id === optionId)) {
+            if (normalizeOptions(nextQuestion).some((option) => option.id === optionId)) {
               setFinalAnswers((answers) => ({ ...answers, [nextQuestion.id]: optionId }));
             }
           }
@@ -412,6 +513,45 @@ export default function LearningQuest() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [progress.phase, currentMiniQuestion, selectedAnswer, writtenAnswer, finalAnswers, finalExam, lastFeedback]);
+
+  useEffect(() => {
+    if (progress.phase !== 'finalExam') return;
+
+    const warn = (reason: string) => {
+      registerProctorWarning(reason);
+    };
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) warn('Fullscreen was exited.');
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden) warn('The exam tab lost focus.');
+    };
+    const handleBlur = () => warn('The exam window lost focus.');
+    const blockClipboard = (event: Event) => {
+      event.preventDefault();
+      warn('Copy and paste are disabled during written exams.');
+    };
+    const blockContextMenu = (event: Event) => {
+      event.preventDefault();
+      warn('Right-click menu is disabled during the exam.');
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('blur', handleBlur);
+    document.addEventListener('copy', blockClipboard);
+    document.addEventListener('paste', blockClipboard);
+    document.addEventListener('contextmenu', blockContextMenu);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('copy', blockClipboard);
+      document.removeEventListener('paste', blockClipboard);
+      document.removeEventListener('contextmenu', blockContextMenu);
+    };
+  }, [progress.phase, progress.proctorWarnings, finalAnswers]);
 
   const prepareFinalExam = async (fresh: boolean) => {
     if (!fresh) {
@@ -473,6 +613,63 @@ export default function LearningQuest() {
     </div>
   );
 
+  const renderPartNavigator = () => (
+    <aside className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-sm h-fit lg:sticky lg:top-6">
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs font-black uppercase tracking-widest text-on-surface-variant/50">Topic book</p>
+        <span className="text-xs font-black text-primary">{computeProgressPercent(progress, parts.length)}%</span>
+      </div>
+      <div className="space-y-2">
+        {parts.map((part, index) => {
+          const isDone = progress.partScores[part.id] !== undefined;
+          const isActive = index === progress.currentPartIndex && progress.phase !== 'finalExam' && progress.phase !== 'complete';
+          return (
+            <button
+              key={part.id}
+              onClick={() => jumpToPart(index)}
+              className={`w-full text-left rounded-xl border px-3 py-3 transition-colors ${
+                isActive ? 'border-primary bg-primary/10' : 'border-outline-variant/30 bg-surface-container/30 hover:border-primary/40'
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                <span className={`mt-0.5 w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${
+                  isDone ? 'bg-emerald-500 border-emerald-500 text-white' : isActive ? 'border-primary text-primary' : 'border-outline text-on-surface-variant/40'
+                }`}>
+                  {isDone ? <CheckCircle2 size={13} /> : <span className="text-[10px] font-black">{index + 1}</span>}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-xs font-black uppercase tracking-widest text-on-surface-variant/50">Lesson {index + 1}</span>
+                  <span className="block text-sm font-extrabold text-on-surface leading-tight line-clamp-2">{part.title}</span>
+                  <span className="block text-[11px] text-on-surface-variant/60 mt-1 line-clamp-1">{part.textbookSection.title}</span>
+                </span>
+              </div>
+            </button>
+          );
+        })}
+        <button
+          onClick={() => moveToPhase('finalExam')}
+          disabled={examLocked || (!allPartsCompleted && progress.status !== 'completed')}
+          className={`w-full text-left rounded-xl border px-3 py-3 transition-colors ${
+            progress.phase === 'finalExam' ? 'border-primary bg-primary/10' : 'border-outline-variant/30 bg-surface-container/30 hover:border-primary/40'
+          } disabled:opacity-50`}
+        >
+          <div className="flex items-start gap-3">
+            <span className={`mt-0.5 w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${
+              progress.status === 'completed' ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-primary text-primary'
+            }`}>
+              <Trophy size={13} />
+            </span>
+            <span>
+              <span className="block text-xs font-black uppercase tracking-widest text-on-surface-variant/50">Gate</span>
+              <span className="block text-sm font-extrabold text-on-surface">Final module exam</span>
+              <span className="block text-[11px] text-on-surface-variant/60 mt-1">Pass at {FINAL_PASSING_SCORE}% to unlock next module</span>
+            </span>
+          </div>
+        </button>
+      </div>
+    </aside>
+  );
+
   const renderContent = () => {
     if (!currentPart && progress.phase !== 'finalExam' && progress.phase !== 'complete') {
       return <EmptyState onBack={() => navigate('/student/courses')} />;
@@ -491,7 +688,7 @@ export default function LearningQuest() {
             <div className="grid grid-cols-3 gap-3 mt-6">
               <Metric label="Parts" value={parts.length.toString()} />
               <Metric label="Final" value={`${finalExam.length || 1} items`} />
-              <Metric label="Pass" value="70%" />
+              <Metric label="Pass" value={`${FINAL_PASSING_SCORE}%`} />
             </div>
             <button onClick={() => moveToPhase('read')} className="w-full bg-primary text-on-primary px-6 py-4 rounded-2xl font-bold flex items-center justify-between shadow-sm mt-6">
               {progress.currentPartIndex > 0 || Object.keys(progress.partScores).length > 0 ? 'Resume module' : 'Start part 1'}
@@ -509,9 +706,27 @@ export default function LearningQuest() {
             {progress.mustReread && (
               <div className="rounded-2xl border border-error/20 bg-error/10 p-4 mt-5">
                 <p className="font-bold text-error">Final exam not passed yet. Reread this section first; your next exam attempt will use fresh questions from this textbook.</p>
+                {progress.finalScore !== undefined && (
+                  <GradeAppealBox
+                    comment={appealComment}
+                    sent={appealSent}
+                    onComment={(value) => { setAppealComment(value); setAppealSent(false); }}
+                    onSubmit={() => submitGradeAppeal('final_exam')}
+                  />
+                )}
               </div>
             )}
             <p className="text-on-surface-variant leading-relaxed mt-5 whitespace-pre-line">{currentPart.textbookSection.body}</p>
+            {currentPart.textbookSection.mediaUrl && (
+              <div className="mt-6 rounded-2xl border border-outline-variant/40 overflow-hidden bg-surface-container">
+                <iframe
+                  src={toEmbeddableUrl(currentPart.textbookSection.mediaUrl)}
+                  title={currentPart.textbookSection.title}
+                  className="w-full aspect-video"
+                  allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
+                />
+              </div>
+            )}
             <button onClick={() => moveToPhase('lesson')} className="w-full bg-primary text-on-primary px-6 py-4 rounded-2xl font-bold flex items-center justify-between shadow-sm mt-6">
               Continue to lesson
               <ChevronRight size={18} />
@@ -597,6 +812,14 @@ export default function LearningQuest() {
                   {lastQuestionResult === 'correct' ? 'Correct' : 'Review this idea'}
                 </p>
                 <p className="text-sm font-bold text-on-surface">{lastFeedback || currentMiniQuestion.explanation}</p>
+                {!isChoiceQuestion(currentMiniQuestion) && (
+                  <GradeAppealBox
+                    comment={appealComment}
+                    sent={appealSent}
+                    onComment={(value) => { setAppealComment(value); setAppealSent(false); }}
+                    onSubmit={() => submitGradeAppeal('mini_quiz')}
+                  />
+                )}
                 <button onClick={completeMiniQuiz} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary text-on-primary px-5 py-3 text-sm font-bold">
                   {currentPart.activity ? 'Continue to activity' : 'Continue'}
                   <ChevronRight size={16} />
@@ -628,9 +851,16 @@ export default function LearningQuest() {
           <Card>
             <HeaderKicker icon={Trophy} label="Final module exam" />
             <h2 className="text-2xl font-extrabold font-headline text-on-surface">Pass this module exam to unlock completion.</h2>
-            <p className="text-sm text-on-surface-variant mt-2">Required score: 70%. Choices support A/B/C/D and Enter. Written answers are AI-checked with spelling tolerance.</p>
+            <p className="text-sm text-on-surface-variant mt-2">Required score: {FINAL_PASSING_SCORE}%. Choices support A/B/C/D and Enter. Written answers are AI-checked with spelling tolerance.</p>
 
-            {progress.finalScore !== undefined && progress.finalScore < 70 && (
+            {examLocked && (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 mt-5 flex gap-3">
+                <Clock size={18} className="text-amber-700 shrink-0" />
+                <p className="font-bold text-amber-700">This exam is paused after repeated proctor warnings. Retry in about {examLockMinutesLeft} minute{examLockMinutesLeft === 1 ? '' : 's'}.</p>
+              </div>
+            )}
+
+            {progress.finalScore !== undefined && progress.finalScore < FINAL_PASSING_SCORE && (
               <div className="rounded-2xl border border-error/20 bg-error/10 p-4 mt-5">
                 <p className="font-bold text-error">Last score: {progress.finalScore}%. You must reread the textbook before retrying. The next attempt uses fresh questions from the same reading.</p>
               </div>
@@ -648,6 +878,7 @@ export default function LearningQuest() {
                         return (
                           <button
                             key={option.id}
+                            disabled={examLocked}
                             onClick={() => setFinalAnswers((answers) => ({ ...answers, [question.id]: option.id }))}
                             className={`rounded-xl border p-3 text-left text-sm font-semibold transition-colors ${
                               selected ? 'border-primary bg-primary/10 text-primary' : 'border-outline-variant/30 bg-surface-container/30 text-on-surface'
@@ -662,6 +893,8 @@ export default function LearningQuest() {
                     <textarea
                       value={finalAnswers[question.id] || ''}
                       onChange={(event) => setFinalAnswers((answers) => ({ ...answers, [question.id]: event.target.value }))}
+                      onPaste={(event) => event.preventDefault()}
+                      disabled={examLocked}
                       rows={question.type === 'essay' ? 6 : 3}
                       placeholder={question.type === 'enumeration' ? 'List answers separated by commas or new lines.' : 'Type your answer here.'}
                       className="w-full bg-surface-container border border-outline-variant/30 rounded-xl p-4 text-sm font-medium outline-none focus:border-primary/40"
@@ -672,7 +905,7 @@ export default function LearningQuest() {
             </div>
 
             <button
-              disabled={finalAnsweredCount < finalExam.length || isGrading}
+              disabled={examLocked || finalAnsweredCount < finalExam.length || isGrading}
               onClick={submitFinalExam}
               className="w-full bg-primary text-on-primary px-6 py-4 rounded-2xl font-bold flex items-center justify-between shadow-sm mt-6 disabled:opacity-50"
             >
@@ -691,6 +924,12 @@ export default function LearningQuest() {
             <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Module complete</p>
             <h2 className="text-2xl font-extrabold font-headline text-on-surface">You passed {module.title}</h2>
             <p className="text-on-surface-variant mt-3">Final exam score: {finalScorePercent}%. The next module can now be unlocked by the learning path.</p>
+            <GradeAppealBox
+              comment={appealComment}
+              sent={appealSent}
+              onComment={(value) => { setAppealComment(value); setAppealSent(false); }}
+              onSubmit={() => submitGradeAppeal('final_exam')}
+            />
             <div className="flex flex-col sm:flex-row gap-3 justify-center mt-7">
               <button onClick={() => navigate('/student/courses')} className="rounded-xl bg-primary text-on-primary px-6 py-3 font-bold">
                 Back to journey
@@ -707,7 +946,7 @@ export default function LearningQuest() {
 
   return (
     <div className="bg-surface text-on-surface min-h-screen p-4 md:p-8 font-body">
-      <header className="max-w-3xl mx-auto w-full flex items-center justify-between gap-4 mb-6">
+      <header className="max-w-6xl mx-auto w-full flex items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-4 min-w-0">
           <button onClick={() => navigate('/student/courses')} className="p-2 bg-surface-container-lowest rounded-full text-on-surface-variant hover:text-on-surface border border-outline-variant shadow-sm">
             <ArrowLeft size={20} />
@@ -725,11 +964,20 @@ export default function LearningQuest() {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto w-full space-y-5">
-        {renderPartStepper()}
-        <motion.div key={`${progress.phase}-${progress.currentPartIndex}`} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
-          {renderContent()}
-        </motion.div>
+      <main className="max-w-6xl mx-auto w-full grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-5">
+        {renderPartNavigator()}
+        <div className="space-y-5 min-w-0">
+          {renderPartStepper()}
+          {proctorMessage && (
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm font-bold text-amber-700 flex gap-3">
+              <ShieldAlert size={18} className="shrink-0" />
+              <span>{proctorMessage}</span>
+            </div>
+          )}
+          <motion.div key={`${progress.phase}-${progress.currentPartIndex}`} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+            {renderContent()}
+          </motion.div>
+        </div>
       </main>
     </div>
   );
@@ -761,6 +1009,49 @@ function normalizeOptions(question: JourneyQuestion) {
 function questionTypeLabel(question: JourneyQuestion) {
   const type = question.type || 'multiple_choice';
   return type.replace('_', ' ');
+}
+
+function toEmbeddableUrl(url: string) {
+  if (url.includes('youtube.com/watch?v=')) {
+    return url.replace('watch?v=', 'embed/');
+  }
+  if (url.includes('youtu.be/')) {
+    return url.replace('youtu.be/', 'www.youtube.com/embed/');
+  }
+  return url;
+}
+
+function GradeAppealBox({
+  comment,
+  sent,
+  onComment,
+  onSubmit,
+}: {
+  comment: string;
+  sent: boolean;
+  onComment: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <div className="mt-4 rounded-xl bg-surface-container-lowest/70 border border-outline-variant/40 p-4 text-left">
+      <p className="text-xs font-black uppercase tracking-widest text-on-surface-variant/50">Instructor review</p>
+      <p className="text-xs text-on-surface-variant/70 mt-1">If the AI score missed an acceptable answer, add a note and ask your instructor to double-check it.</p>
+      <textarea
+        value={comment}
+        onChange={(event) => onComment(event.target.value)}
+        rows={2}
+        placeholder="Explain why your answer should be accepted."
+        className="mt-3 w-full bg-surface-container border border-outline-variant/30 rounded-xl p-3 text-sm font-medium outline-none focus:border-primary/40"
+      />
+      <button
+        onClick={onSubmit}
+        disabled={!comment.trim() || sent}
+        className="mt-3 rounded-xl bg-primary text-on-primary px-4 py-2 text-xs font-bold disabled:opacity-50"
+      >
+        {sent ? 'Review request sent' : 'Ask instructor to review'}
+      </button>
+    </div>
+  );
 }
 
 function rotateQuestions(questions: JourneyQuestion[]) {
