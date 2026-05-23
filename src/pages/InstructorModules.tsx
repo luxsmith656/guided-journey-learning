@@ -5,12 +5,15 @@ import {
   CheckCircle2,
   ClipboardList,
   FileQuestion,
+  Eye,
   Layers3,
   Plus,
   Save,
   Search,
   Sparkles,
   Trash2,
+  Wand2,
+  X,
 } from 'lucide-react';
 import { addDoc, collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from 'firebase/firestore';
 import DashboardLayout from '../components/DashboardLayout';
@@ -140,6 +143,10 @@ export default function InstructorModules() {
   const [searchTerm, setSearchTerm] = useState('');
   const [assistantPrompt, setAssistantPrompt] = useState('');
   const [isDrafting, setIsDrafting] = useState(false);
+  const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const [moduleFilter, setModuleFilter] = useState<'all' | 'published' | 'draft'>('all');
+  const [builderMode, setBuilderMode] = useState<'edit' | 'preview'>('edit');
+  const [aiOpen, setAiOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [showToast, setShowToast] = useState(false);
 
@@ -154,7 +161,7 @@ export default function InstructorModules() {
         const nextModules = [...remoteModules, ...seedModules];
         setModules(nextModules);
 
-        if (!nextModules.some((module) => module.id === selectedModuleId)) {
+        if (!isCreatingNew && !nextModules.some((module) => module.id === selectedModuleId)) {
           setSelectedModuleId(nextModules[0]?.id || '');
           setDraft(nextModules[0] || emptyModule);
         }
@@ -165,16 +172,17 @@ export default function InstructorModules() {
     );
 
     return () => unsubscribe();
-  }, [selectedModuleId]);
+  }, [selectedModuleId, isCreatingNew]);
 
   const selectedSubject = journeySubjects.find((subject) => subject.id === draft.subjectId) || journeySubjects[0];
   const activePart = draft.parts[Math.min(activePartIndex, Math.max(draft.parts.length - 1, 0))];
 
   const filteredModules = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    if (!term) return modules;
-
     return modules.filter((module) => {
+      if (moduleFilter === 'published' && !module.isPublished) return false;
+      if (moduleFilter === 'draft' && module.isPublished) return false;
+      if (!term) return true;
       const subject = journeySubjects.find((item) => item.id === module.subjectId);
       const topic = subject?.topics.find((item) => item.id === module.topicId);
       return (
@@ -184,7 +192,7 @@ export default function InstructorModules() {
         topic?.title.toLowerCase().includes(term)
       );
     });
-  }, [modules, searchTerm]);
+  }, [modules, searchTerm, moduleFilter]);
 
   const updateDraft = (field: keyof BuilderModule, value: string | number | boolean | JourneyModulePart[] | JourneyQuestion[]) => {
     setDraft((current) => {
@@ -230,19 +238,23 @@ export default function InstructorModules() {
   };
 
   const selectModule = (module: BuilderModule) => {
+    setIsCreatingNew(false);
     setSelectedModuleId(module.id);
     setDraft(module);
     setActiveStep('outline');
     setActivePartIndex(0);
+    setBuilderMode('edit');
   };
 
   const createNewDraft = () => {
     const topicId = selectedSubject.topics[0]?.id || journeySubjects[0].topics[0].id;
+    setIsCreatingNew(true);
     setSelectedModuleId('');
     setSearchTerm('');
-    setDraft({ ...emptyModule, title: 'New module draft', subjectId: selectedSubject.id, topicId, parts: [blankPart(0)], finalExam: [blankQuestion('final-q1')] });
+    setDraft({ ...emptyModule, title: '', description: '', subjectId: selectedSubject.id, topicId, parts: [blankPart(0)], finalExam: [blankQuestion('final-q1')] });
     setActiveStep('outline');
     setActivePartIndex(0);
+    setBuilderMode('edit');
     setToastMsg('New module draft created. Fill Step 1, then save it.');
     setShowToast(true);
   };
@@ -330,6 +342,37 @@ export default function InstructorModules() {
     }
   };
 
+  const rewriteActiveReading = async (mode: 'proofread' | 'paraphrase') => {
+    if (!activePart?.textbookSection?.body?.trim()) {
+      setToastMsg('Add reading text first, then ask AI to improve it.');
+      setShowToast(true);
+      return;
+    }
+
+    setIsDrafting(true);
+    try {
+      const response = await fetch('/api/rewrite-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode,
+          text: activePart.textbookSection.body,
+          instruction: assistantPrompt,
+        }),
+      });
+      const data = await response.json();
+      if (!data.text) throw new Error(data.error || 'No rewritten text returned');
+      updatePart({ textbookSection: { ...activePart.textbookSection, body: data.text } });
+      setToastMsg(mode === 'proofread' ? 'Reading proofread by AI.' : 'Reading paraphrased by AI.');
+    } catch (error) {
+      console.warn('AI rewrite failed', error);
+      setToastMsg('AI rewrite unavailable. Try again later.');
+    } finally {
+      setIsDrafting(false);
+      setShowToast(true);
+    }
+  };
+
   const saveModule = async () => {
     if (!draft.title.trim()) {
       setToastMsg('Module title is required');
@@ -369,6 +412,7 @@ export default function InstructorModules() {
         });
         setSelectedModuleId(newDoc.id);
         setDraft((current) => ({ ...current, id: newDoc.id }));
+        setIsCreatingNew(false);
         setToastMsg('Module created');
       }
       setShowToast(true);
@@ -429,12 +473,29 @@ export default function InstructorModules() {
                   className="w-full bg-surface-container border border-outline-variant/30 rounded-xl py-3 pl-10 pr-3 text-sm font-medium outline-none focus:border-primary/40"
                 />
               </div>
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                {[
+                  { id: 'all', label: 'All' },
+                  { id: 'published', label: 'Published' },
+                  { id: 'draft', label: 'Drafts' },
+                ].map((filter) => (
+                  <button
+                    key={filter.id}
+                    onClick={() => setModuleFilter(filter.id as typeof moduleFilter)}
+                    className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest border ${
+                      moduleFilter === filter.id ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container text-on-surface-variant border-outline-variant/30'
+                    }`}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
 
               <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
                 {!selectedModuleId && (
                   <button className="w-full text-left rounded-xl border p-4 transition-all border-primary bg-primary/10">
-                    <p className="font-extrabold text-on-surface leading-tight">{draft.title || 'New module draft'}</p>
-                    <p className="text-[11px] text-on-surface-variant/60 mt-1 line-clamp-2">Unsaved module / Step 1 ready</p>
+                    <p className="font-extrabold text-on-surface leading-tight">{draft.title || 'Blank new module'}</p>
+                    <p className="text-[11px] text-on-surface-variant/60 mt-1 line-clamp-2">Unsaved blank module / Step 1 ready</p>
                     <p className="text-[10px] font-black uppercase tracking-widest text-primary mt-2">Fill the outline, parts, quizzes, then save</p>
                   </button>
                 )}
@@ -462,56 +523,52 @@ export default function InstructorModules() {
               </div>
             </div>
 
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center gap-2 text-primary text-xs font-black uppercase tracking-widest mb-3">
-                <Bot size={16} />
-                AI module helper
-              </div>
-              <textarea
-                value={assistantPrompt}
-                onChange={(event) => setAssistantPrompt(event.target.value)}
-                rows={4}
-                placeholder="Describe the module you want, e.g. assessment validity with 2 parts and LET-style quiz questions."
-                className="w-full bg-surface-container border border-transparent rounded-xl px-4 py-3 text-sm font-medium resize-none outline-none focus:border-primary/30"
-              />
-              <button
-                onClick={generateAIDraft}
-                disabled={isDrafting}
-                className="w-full mt-3 inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-on-primary px-4 py-3 font-bold text-sm disabled:opacity-50"
-              >
-                <Sparkles size={16} />
-                {isDrafting ? 'Drafting...' : 'Draft editable module'}
-              </button>
-            </div>
           </aside>
 
           <main className="bg-surface-container-lowest border border-outline-variant rounded-2xl shadow-sm overflow-hidden">
             <div className="border-b border-outline-variant p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div className="flex flex-wrap gap-2">
-                {builderSteps.map((step, index) => (
-                  <button
-                    key={step.id}
-                    onClick={() => setActiveStep(step.id)}
-                    className={`rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest border transition-colors ${
-                      activeStep === step.id ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container text-on-surface-variant border-outline-variant/30'
-                    }`}
-                  >
-                    {index + 1}. {step.label}
-                  </button>
-                ))}
+                {builderMode === 'edit' ? builderSteps.map((step, index) => (
+                    <button
+                      key={step.id}
+                      onClick={() => setActiveStep(step.id)}
+                      className={`rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest border transition-colors ${
+                        activeStep === step.id ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container text-on-surface-variant border-outline-variant/30'
+                      }`}
+                    >
+                      {index + 1}. {step.label}
+                    </button>
+                  )) : (
+                    <div className="rounded-xl bg-primary/10 text-primary px-4 py-2 text-xs font-black uppercase tracking-widest border border-primary/20">
+                      Student preview
+                    </div>
+                  )}
               </div>
-              <button onClick={saveModule} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-on-primary px-5 py-3 font-bold text-sm shadow-sm">
-                <Save size={16} />
-                Save module
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setBuilderMode(builderMode === 'edit' ? 'preview' : 'edit')}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-surface-container text-on-surface px-5 py-3 font-bold text-sm border border-outline-variant/40"
+                >
+                  {builderMode === 'edit' ? <Eye size={16} /> : <Wand2 size={16} />}
+                  {builderMode === 'edit' ? 'Preview as student' : 'Back to edit'}
+                </button>
+                <button onClick={saveModule} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-on-primary px-5 py-3 font-bold text-sm shadow-sm">
+                  <Save size={16} />
+                  Save module
+                </button>
+              </div>
             </div>
 
             <div className="p-5 md:p-6">
-              {activeStep === 'outline' && (
+              {builderMode === 'preview' && (
+                <ModuleStudentPreview draft={draft} />
+              )}
+
+              {builderMode === 'edit' && activeStep === 'outline' && (
                 <OutlineStep draft={draft} selectedSubject={selectedSubject} updateDraft={updateDraft} />
               )}
 
-              {activeStep === 'parts' && (
+              {builderMode === 'edit' && activeStep === 'parts' && (
                 <PartsStep
                   draft={draft}
                   activePartIndex={activePartIndex}
@@ -524,7 +581,7 @@ export default function InstructorModules() {
                 />
               )}
 
-              {activeStep === 'assessments' && (
+              {builderMode === 'edit' && activeStep === 'assessments' && (
                 <AssessmentsStep
                   draft={draft}
                   activePartIndex={activePartIndex}
@@ -538,7 +595,7 @@ export default function InstructorModules() {
                 />
               )}
 
-              {activeStep === 'publish' && (
+              {builderMode === 'edit' && activeStep === 'publish' && (
                 <PublishStep draft={draft} updateDraft={updateDraft} saveModule={saveModule} />
               )}
             </div>
@@ -551,6 +608,17 @@ export default function InstructorModules() {
         message={toastMsg}
         onClose={() => setShowToast(false)}
         type={toastMsg.includes('Unable') || toastMsg.includes('required') ? 'error' : 'success'}
+      />
+
+      <FloatingAIHelper
+        isOpen={aiOpen}
+        setIsOpen={setAiOpen}
+        prompt={assistantPrompt}
+        setPrompt={setAssistantPrompt}
+        isWorking={isDrafting}
+        onDraft={generateAIDraft}
+        onProofread={() => rewriteActiveReading('proofread')}
+        onParaphrase={() => rewriteActiveReading('paraphrase')}
       />
     </DashboardLayout>
   );
@@ -592,6 +660,129 @@ function OutlineStep({
       <Field label="Student-facing description">
         <textarea value={draft.description} onChange={(event) => updateDraft('description', event.target.value)} rows={4} placeholder="What will the learner master in this module?" className="input resize-none" />
       </Field>
+    </div>
+  );
+}
+
+function ModuleStudentPreview({ draft }: { draft: BuilderModule }) {
+  const firstPart = draft.parts[0] || blankPart(0);
+  const firstQuiz = firstPart.miniQuiz[0] || blankQuestion('preview-q1');
+
+  return (
+    <div className="grid grid-cols-1 xl:grid-cols-[260px_1fr] gap-5">
+      <aside className="rounded-2xl border border-outline-variant/40 bg-surface-container/30 p-4 h-fit">
+        <p className="text-xs font-black uppercase tracking-widest text-primary mb-3">Student topic book</p>
+        <div className="space-y-2">
+          {draft.parts.map((part, index) => (
+            <div key={part.id} className={`rounded-xl border p-3 ${index === 0 ? 'border-primary bg-primary/10' : 'border-outline-variant/30 bg-surface-container/40'}`}>
+              <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Lesson {index + 1}</p>
+              <p className="text-sm font-extrabold text-on-surface line-clamp-2">{part.title}</p>
+            </div>
+          ))}
+          <div className="rounded-xl border border-outline-variant/30 bg-surface-container/40 p-3">
+            <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Gate</p>
+            <p className="text-sm font-extrabold text-on-surface">Final exam at 85%</p>
+          </div>
+        </div>
+      </aside>
+
+      <section className="space-y-5">
+        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-6">
+          <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Guided module preview</p>
+          <h2 className="text-2xl font-extrabold font-headline text-on-surface">{draft.title || 'Untitled module'}</h2>
+          <p className="text-sm text-on-surface-variant mt-2">{draft.description || 'Student-facing description will appear here.'}</p>
+        </div>
+
+        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-6">
+          <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Part 1 textbook</p>
+          <h3 className="text-xl font-extrabold text-on-surface">{firstPart.textbookSection.title}</h3>
+          <p className="text-xs font-bold text-on-surface-variant/50 mt-1">{firstPart.textbookSection.estimatedReadMinutes} min read</p>
+          <p className="text-sm text-on-surface-variant leading-relaxed whitespace-pre-line mt-4">{firstPart.textbookSection.body}</p>
+          {firstPart.textbookSection.mediaUrl && (
+            <div className="mt-5 rounded-xl border border-outline-variant/40 bg-surface-container p-4 text-xs font-bold text-on-surface-variant">
+              Embedded media: {firstPart.textbookSection.mediaUrl}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-6">
+          <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Mini quiz preview</p>
+          <h3 className="font-extrabold text-on-surface mb-4">{firstQuiz.stem}</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {(firstQuiz.options || []).map((option) => (
+              <div key={option.id} className="rounded-xl border border-outline-variant/30 bg-surface-container/40 p-3 text-sm font-semibold text-on-surface">
+                {option.id}. {option.text}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function FloatingAIHelper({
+  isOpen,
+  setIsOpen,
+  prompt,
+  setPrompt,
+  isWorking,
+  onDraft,
+  onProofread,
+  onParaphrase,
+}: {
+  isOpen: boolean;
+  setIsOpen: (open: boolean) => void;
+  prompt: string;
+  setPrompt: (value: string) => void;
+  isWorking: boolean;
+  onDraft: () => void;
+  onProofread: () => void;
+  onParaphrase: () => void;
+}) {
+  return (
+    <div className="fixed right-5 bottom-5 z-[80]">
+      {isOpen && (
+        <div className="mb-3 w-[min(360px,calc(100vw-2.5rem))] rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-2xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2 text-primary text-xs font-black uppercase tracking-widest">
+              <Bot size={16} />
+              AI edit helper
+            </div>
+            <button onClick={() => setIsOpen(false)} className="p-1 rounded-lg hover:bg-surface-container text-on-surface-variant">
+              <X size={16} />
+            </button>
+          </div>
+          <textarea
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            rows={4}
+            placeholder="Ask for edits: proofread, paraphrase, make it clearer, or draft a quiz from this topic."
+            className="w-full bg-surface-container border border-transparent rounded-xl px-4 py-3 text-sm font-medium resize-none outline-none focus:border-primary/30"
+          />
+          <div className="grid grid-cols-1 gap-2 mt-3">
+            <button onClick={onDraft} disabled={isWorking} className="rounded-xl bg-primary text-on-primary px-4 py-3 text-sm font-bold disabled:opacity-50 inline-flex items-center justify-center gap-2">
+              <Sparkles size={16} />
+              Draft module/quiz
+            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={onProofread} disabled={isWorking} className="rounded-xl bg-surface-container text-on-surface px-4 py-3 text-xs font-black uppercase tracking-widest border border-outline-variant/30 disabled:opacity-50">
+                Proofread
+              </button>
+              <button onClick={onParaphrase} disabled={isWorking} className="rounded-xl bg-surface-container text-on-surface px-4 py-3 text-xs font-black uppercase tracking-widest border border-outline-variant/30 disabled:opacity-50">
+                Paraphrase
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-14 h-14 rounded-full bg-primary text-on-primary shadow-xl flex items-center justify-center"
+        title="AI edit helper"
+      >
+        {isOpen ? <X size={22} /> : <Bot size={24} />}
+      </button>
     </div>
   );
 }

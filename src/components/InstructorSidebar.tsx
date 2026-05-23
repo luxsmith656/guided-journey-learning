@@ -11,11 +11,9 @@ export default function InstructorSidebar() {
   const navItems = [
     { name: 'Dashboard', path: '/instructor/dashboard', icon: 'dashboard' },
     { name: 'Classes', path: '/instructor/classes', icon: 'groups' },
-    { name: 'Questions', path: '/instructor/questions', icon: 'quiz' },
-    { name: 'Bulk Upload', path: '/instructor/bulk-upload', icon: 'upload_file' },
     { name: 'Modules', path: '/instructor/modules', icon: 'book' },
+    { name: 'Gradebook', path: '/instructor/grades', icon: 'grade' },
     { name: 'Students', path: '/instructor/students', icon: 'person_search' },
-    { name: 'AI Drafts', path: '/instructor/ai-drafts', icon: 'smart_toy' },
     { name: 'Analytics', path: '/instructor/analytics', icon: 'bar_chart' },
   ];
 

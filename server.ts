@@ -265,6 +265,48 @@ Keep the explanation under 4 short sentences. Pedagogical, warm, no markdown.`;
     }
   });
 
+  app.post('/api/rewrite-text', async (req: any, res: any) => {
+    const { text = '', mode = 'proofread', instruction = '' } = req.body || {};
+    if (!String(text).trim()) return res.status(400).json({ success: false, error: 'text required' });
+
+    try {
+      const data = await callAI({
+        messages: [
+          {
+            role: 'system',
+            content: 'You help instructors improve LET learning materials. Preserve facts, keep the text student-friendly, and do not add unsupported claims.',
+          },
+          {
+            role: 'user',
+            content: `Task: ${mode === 'paraphrase' ? 'Paraphrase for clarity while preserving meaning' : 'Proofread grammar, spelling, and clarity'}.\nInstructor note: ${instruction || 'No extra note'}\nText:\n${String(text).slice(0, 5000)}`,
+          },
+        ],
+        tools: [{
+          type: 'function',
+          function: {
+            name: 'return_rewrite',
+            description: 'Return improved text',
+            parameters: {
+              type: 'object',
+              properties: {
+                text: { type: 'string' },
+              },
+              required: ['text'],
+              additionalProperties: false,
+            },
+          },
+        }],
+        tool_choice: { type: 'function', function: { name: 'return_rewrite' } },
+      });
+      const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+      const args = toolCall ? JSON.parse(toolCall.function.arguments) : { text };
+      res.json({ success: true, text: args.text || text });
+    } catch (error: any) {
+      console.error('rewrite-text error:', error.message);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   // Adaptive learning: compute weak skills & suggested next topics from a learner profile
   app.post('/api/adaptive-recommend', async (req: any, res: any) => {
     try {

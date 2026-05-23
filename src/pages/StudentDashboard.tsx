@@ -24,6 +24,7 @@ export default function StudentDashboard() {
   const [profile, setProfile] = useState<any>(null);
   const [classData, setClassData] = useState<any>(null);
   const [assignedModules, setAssignedModules] = useState<any[]>([]);
+  const [gradeSummary, setGradeSummary] = useState({ avgScore: 0, completed: 0, rank: 0 });
   const [analytics, setAnalytics] = useState({
     mastery: 0,
     timeSpent: '0 hrs',
@@ -50,6 +51,12 @@ export default function StudentDashboard() {
         // Simulating fetching active courses/modules workflow
         const progressSnap = await getDocs(query(collection(db, 'moduleProgress'), where('userId', '==', user.uid)));
         const progressByModule = new Map(progressSnap.docs.map((progressDoc) => [progressDoc.data().moduleId, progressDoc.data()]));
+        const scoredRows = progressSnap.docs.map((progressDoc) => progressDoc.data()).filter((row) => row.finalScore != null);
+        setGradeSummary({
+          avgScore: scoredRows.length ? Math.round(scoredRows.reduce((sum, row) => sum + (row.finalScore || 0), 0) / scoredRows.length) : 0,
+          completed: scoredRows.filter((row) => row.status === 'completed' && (row.finalScore ?? 0) >= 85).length,
+          rank: 0,
+        });
 
         if (user.learningMode === 'class_based' && user.activeClassId) {
           const classRef = await getDoc(doc(db, 'classes', user.activeClassId));
@@ -227,6 +234,30 @@ export default function StudentDashboard() {
 
            {/* Right Column: Deadlines, Activity, Quick Actions */}
            <div className="space-y-6">
+              {(classData?.showGradesToStudents || classData?.leaderboardEnabled) && (
+                <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-sm">
+                  <h3 className="font-extrabold font-headline text-on-surface mb-4 flex items-center gap-2">
+                    <Award size={18} className="text-primary" /> Class Grade View
+                  </h3>
+                  {classData?.showGradesToStudents && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-surface-container rounded-xl p-4 border border-outline-variant/30">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Avg Score</p>
+                        <p className="text-2xl font-black text-on-surface mt-1">{gradeSummary.avgScore}%</p>
+                      </div>
+                      <div className="bg-surface-container rounded-xl p-4 border border-outline-variant/30">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Passed</p>
+                        <p className="text-2xl font-black text-on-surface mt-1">{gradeSummary.completed}</p>
+                      </div>
+                    </div>
+                  )}
+                  {classData?.leaderboardEnabled && (
+                    <div className="mt-3 rounded-xl bg-primary/10 text-primary border border-primary/20 p-3 text-xs font-bold">
+                      Leaderboard is enabled for this class. Rankings are managed by your instructor.
+                    </div>
+                  )}
+                </div>
+              )}
               
               {/* Upcoming Deadlines / Schedule */}
               <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-sm">

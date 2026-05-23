@@ -115,7 +115,7 @@ service cloud.firestore {
     match /classes/{classId} {
       allow read: if isSignedIn();
       allow create: if isInstructor();
-      allow update: if isInstructor() && (existing().instructorId == request.auth.uid || isAdmin());
+      allow update: if isInstructor() && (existing().instructorId == request.auth.uid || existing().instructorEmail == request.auth.token.email || isAdmin());
       allow delete: if isAdmin();
     }
     

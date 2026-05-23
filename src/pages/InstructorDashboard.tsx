@@ -168,8 +168,8 @@ export default function InstructorDashboard() {
                  <button onClick={() => navigate('/instructor/modules')} className="bg-primary text-on-primary px-6 py-3 rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] transition-all">
                     + Build Module
                  </button>
-                 <button onClick={() => navigate('/instructor/questions')} className="bg-surface-container text-on-surface-variant px-6 py-3 rounded-xl font-bold text-sm border border-outline-variant/50 hover:bg-surface-container/80 transition-all flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[18px]">quiz</span> Question Bank
+                 <button onClick={() => navigate('/instructor/grades')} className="bg-surface-container text-on-surface-variant px-6 py-3 rounded-xl font-bold text-sm border border-outline-variant/50 hover:bg-surface-container/80 transition-all flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px]">grade</span> Gradebook
                  </button>
               </div>
             </div>

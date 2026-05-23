@@ -29,6 +29,7 @@ import AIDrafts from './pages/AIDrafts';
 import LearningQuest from './pages/LearningQuest';
 import AdminClasses from './pages/AdminClasses';
 import InstructorClasses from './pages/InstructorClasses';
+import InstructorGradebook from './pages/InstructorGradebook';
 import TextbookLibrary from './pages/TextbookLibrary';
 import ChooseLearningMode from './pages/ChooseLearningMode';
 import ChooseFocus from './pages/ChooseFocus';
@@ -139,13 +140,15 @@ function AppContent() {
 
             {/* Instructor Routes */}
             <Route path="/instructor/dashboard" element={<ProtectedRoute role="instructor"><InstructorDashboard /></ProtectedRoute>} />
-            <Route path="/instructor/questions" element={<ProtectedRoute role="instructor"><QuestionBank /></ProtectedRoute>} />
-            <Route path="/instructor/question/new" element={<ProtectedRoute role="instructor"><EditQuestion /></ProtectedRoute>} />
-            <Route path="/instructor/question/edit/:id" element={<ProtectedRoute role="instructor"><EditQuestion /></ProtectedRoute>} />
-            <Route path="/instructor/bulk-upload" element={<ProtectedRoute role="instructor"><BulkUpload /></ProtectedRoute>} />
+            <Route path="/instructor/questions" element={<ProtectedRoute role="instructor"><Navigate to="/instructor/modules" replace /></ProtectedRoute>} />
+            <Route path="/instructor/question/new" element={<ProtectedRoute role="instructor"><Navigate to="/instructor/modules" replace /></ProtectedRoute>} />
+            <Route path="/instructor/question/edit/:id" element={<ProtectedRoute role="instructor"><Navigate to="/instructor/modules" replace /></ProtectedRoute>} />
+            <Route path="/instructor/bulk-upload" element={<ProtectedRoute role="instructor"><Navigate to="/instructor/modules" replace /></ProtectedRoute>} />
             <Route path="/instructor/modules" element={<ProtectedRoute role="instructor"><InstructorModules /></ProtectedRoute>} />
+            <Route path="/instructor/grades" element={<ProtectedRoute role="instructor"><InstructorGradebook /></ProtectedRoute>} />
             <Route path="/instructor/students" element={<ProtectedRoute role="instructor"><Users /></ProtectedRoute>} />
             <Route path="/instructor/ai-drafts" element={<ProtectedRoute role="instructor"><AIDrafts /></ProtectedRoute>} />
+            <Route path="/instructor/analytics" element={<ProtectedRoute role="instructor"><Analytics /></ProtectedRoute>} />
             <Route path="/instructor/classes" element={<ProtectedRoute role="instructor"><InstructorClasses /></ProtectedRoute>} />
 
             {/* Mobile / App Routes */}
