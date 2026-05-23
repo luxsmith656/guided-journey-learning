@@ -24,7 +24,7 @@ async function callAI(body: any) {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || Number(process.argv[process.argv.indexOf('--port') + 1]) || 8080;
 
   app.use(express.json({ limit: '2mb' }));
 
