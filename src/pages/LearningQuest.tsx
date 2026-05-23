@@ -34,7 +34,7 @@ export default function LearningQuest() {
   useEffect(() => {
     async function loadContent() {
       try {
-        let activeModule = null;
+        let activeModule: any = null;
         let mid = moduleId;
 
         if (!mid && user) {
