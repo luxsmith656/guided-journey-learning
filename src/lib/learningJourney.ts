@@ -80,8 +80,13 @@ export interface JourneyModule {
     maxAttempts: number;
     scoreMode: 'first' | 'highest' | 'latest';
     showAnswersAfterSubmit: boolean;
+    answerRevealMode?: 'immediate' | 'after_deadline' | 'never';
     timeLimitMinutes: number;
     randomizeQuestions: boolean;
+    randomizeChoices?: boolean;
+    questionPoolSize?: number;
+    attemptLogs?: boolean;
+    integrityLevel?: 'basic' | 'advanced';
   };
   authorName?: string;
   authorEmail?: string;

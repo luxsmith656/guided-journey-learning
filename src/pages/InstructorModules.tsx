@@ -62,8 +62,13 @@ interface BuilderModule {
     maxAttempts: number;
     scoreMode: 'first' | 'highest' | 'latest';
     showAnswersAfterSubmit: boolean;
+    answerRevealMode: 'immediate' | 'after_deadline' | 'never';
     timeLimitMinutes: number;
     randomizeQuestions: boolean;
+    randomizeChoices: boolean;
+    questionPoolSize: number;
+    attemptLogs: boolean;
+    integrityLevel: 'basic' | 'advanced';
   };
   flowItems: { id: string; type: 'textbook' | 'lesson' | 'quiz' | 'activity' | 'exam'; refId: string; title: string }[];
   parts: JourneyModulePart[];
@@ -89,8 +94,13 @@ const defaultAttemptPolicy = {
   maxAttempts: 1,
   scoreMode: 'first' as const,
   showAnswersAfterSubmit: false,
+  answerRevealMode: 'never' as const,
   timeLimitMinutes: 0,
   randomizeQuestions: false,
+  randomizeChoices: false,
+  questionPoolSize: 0,
+  attemptLogs: true,
+  integrityLevel: 'basic' as const,
 };
 
 const blankQuestion = (id: string): JourneyQuestion => ({
@@ -1130,7 +1140,7 @@ function FloatingAIHelper({
   onParaphrase: () => void;
 }) {
   return (
-    <div className="fixed right-5 bottom-5 z-[80]">
+    <div className="fixed right-6 bottom-24 z-[90]">
       {isOpen && (
         <div className="mb-3 w-[min(360px,calc(100vw-2.5rem))] rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-2xl p-4">
           <div className="flex items-center justify-between mb-3">
@@ -1600,8 +1610,23 @@ function PublishStep({
         </label>
       </div>
       <section className="rounded-2xl border border-outline-variant/40 bg-surface-container/20 p-4 space-y-4">
-        <h3 className="font-headline font-extrabold text-xl">Attempt controls</h3>
-        <p className="text-xs text-on-surface-variant/60">Default is one take. Practice modules can loosen this, while final exams can stay strict.</p>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div>
+            <h3 className="font-headline font-extrabold text-xl">Academic integrity controls</h3>
+            <p className="text-xs text-on-surface-variant/60 mt-1">Default is one take. Basic controls cover fair attempts and timing; advanced adds pools, reveal timing, and attempt logs.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 rounded-xl bg-surface-container p-1">
+            {(['basic', 'advanced'] as const).map((level) => (
+              <button
+                key={level}
+                onClick={() => updateDraft('attemptPolicy', { ...draft.attemptPolicy, integrityLevel: level })}
+                className={`rounded-lg px-4 py-2 text-xs font-black uppercase tracking-widest ${draft.attemptPolicy.integrityLevel === level ? 'bg-primary text-on-primary' : 'text-on-surface-variant'}`}
+              >
+                {level}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <Field label="Allowed attempts">
             <input type="number" min={1} value={draft.attemptPolicy.maxAttempts} onChange={(event) => updateDraft('attemptPolicy', { ...draft.attemptPolicy, maxAttempts: Number(event.target.value) })} className="input" />
@@ -1619,14 +1644,64 @@ function PublishStep({
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <label className="flex items-center justify-between gap-4 bg-surface-container rounded-xl px-4 py-4">
-            <span className="text-sm font-extrabold text-on-surface">Show answers after submission</span>
-            <input type="checkbox" checked={draft.attemptPolicy.showAnswersAfterSubmit} onChange={(event) => updateDraft('attemptPolicy', { ...draft.attemptPolicy, showAnswersAfterSubmit: event.target.checked })} className="w-5 h-5 accent-primary" />
-          </label>
-          <label className="flex items-center justify-between gap-4 bg-surface-container rounded-xl px-4 py-4">
-            <span className="text-sm font-extrabold text-on-surface">Randomize questions</span>
+            <span>
+              <span className="block text-sm font-extrabold text-on-surface">Randomize question order</span>
+              <span className="block text-xs text-on-surface-variant/60">Useful when more than one student takes the same exam window.</span>
+            </span>
             <input type="checkbox" checked={draft.attemptPolicy.randomizeQuestions} onChange={(event) => updateDraft('attemptPolicy', { ...draft.attemptPolicy, randomizeQuestions: event.target.checked })} className="w-5 h-5 accent-primary" />
           </label>
+          <label className="flex items-center justify-between gap-4 bg-surface-container rounded-xl px-4 py-4">
+            <span>
+              <span className="block text-sm font-extrabold text-on-surface">Randomize choices</span>
+              <span className="block text-xs text-on-surface-variant/60">Keeps A/B/C/D from becoming memorized positions.</span>
+            </span>
+            <input type="checkbox" checked={draft.attemptPolicy.randomizeChoices} onChange={(event) => updateDraft('attemptPolicy', { ...draft.attemptPolicy, randomizeChoices: event.target.checked })} className="w-5 h-5 accent-primary" />
+          </label>
         </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Field label="Answer reveal">
+            <select
+              value={draft.attemptPolicy.answerRevealMode}
+              onChange={(event) => {
+                const mode = event.target.value as BuilderModule['attemptPolicy']['answerRevealMode'];
+                updateDraft('attemptPolicy', { ...draft.attemptPolicy, answerRevealMode: mode, showAnswersAfterSubmit: mode !== 'never' });
+              }}
+              className="input font-bold"
+            >
+              <option value="never">Never reveal answers</option>
+              <option value="after_deadline">Reveal after due date</option>
+              <option value="immediate">Reveal after submission</option>
+            </select>
+          </Field>
+          <label className="flex items-center justify-between gap-4 bg-surface-container rounded-xl px-4 py-4">
+            <span>
+              <span className="block text-sm font-extrabold text-on-surface">Save attempt logs</span>
+              <span className="block text-xs text-on-surface-variant/60">Keeps score, timing, warnings, and policy snapshot for instructor review.</span>
+            </span>
+            <input type="checkbox" checked={draft.attemptPolicy.attemptLogs} onChange={(event) => updateDraft('attemptPolicy', { ...draft.attemptPolicy, attemptLogs: event.target.checked })} className="w-5 h-5 accent-primary" />
+          </label>
+        </div>
+        {draft.attemptPolicy.integrityLevel === 'advanced' && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 rounded-2xl border border-primary/15 bg-primary/5 p-4">
+            <Field label="Question pool size">
+              <input
+                type="number"
+                min={0}
+                value={draft.attemptPolicy.questionPoolSize}
+                onChange={(event) => updateDraft('attemptPolicy', { ...draft.attemptPolicy, questionPoolSize: Number(event.target.value) })}
+                className="input"
+                placeholder="0 uses every final exam question"
+              />
+            </Field>
+            <label className="flex items-center justify-between gap-4 bg-surface-container rounded-xl px-4 py-4">
+              <span>
+                <span className="block text-sm font-extrabold text-on-surface">Fullscreen and focus checks</span>
+                <span className="block text-xs text-on-surface-variant/60">Warns on tab switching, copy/paste, and leaving full screen.</span>
+              </span>
+              <input type="checkbox" checked={draft.antiCheatEnabled} onChange={(event) => updateDraft('antiCheatEnabled', event.target.checked)} className="w-5 h-5 accent-primary" />
+            </label>
+          </div>
+        )}
       </section>
       <button onClick={saveModule} className="rounded-xl bg-primary text-on-primary px-6 py-3 font-bold">Save module</button>
     </div>

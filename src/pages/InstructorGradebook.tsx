@@ -14,6 +14,7 @@ export default function InstructorGradebook() {
   const [students, setStudents] = useState<any[]>([]);
   const [enrollments, setEnrollments] = useState<any[]>([]);
   const [progressRows, setProgressRows] = useState<any[]>([]);
+  const [attemptLogs, setAttemptLogs] = useState<any[]>([]);
   const [modules, setModules] = useState<any[]>(journeyModules);
   const [selectedClassId, setSelectedClassId] = useState('');
   const [selectedModuleId, setSelectedModuleId] = useState('all');
@@ -44,6 +45,9 @@ export default function InstructorGradebook() {
     const unsubProgress = onSnapshot(collection(db, 'moduleProgress'), (snap) => {
       setProgressRows(snap.docs.map((progressDoc) => ({ id: progressDoc.id, ...progressDoc.data() })));
     });
+    const unsubAttemptLogs = onSnapshot(collection(db, 'examAttemptLogs'), (snap) => {
+      setAttemptLogs(snap.docs.map((attemptDoc) => ({ id: attemptDoc.id, ...attemptDoc.data() })));
+    });
     const unsubEnrollments = onSnapshot(collection(db, 'classEnrollments'), (snap) => {
       setEnrollments(snap.docs.map((enrollmentDoc) => ({ id: enrollmentDoc.id, ...enrollmentDoc.data() })));
     });
@@ -61,6 +65,7 @@ export default function InstructorGradebook() {
       unsubUid();
       unsubEmail();
       unsubProgress();
+      unsubAttemptLogs();
       unsubEnrollments();
       unsubModules();
     };
@@ -83,6 +88,10 @@ export default function InstructorGradebook() {
       row.userId === student.uid &&
       (selectedModuleId === 'all' || row.moduleId === selectedModuleId)
     ));
+    const studentAttemptLogs = attemptLogs.filter((row) => (
+      row.userId === student.uid &&
+      (selectedModuleId === 'all' || row.moduleId === selectedModuleId)
+    ));
     const avgProgress = studentProgress.length
       ? Math.round(studentProgress.reduce((sum, row) => sum + (row.progressPercent || 0), 0) / studentProgress.length)
       : 0;
@@ -91,10 +100,14 @@ export default function InstructorGradebook() {
       ? Math.round(scoredRows.reduce((sum, row) => sum + (row.firstFinalScore ?? row.finalScore ?? 0), 0) / scoredRows.length)
       : 0;
     const completed = studentProgress.filter((row) => row.status === 'completed' && (row.finalScore ?? 0) >= 85).length;
-    const attempts = studentProgress.reduce((sum, row) => sum + (row.finalAttemptCount || row.failedAttempts || 0), 0);
-    const warnings = studentProgress.reduce((sum, row) => sum + (row.proctorWarnings || 0), 0);
-    const timeSpentSeconds = studentProgress.reduce((sum, row) => sum + (row.timeSpentSeconds || 0), 0);
-    return { student, avgProgress, avgScore, completed, modules: studentProgress.length, attempts, warnings, timeSpentSeconds };
+    const attempts = studentAttemptLogs.length || studentProgress.reduce((sum, row) => sum + (row.finalAttemptCount || row.failedAttempts || 0), 0);
+    const warnings = studentAttemptLogs.length
+      ? studentAttemptLogs.reduce((sum, row) => sum + (row.proctorWarnings || 0), 0)
+      : studentProgress.reduce((sum, row) => sum + (row.proctorWarnings || 0), 0);
+    const timeSpentSeconds = studentAttemptLogs.length
+      ? studentAttemptLogs.reduce((sum, row) => sum + (row.timeSpentSeconds || 0), 0)
+      : studentProgress.reduce((sum, row) => sum + (row.timeSpentSeconds || 0), 0);
+    return { student, avgProgress, avgScore, completed, modules: studentProgress.length, attempts, warnings, timeSpentSeconds, loggedAttempts: studentAttemptLogs.length };
   }).sort((a, b) => b.avgScore - a.avgScore);
 
   const updateClassSetting = async (field: 'showGradesToStudents' | 'leaderboardEnabled', value: boolean) => {
@@ -168,6 +181,7 @@ export default function InstructorGradebook() {
                   <th className="px-5 py-4">Progress</th>
                   <th className="px-5 py-4">Completed</th>
                   <th className="px-5 py-4">Attempts</th>
+                  <th className="px-5 py-4">Logs</th>
                   <th className="px-5 py-4">Time</th>
                   <th className="px-5 py-4">Warnings</th>
                   <th className="px-5 py-4">Rank</th>
@@ -184,6 +198,7 @@ export default function InstructorGradebook() {
                     <td className="px-5 py-4">{row.avgProgress}%</td>
                     <td className="px-5 py-4">{row.completed} / {row.modules}</td>
                     <td className="px-5 py-4">{row.attempts}</td>
+                    <td className="px-5 py-4">{row.loggedAttempts}</td>
                     <td className="px-5 py-4 inline-flex items-center gap-1"><Clock size={13} /> {formatDuration(row.timeSpentSeconds)}</td>
                     <td className="px-5 py-4">
                       <span className={`inline-flex items-center gap-1 ${row.warnings > 0 ? 'text-error font-black' : 'text-on-surface-variant'}`}>
@@ -201,7 +216,7 @@ export default function InstructorGradebook() {
                 ))}
                 {gradeRows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-5 py-12 text-center text-on-surface-variant/40 font-bold">No student progress yet.</td>
+                    <td colSpan={9} className="px-5 py-12 text-center text-on-surface-variant/40 font-bold">No student progress yet.</td>
                   </tr>
                 )}
               </tbody>

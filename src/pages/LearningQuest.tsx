@@ -49,6 +49,7 @@ interface QuestProgress {
   weakPartIds?: string[];
   proctorWarnings?: number;
   examLockedUntil?: number;
+  examStartedAt?: number;
   status: 'in_progress' | 'completed';
 }
 
@@ -136,6 +137,7 @@ export default function LearningQuest() {
   const [selectedText, setSelectedText] = useState('');
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [lowBandwidth, setLowBandwidth] = useState(() => localStorage.getItem('let-mastery-low-bandwidth') === '1');
+  const [answerDraftSavedAt, setAnswerDraftSavedAt] = useState(0);
   const [loading, setLoading] = useState(true);
   const [sessionStartedAt] = useState(Date.now());
   const [nowTick, setNowTick] = useState(Date.now());
@@ -156,19 +158,32 @@ export default function LearningQuest() {
     maxAttempts: 1,
     scoreMode: recordFirstAttemptOnly ? 'first' : 'latest',
     showAnswersAfterSubmit: false,
+    answerRevealMode: 'never',
     timeLimitMinutes: 0,
     randomizeQuestions: false,
+    randomizeChoices: false,
+    questionPoolSize: 0,
+    attemptLogs: true,
+    integrityLevel: 'basic',
     ...((module as any).attemptPolicy || {}),
   };
   const attemptsUsed = progress.finalAttemptCount || 0;
   const finalAttemptsLocked = progress.status !== 'completed' && attemptsUsed >= Math.max(1, attemptPolicy.maxAttempts);
   const moduleDueAt = (module as any).dueAt ? new Date((module as any).dueAt) : null;
   const modulePastDue = !!moduleDueAt && moduleDueAt.getTime() < Date.now() && progress.status !== 'completed';
+  const examTimeLimitSeconds = Math.max(0, Number(attemptPolicy.timeLimitMinutes || 0) * 60);
+  const examElapsedSeconds = progress.phase === 'finalExam' && progress.examStartedAt ? Math.max(0, Math.floor((nowTick - progress.examStartedAt) / 1000)) : 0;
+  const examTimeSecondsLeft = examTimeLimitSeconds ? Math.max(0, examTimeLimitSeconds - examElapsedSeconds) : 0;
+  const canRevealFinalAnswers = !!attemptPolicy.showAnswersAfterSubmit && (
+    attemptPolicy.answerRevealMode === 'immediate' ||
+    (attemptPolicy.answerRevealMode === 'after_deadline' && !!moduleDueAt && moduleDueAt.getTime() < Date.now())
+  );
   const learningState = getLearningState(progress, parts.length);
   const weakReviewParts = parts.filter((part) => progress.weakPartIds?.includes(part.id));
 
   const progressDocId = user ? `${user.uid}_${module.id}` : '';
   const localProgressKey = `let-mastery-progress:${module.id}`;
+  const answerDraftKey = user ? `let-mastery-answer-drafts:${user.uid}:${module.id}` : '';
 
   useEffect(() => {
     const syncLowBandwidth = () => setLowBandwidth(localStorage.getItem('let-mastery-low-bandwidth') === '1');
@@ -236,6 +251,7 @@ export default function LearningQuest() {
           weakPartIds: nextProgress.weakPartIds || [],
           proctorWarnings: nextProgress.proctorWarnings || 0,
           examLockedUntil: nextProgress.examLockedUntil || null,
+          examStartedAt: nextProgress.examStartedAt || null,
           progressPercent: computeProgressPercent(nextProgress, parts.length),
           lastAccessedAt: serverTimestamp(),
           completedAt: nextProgress.status === 'completed' ? serverTimestamp() : null,
@@ -307,6 +323,7 @@ export default function LearningQuest() {
               weakPartIds: data.weakPartIds || [],
               proctorWarnings: data.proctorWarnings || 0,
               examLockedUntil: data.examLockedUntil || undefined,
+              examStartedAt: data.examStartedAt || undefined,
               status: data.status === 'completed' ? 'completed' : 'in_progress',
             };
           }
@@ -334,6 +351,32 @@ export default function LearningQuest() {
     loadModuleAndProgress();
   }, [moduleId, user]);
 
+  useEffect(() => {
+    if (!answerDraftKey) return;
+    try {
+      const saved = localStorage.getItem(answerDraftKey);
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      setWrittenAnswer(parsed.writtenAnswer || '');
+      setFinalAnswers(parsed.finalAnswers || {});
+      setAnswerDraftSavedAt(parsed.savedAt || 0);
+    } catch {
+      setAnswerDraftSavedAt(0);
+    }
+  }, [answerDraftKey]);
+
+  useEffect(() => {
+    if (!answerDraftKey || !['miniQuiz', 'finalExam'].includes(progress.phase)) return;
+    const hasDraft = writtenAnswer.trim() || Object.values(finalAnswers).some((answer) => String(answer || '').trim());
+    const savedAt = Date.now();
+    try {
+      localStorage.setItem(answerDraftKey, JSON.stringify({ writtenAnswer, finalAnswers, savedAt }));
+      if (hasDraft) setAnswerDraftSavedAt(savedAt);
+    } catch (error) {
+      console.warn('Unable to autosave answer draft', error);
+    }
+  }, [writtenAnswer, finalAnswers, answerDraftKey, progress.phase]);
+
   const moveToPhase = async (phase: QuestPhase) => {
     if (phase === 'finalExam') {
       if (finalAttemptsLocked) {
@@ -351,7 +394,12 @@ export default function LearningQuest() {
       if (antiCheatEnabled) await requestExamFullscreen();
       await prepareFinalExam(!!progress.mustReread || (progress.failedAttempts || 0) > 0);
     }
-    persistProgress({ ...progress, phase, status: phase === 'complete' ? 'completed' : 'in_progress' });
+    persistProgress({
+      ...progress,
+      phase,
+      status: phase === 'complete' ? 'completed' : 'in_progress',
+      examStartedAt: phase === 'finalExam' ? (progress.examStartedAt || Date.now()) : undefined,
+    });
   };
 
   const gradeQuestion = async (question: JourneyQuestion, answer: string, strict = false): Promise<GradeResult> => {
@@ -418,6 +466,7 @@ export default function LearningQuest() {
         mustReread: true,
         proctorWarnings: nextCount,
         examLockedUntil: lockedUntil,
+        examStartedAt: undefined,
       });
       return;
     }
@@ -549,7 +598,7 @@ export default function LearningQuest() {
     const nextIndex = progress.currentPartIndex + 1;
     if (nextIndex >= parts.length) {
       await prepareFinalExam(!!progress.mustReread || (progress.failedAttempts || 0) > 0);
-      persistProgress({ ...progress, currentPartIndex: progress.currentPartIndex, phase: 'finalExam', partScores });
+      persistProgress({ ...progress, currentPartIndex: progress.currentPartIndex, phase: 'finalExam', partScores, examStartedAt: Date.now() });
       return;
     }
 
@@ -575,6 +624,36 @@ export default function LearningQuest() {
         : officialFirstScore;
     const status = score >= FINAL_PASSING_SCORE ? 'completed' : 'in_progress';
     const phase: QuestPhase = score >= FINAL_PASSING_SCORE ? 'complete' : 'read';
+    const attemptNumber = (progress.finalAttemptCount || 0) + 1;
+    const attemptTimeSeconds = progress.examStartedAt ? Math.max(0, Math.round((Date.now() - progress.examStartedAt) / 1000)) : Math.round((Date.now() - sessionStartedAt) / 1000);
+
+    if (user && attemptPolicy.attemptLogs !== false) {
+      try {
+        await addDoc(collection(db, 'examAttemptLogs'), {
+          userId: user.uid,
+          studentEmail: user.email,
+          studentName: user.fullName || user.email,
+          moduleId: module.id,
+          moduleTitle: module.title,
+          topicId: module.topicId,
+          attemptNumber,
+          rawScore: score,
+          officialScore,
+          passed: score >= FINAL_PASSING_SCORE,
+          questionCount: finalExam.length,
+          answeredCount: finalAnsweredCount,
+          weakPartIds,
+          proctorWarnings: progress.proctorWarnings || 0,
+          timeSpentSeconds: attemptTimeSeconds,
+          startedAtMillis: progress.examStartedAt || sessionStartedAt,
+          policySnapshot: attemptPolicy,
+          questionIds: finalExam.map((question) => question.id),
+          createdAt: serverTimestamp(),
+        });
+      } catch (error) {
+        console.warn('Unable to write exam attempt log', error);
+      }
+    }
 
     await persistProgress({
       ...progress,
@@ -583,7 +662,7 @@ export default function LearningQuest() {
       finalScore: officialScore,
       firstFinalScore: officialFirstScore,
       latestFinalScore: score,
-      finalAttemptCount: (progress.finalAttemptCount || 0) + 1,
+      finalAttemptCount: attemptNumber,
       timeSpentSeconds: (progress.timeSpentSeconds || 0) + Math.round((Date.now() - sessionStartedAt) / 1000),
       status,
       mustReread: score < FINAL_PASSING_SCORE,
@@ -591,7 +670,12 @@ export default function LearningQuest() {
       failedAttempts: score >= FINAL_PASSING_SCORE ? progress.failedAttempts || 0 : (progress.failedAttempts || 0) + 1,
       proctorWarnings: 0,
       examLockedUntil: undefined,
+      examStartedAt: undefined,
     });
+    if (answerDraftKey) {
+      localStorage.removeItem(answerDraftKey);
+      setAnswerDraftSavedAt(0);
+    }
     setIsGrading(false);
     if (score < FINAL_PASSING_SCORE) {
       setFinalAnswers({});
@@ -624,7 +708,8 @@ export default function LearningQuest() {
   const resetFinalExam = () => {
     setFinalAnswers({});
     setFinalGrades({});
-    persistProgress({ ...progress, finalScore: undefined, phase: 'read', currentPartIndex: 0, status: 'in_progress', mustReread: true, proctorWarnings: 0, examLockedUntil: undefined });
+    if (answerDraftKey) localStorage.removeItem(answerDraftKey);
+    persistProgress({ ...progress, finalScore: undefined, phase: 'read', currentPartIndex: 0, status: 'in_progress', mustReread: true, proctorWarnings: 0, examLockedUntil: undefined, examStartedAt: undefined });
   };
 
   const jumpToPart = (index: number) => {
@@ -738,14 +823,20 @@ export default function LearningQuest() {
   }, [progress.phase, progress.proctorWarnings, finalAnswers, antiCheatEnabled]);
 
   useEffect(() => {
-    if (!examLocked) return;
+    if (!examLocked && !(progress.phase === 'finalExam' && examTimeLimitSeconds > 0)) return;
     const timer = window.setInterval(() => setNowTick(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [examLocked]);
+  }, [examLocked, progress.phase, examTimeLimitSeconds]);
+
+  useEffect(() => {
+    if (progress.phase !== 'finalExam' || !examTimeLimitSeconds || examTimeSecondsLeft > 0 || isGrading) return;
+    setProctorMessage('Time is up. The exam is being submitted with the answers currently saved.');
+    submitFinalExam();
+  }, [progress.phase, examTimeLimitSeconds, examTimeSecondsLeft, isGrading]);
 
   const prepareFinalExam = async (fresh: boolean) => {
     if (!fresh) {
-      setFinalQuestionSet(attemptPolicy.randomizeQuestions ? shuffleQuestions(baseFinalExam) : baseFinalExam);
+      setFinalQuestionSet(applyExamPolicy(baseFinalExam, attemptPolicy));
       return;
     }
 
@@ -756,16 +847,16 @@ export default function LearningQuest() {
         body: JSON.stringify({
           moduleTitle: module.title,
           textbookContext: parts.map((part) => `${part.textbookSection.title}\n${part.textbookSection.body}`).join('\n\n'),
-          count: Math.max(3, baseFinalExam.length),
+          count: Math.max(3, Number(attemptPolicy.questionPoolSize || 0) || baseFinalExam.length),
         }),
       });
       const data = await response.json();
       const freshQuestions = (data.questions || []).filter((question: JourneyQuestion) => question.stem);
       const nextQuestions = freshQuestions.length ? freshQuestions : rotateQuestions(baseFinalExam);
-      setFinalQuestionSet(attemptPolicy.randomizeQuestions ? shuffleQuestions(nextQuestions) : nextQuestions);
+      setFinalQuestionSet(applyExamPolicy(nextQuestions, attemptPolicy));
     } catch {
       const nextQuestions = rotateQuestions(baseFinalExam);
-      setFinalQuestionSet(attemptPolicy.randomizeQuestions ? shuffleQuestions(nextQuestions) : nextQuestions);
+      setFinalQuestionSet(applyExamPolicy(nextQuestions, attemptPolicy));
     }
     setFinalAnswers({});
     setFinalGrades({});
@@ -1069,6 +1160,9 @@ export default function LearningQuest() {
                   placeholder={currentMiniQuestion.type === 'enumeration' ? 'List answers separated by commas or new lines.' : 'Type your answer here.'}
                   className="w-full bg-surface-container border border-outline-variant/30 rounded-xl p-4 text-sm font-medium outline-none focus:border-primary/40"
                 />
+                {writtenAnswer.trim() && (
+                  <p className="text-[11px] font-bold text-on-surface-variant/60">Draft autosaved{answerDraftSavedAt ? ` ${new Date(answerDraftSavedAt).toLocaleTimeString()}` : ''}.</p>
+                )}
                 <button
                   disabled={!writtenAnswer.trim() || isGrading}
                   onClick={checkWrittenMiniQuiz}
@@ -1127,8 +1221,11 @@ export default function LearningQuest() {
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
               <Metric label="Attempts" value={`${attemptsUsed}/${attemptPolicy.maxAttempts}`} />
               <Metric label="Score kept" value={attemptPolicy.scoreMode} />
-              <Metric label="Timer" value={attemptPolicy.timeLimitMinutes ? `${attemptPolicy.timeLimitMinutes} min` : 'None'} />
+              <Metric label="Timer" value={examTimeLimitSeconds ? formatDuration(examTimeSecondsLeft) : 'None'} />
             </div>
+            {Object.values(finalAnswers).some((answer) => String(answer || '').trim()) && (
+              <p className="mt-3 text-[11px] font-bold text-on-surface-variant/60">Answers autosaved{answerDraftSavedAt ? ` ${new Date(answerDraftSavedAt).toLocaleTimeString()}` : ''}.</p>
+            )}
 
             {examLocked && (
               <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 mt-5 flex gap-3">
@@ -1222,6 +1319,20 @@ export default function LearningQuest() {
               onComment={(value) => { setAppealComment(value); setAppealSent(false); }}
               onSubmit={() => submitGradeAppeal('final_exam')}
             />
+            {canRevealFinalAnswers && (
+              <div className="mt-6 rounded-2xl border border-outline-variant/40 bg-surface-container/30 p-4 text-left">
+                <p className="text-xs font-black uppercase tracking-widest text-primary mb-3">Answer review</p>
+                <div className="space-y-3">
+                  {finalExam.map((question, index) => (
+                    <div key={question.id} className="rounded-xl bg-surface-container-lowest border border-outline-variant/30 p-3">
+                      <p className="text-xs font-black text-on-surface-variant/50">Question {index + 1}</p>
+                      <p className="text-sm font-extrabold text-on-surface mt-1">{question.stem}</p>
+                      <p className="text-xs text-on-surface-variant mt-2">{question.explanation || finalGrades[question.id]?.feedback || 'Reviewed.'}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex flex-col sm:flex-row gap-3 justify-center mt-7">
               <button onClick={() => navigate('/student/courses')} className="rounded-xl bg-primary text-on-primary px-6 py-3 font-bold">
                 Back to journey
@@ -1442,24 +1553,37 @@ function rotateQuestions(questions: JourneyQuestion[]) {
   });
 }
 
-function shuffleQuestions(questions: JourneyQuestion[]) {
-  return questions
+function applyExamPolicy(questions: JourneyQuestion[], policy: {
+  randomizeQuestions?: boolean;
+  randomizeChoices?: boolean;
+  questionPoolSize?: number;
+}) {
+  const ordered = policy.randomizeQuestions ? shuffleList(questions) : [...questions];
+  const poolSize = Math.max(0, Number(policy.questionPoolSize || 0));
+  const pooled = poolSize > 0 ? ordered.slice(0, Math.min(poolSize, ordered.length)) : ordered;
+  return policy.randomizeChoices ? pooled.map(shuffleChoicesForQuestion) : pooled;
+}
+
+function shuffleList<T>(items: T[]) {
+  return items
+    .map((item) => ({ item, sort: Math.random() }))
+    .sort((a, b) => a.sort - b.sort)
+    .map(({ item }) => item);
+}
+
+function shuffleChoicesForQuestion(question: JourneyQuestion) {
+  if (!isChoiceQuestion(question)) return question;
+  const options = normalizeOptions(question);
+  const shuffled = options
     .map((question) => ({ question, sort: Math.random() }))
     .sort((a, b) => a.sort - b.sort)
-    .map(({ question }) => {
-      if (!isChoiceQuestion(question)) return question;
-      const options = normalizeOptions(question);
-      const shuffled = options
-        .map((option) => ({ option, sort: Math.random() }))
-        .sort((a, b) => a.sort - b.sort)
-        .map(({ option }, index) => ({ id: String.fromCharCode(65 + index), text: option.text, was: option.id }));
-      const correct = shuffled.find((option) => option.was === question.correctOptionId)?.id || question.correctOptionId;
-      return {
-        ...question,
-        options: shuffled.map(({ id, text }) => ({ id, text })),
-        correctOptionId: correct,
-      };
-    });
+    .map(({ question: option }, index) => ({ id: String.fromCharCode(65 + index), text: option.text, was: option.id }));
+  const correct = shuffled.find((option) => option.was === question.correctOptionId)?.id || question.correctOptionId;
+  return {
+    ...question,
+    options: shuffled.map(({ id, text }) => ({ id, text })),
+    correctOptionId: correct,
+  };
 }
 
 function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {

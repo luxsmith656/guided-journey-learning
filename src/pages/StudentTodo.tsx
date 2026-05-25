@@ -38,6 +38,8 @@ export default function StudentTodo() {
   const [profile, setProfile] = useState<any>(null);
   const [reminderDraft, setReminderDraft] = useState({ title: '', remindAt: todayInputValue() });
   const [submissionWarning, setSubmissionWarning] = useState('');
+  const [draftsLoaded, setDraftsLoaded] = useState(false);
+  const [draftSavedAt, setDraftSavedAt] = useState(0);
 
   useEffect(() => {
     const moduleQuery = query(collection(db, 'modules'), where('isPublished', '==', true));
@@ -56,6 +58,15 @@ export default function StudentTodo() {
 
   useEffect(() => {
     if (!user) return;
+    setDraftsLoaded(false);
+    try {
+      const savedDrafts = localStorage.getItem(submissionDraftStorageKey(user.uid));
+      setSubmissionDrafts(savedDrafts ? JSON.parse(savedDrafts) : {});
+    } catch {
+      setSubmissionDrafts({});
+    }
+    setDraftsLoaded(true);
+
     const unsubProfile = onSnapshot(doc(db, 'learnerProfiles', user.uid), (snapshot) => {
       setProfile(snapshot.exists() ? snapshot.data() : null);
     });
@@ -89,6 +100,17 @@ export default function StudentTodo() {
     };
   }, [user]);
 
+  useEffect(() => {
+    if (!user || !draftsLoaded) return;
+    const hasDrafts = Object.values(submissionDrafts).some((draft) => draft.content.trim());
+    try {
+      localStorage.setItem(submissionDraftStorageKey(user.uid), JSON.stringify(submissionDrafts));
+      if (hasDrafts) setDraftSavedAt(Date.now());
+    } catch (error) {
+      console.warn('Unable to autosave assignment draft', error);
+    }
+  }, [submissionDrafts, user?.uid, draftsLoaded]);
+
   const todoItems = useMemo(() => modules
     .filter((module) => {
       if (module.publishScope === 'classes') return user?.activeClassId && module.classIds?.includes(user.activeClassId);
@@ -111,6 +133,25 @@ export default function StudentTodo() {
     weakTopicLabel,
     progressByModule,
   });
+  const dueDateItems = useMemo(() => [
+    ...assignmentItems.map((assignment) => ({
+      id: `assignment-${assignment.id}`,
+      type: 'Assignment',
+      title: assignment.title,
+      dueAt: assignment.dueAt || '',
+      targetLink: '/student/todo',
+    })),
+    ...todoItems.map((module) => ({
+      id: `module-${module.id}`,
+      type: 'Module',
+      title: module.title,
+      dueAt: module.dueAt || '',
+      targetLink: `/quest?moduleId=${module.id}`,
+    })),
+  ]
+    .filter((item) => item.dueAt)
+    .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())
+    .slice(0, 6), [assignmentItems, todoItems]);
 
   const calendarDays = useMemo(() => {
     const markers: CalendarMarker[] = [
@@ -189,7 +230,11 @@ export default function StudentTodo() {
       submittedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     }, { merge: true });
-    setSubmissionDrafts((drafts) => ({ ...drafts, [assignment.id]: { ...draft, content: '' } }));
+    setSubmissionDrafts((drafts) => {
+      const nextDrafts = { ...drafts, [assignment.id]: { ...draft, content: '' } };
+      localStorage.setItem(submissionDraftStorageKey(user.uid), JSON.stringify(nextDrafts));
+      return nextDrafts;
+    });
   };
 
   return (
@@ -247,15 +292,22 @@ export default function StudentTodo() {
             </div>
 
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-sm">
-              <h3 className="font-headline font-extrabold text-lg mb-3">Suggested study flow</h3>
+              <h3 className="font-headline font-extrabold text-lg mb-3">Upcoming due dates</h3>
               <div className="space-y-2">
-                {studyPlan.map((item, index) => (
-                  <button key={`${item.title}-${index}`} onClick={() => navigate(item.targetLink)} className="w-full rounded-xl border border-outline-variant/40 bg-surface-container/30 p-3 text-left hover:border-primary/40 transition-colors">
-                    <p className={`text-[10px] font-black uppercase tracking-widest ${item.priority === 'high' ? 'text-error' : 'text-primary'}`}>{item.dayLabel || 'This week'} {item.minutes ? `/ ${item.minutes} min` : ''}</p>
-                    <h4 className="font-extrabold text-sm text-on-surface mt-1">{item.title}</h4>
-                    <p className="text-[11px] text-on-surface-variant/60 mt-1">{item.body}</p>
-                  </button>
-                ))}
+                {dueDateItems.map((item) => {
+                  const dueDate = new Date(item.dueAt);
+                  const isOverdue = dueDate.getTime() < Date.now();
+                  return (
+                    <button key={item.id} onClick={() => navigate(item.targetLink)} className="w-full rounded-xl border border-outline-variant/40 bg-surface-container/30 p-3 text-left hover:border-primary/40 transition-colors">
+                      <p className={`text-[10px] font-black uppercase tracking-widest ${isOverdue ? 'text-error' : 'text-primary'}`}>{item.type} / {isOverdue ? 'Overdue' : 'Due'}</p>
+                      <h4 className="font-extrabold text-sm text-on-surface mt-1">{item.title}</h4>
+                      <p className="text-[11px] text-on-surface-variant/60 mt-1">{dueDate.toLocaleString()}</p>
+                    </button>
+                  );
+                })}
+                {dueDateItems.length === 0 && (
+                  <p className="rounded-xl bg-surface-container/30 border border-outline-variant/30 p-3 text-xs font-bold text-on-surface-variant/60">No due dates yet. Reminders and generated study markers will still appear on the calendar.</p>
+                )}
               </div>
             </div>
           </aside>
@@ -319,6 +371,11 @@ export default function StudentTodo() {
                       className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm outline-none focus:border-primary/40 resize-none"
                     />
                     {submissionWarning && <p className="text-xs font-bold text-error mt-2">{submissionWarning}</p>}
+                    {draft.content.trim() && (
+                      <p className="text-[11px] font-bold text-on-surface-variant/60 mt-2">
+                        Draft autosaved{draftSavedAt ? ` ${new Date(draftSavedAt).toLocaleTimeString()}` : ''}.
+                      </p>
+                    )}
                     <button onClick={() => submitAssignment(assignment)} className="mt-3 w-full rounded-xl bg-primary text-on-primary px-4 py-3 text-sm font-bold inline-flex items-center justify-center gap-2">
                       <TypeIcon size={15} />
                       {submission ? 'Resubmit' : 'Submit'}
@@ -371,6 +428,10 @@ function toDateKey(value: any) {
 
 function todayInputValue() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function submissionDraftStorageKey(userId: string) {
+  return `let-mastery-submission-drafts:${userId}`;
 }
 
 function planItemDateKey(item: StudyPlanItem, index: number) {
