@@ -32,6 +32,11 @@ export interface JourneyModulePart {
     body: string;
     estimatedReadMinutes: number;
     mediaUrl?: string;
+    sourceDocumentId?: string;
+    sourcePage?: number;
+    sourceSlide?: number;
+    sourceTextSnippet?: string;
+    aiConfidence?: 'high' | 'medium' | 'needs_review';
   };
   lessonBlocks: { type: 'heading' | 'text' | 'callout'; content: string }[];
   miniQuiz: JourneyQuestion[];
@@ -49,7 +54,7 @@ export interface JourneyModule {
   topicId: string;
   level: number;
   duration: string;
-  status: 'locked' | 'available' | 'in_progress' | 'completed';
+  status: ModuleLearningState;
   progress: number;
   lessonBlocks: { type: 'heading' | 'text' | 'callout'; content: string }[];
   resources: JourneyResource[];
@@ -70,6 +75,11 @@ export interface JourneyModule {
   certificateEnabled?: boolean;
   certificateTemplateId?: string;
   certificateRequirementNote?: string;
+  sourceDocument?: SourceDocumentMeta;
+  sourceDocumentId?: string;
+  sourceDocumentName?: string;
+  sourceConfidence?: 'high' | 'medium' | 'needs_review';
+  sourceReviewRequired?: boolean;
   prerequisiteModuleIds?: string[];
   publishScope?: 'public' | 'classes';
   classIds?: string[];
@@ -90,6 +100,36 @@ export interface JourneyModule {
   };
   authorName?: string;
   authorEmail?: string;
+}
+
+export type ModuleLearningState =
+  | 'locked'
+  | 'available'
+  | 'in_progress'
+  | 'paused'
+  | 'ready_for_final_exam'
+  | 'review_required'
+  | 'completed'
+  | 'mastered';
+
+export interface SourceDocumentChunk {
+  id: string;
+  sourcePage?: number;
+  sourceSlide?: number;
+  sourcePart?: string;
+  text: string;
+  sourceTextSnippet: string;
+}
+
+export interface SourceDocumentMeta {
+  sourceDocumentId: string;
+  fileName: string;
+  fileType?: string;
+  confidence: 'high' | 'medium' | 'needs_review';
+  reviewRequired: boolean;
+  warnings?: string[];
+  wordCount?: number;
+  chunks?: SourceDocumentChunk[];
 }
 
 export interface JourneyTopic {

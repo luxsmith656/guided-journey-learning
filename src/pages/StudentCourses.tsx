@@ -24,7 +24,11 @@ const statusLabel = {
   locked: 'Locked',
   available: 'Ready',
   in_progress: 'In progress',
+  paused: 'Paused',
+  ready_for_final_exam: 'Ready for final',
+  review_required: 'Review required',
   completed: 'Completed',
+  mastered: 'Mastered',
 };
 
 export default function StudentCourses() {
@@ -109,7 +113,7 @@ export default function StudentCourses() {
       const progress = progressByModule[module.id];
       return {
         ...module,
-        status: progress?.status === 'completed' && (progress.finalScore ?? 0) >= 85 ? 'completed' : progress ? 'in_progress' : module.status,
+        status: progress?.moduleState || (progress?.status === 'completed' && (progress.finalScore ?? 0) >= 85 ? 'completed' : progress ? 'in_progress' : module.status),
         progress: progress?.progressPercent ?? module.progress,
       } as JourneyModule;
     });
@@ -332,6 +336,7 @@ export default function StudentCourses() {
                   topicModules.map((module, index) => {
                     const missingPrerequisite = module.prerequisiteModuleIds?.some((id) => !completedModuleIds.has(id));
                     const isLocked = module.status === 'locked' || !!missingPrerequisite;
+                    const isCompleted = module.status === 'completed' || module.status === 'mastered';
                     return (
                       <article
                         key={module.id}
@@ -342,7 +347,7 @@ export default function StudentCourses() {
                             <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
                               isLocked ? 'bg-surface-container text-on-surface-variant/40' : 'bg-primary/10 text-primary'
                             }`}>
-                              {module.status === 'completed' ? <CheckCircle2 size={24} /> : isLocked ? <Lock size={22} /> : <PlayCircle size={24} />}
+                              {isCompleted ? <CheckCircle2 size={24} /> : isLocked ? <Lock size={22} /> : <PlayCircle size={24} />}
                             </div>
                             <div className="min-w-0">
                               <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/40">
@@ -360,7 +365,7 @@ export default function StudentCourses() {
                             {isLocked ? 'Pass previous final at 85%' : module.progress > 0 ? 'Resume module' : 'Start module'}
                             {!isLocked && <ArrowRight size={16} />}
                           </button>
-                          {module.status === 'completed' && (
+                          {isCompleted && (
                             <button
                               onClick={() => archiveModule(module.id)}
                               className="inline-flex items-center justify-center gap-2 rounded-xl bg-surface-container text-on-surface px-5 py-3 text-sm font-bold border border-outline-variant/40"

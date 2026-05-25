@@ -1,5 +1,5 @@
 {
-  "name": "react-example",
+  "name": "let-mastery-pro",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -21,9 +21,11 @@
     "express": "^4.21.2",
     "firebase": "^12.13.0",
     "idb": "^8.0.3",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "papaparse": "^5.5.3",
+    "pdf-parse": "^2.4.5",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "react-router-dom": "^7.15.0",

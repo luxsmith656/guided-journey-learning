@@ -24,7 +24,7 @@ import DashboardLayout from '../components/DashboardLayout';
 import DeleteConfirmModal from '../components/DeleteConfirmModal';
 import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
-import { JourneyModulePart, JourneyQuestion, journeyModules, journeySubjects } from '../lib/learningJourney';
+import { JourneyModulePart, JourneyQuestion, SourceDocumentMeta, journeyModules, journeySubjects } from '../lib/learningJourney';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { createNotification, getClassRecipientIds } from '../lib/notifications';
 
@@ -59,6 +59,11 @@ interface BuilderModule {
   certificateEnabled: boolean;
   certificateTemplateId?: string;
   certificateRequirementNote?: string;
+  sourceDocument?: SourceDocumentMeta | null;
+  sourceDocumentId?: string;
+  sourceDocumentName?: string;
+  sourceConfidence?: 'high' | 'medium' | 'needs_review';
+  sourceReviewRequired?: boolean;
   attemptPolicy: {
     maxAttempts: number;
     scoreMode: 'first' | 'highest' | 'latest';
@@ -150,6 +155,51 @@ function buildDefaultFlow(parts: JourneyModulePart[], finalExam: JourneyQuestion
   return flow;
 }
 
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+    reader.onerror = () => reject(reader.error || new Error('Unable to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function formatSourceDocumentForPrompt(documentMeta: SourceDocumentMeta) {
+  const chunks = documentMeta.chunks || [];
+  return chunks.map((chunk, index) => {
+    const locator = chunk.sourcePage
+      ? `page ${chunk.sourcePage}`
+      : chunk.sourceSlide
+        ? `slide ${chunk.sourceSlide}`
+        : chunk.sourcePart || `chunk ${index + 1}`;
+    return `[${locator}] ${chunk.text}`;
+  }).join('\n\n');
+}
+
+function groundAIPart(part: any, index: number, sourceDocument?: SourceDocumentMeta | null): JourneyModulePart {
+  const fallback = blankPart(index);
+  const chunk = sourceDocument?.chunks?.[index % Math.max(sourceDocument.chunks.length, 1)];
+  const textbookSection = {
+    ...fallback.textbookSection,
+    ...(part.textbookSection || {}),
+    sourceDocumentId: part.textbookSection?.sourceDocumentId || sourceDocument?.sourceDocumentId || chunk?.id?.split('-chunk-')[0] || '',
+    sourcePage: part.textbookSection?.sourcePage || chunk?.sourcePage,
+    sourceSlide: part.textbookSection?.sourceSlide || chunk?.sourceSlide,
+    sourceTextSnippet: part.textbookSection?.sourceTextSnippet || chunk?.sourceTextSnippet || chunk?.text?.slice(0, 320) || '',
+    aiConfidence: part.textbookSection?.aiConfidence || sourceDocument?.confidence || 'medium',
+  };
+
+  return {
+    ...fallback,
+    ...part,
+    id: part.id || `ai-part-${index + 1}-${Date.now()}`,
+    textbookSection,
+    lessonBlocks: part.lessonBlocks?.length ? part.lessonBlocks : fallback.lessonBlocks,
+    miniQuiz: part.miniQuiz?.length ? part.miniQuiz : [blankQuestion(`ai-part-${index + 1}-q1`)],
+    activity: part.activity?.prompt ? part.activity : fallback.activity,
+  };
+}
+
 const emptyModule: BuilderModule = {
   id: '',
   title: '',
@@ -176,6 +226,11 @@ const emptyModule: BuilderModule = {
   certificateEnabled: false,
   certificateTemplateId: '',
   certificateRequirementNote: 'Issue a certificate after this module is completed and the final assessment is passed.',
+  sourceDocument: null,
+  sourceDocumentId: '',
+  sourceDocumentName: '',
+  sourceConfidence: undefined,
+  sourceReviewRequired: false,
   attemptPolicy: defaultAttemptPolicy,
   flowItems: buildDefaultFlow([blankPart(0)], [blankQuestion('final-q1')]),
   parts: [blankPart(0)],
@@ -209,6 +264,11 @@ function fromSeedModule(module: (typeof journeyModules)[number]): BuilderModule 
     certificateEnabled: !!(module as any).certificateEnabled,
     certificateTemplateId: (module as any).certificateTemplateId || '',
     certificateRequirementNote: (module as any).certificateRequirementNote || emptyModule.certificateRequirementNote,
+    sourceDocument: (module as any).sourceDocument || null,
+    sourceDocumentId: (module as any).sourceDocumentId || '',
+    sourceDocumentName: (module as any).sourceDocumentName || '',
+    sourceConfidence: (module as any).sourceConfidence || undefined,
+    sourceReviewRequired: !!(module as any).sourceReviewRequired,
     attemptPolicy: { ...defaultAttemptPolicy, ...((module as any).attemptPolicy || {}) },
     parts: module.parts?.length ? module.parts : [blankPart(0)],
     finalExam: module.finalExam?.length ? module.finalExam : module.questions.slice(0, 2),
@@ -259,6 +319,11 @@ function fromFirestoreModule(id: string, data: any): BuilderModule {
     certificateEnabled: !!data.certificateEnabled,
     certificateTemplateId: data.certificateTemplateId || '',
     certificateRequirementNote: data.certificateRequirementNote || emptyModule.certificateRequirementNote,
+    sourceDocument: data.sourceDocument || null,
+    sourceDocumentId: data.sourceDocumentId || data.sourceDocument?.sourceDocumentId || '',
+    sourceDocumentName: data.sourceDocumentName || data.sourceDocument?.fileName || '',
+    sourceConfidence: data.sourceConfidence || data.sourceDocument?.confidence || undefined,
+    sourceReviewRequired: !!(data.sourceReviewRequired || data.sourceDocument?.reviewRequired),
     attemptPolicy: { ...defaultAttemptPolicy, ...(data.attemptPolicy || {}) },
     parts,
     finalExam,
@@ -504,6 +569,53 @@ export default function InstructorModules() {
     updateDraft('flowItems', buildDefaultFlow(draft.parts, draft.finalExam));
   };
 
+  const uploadSourceDocument = async (file: File) => {
+    if (file.size > 18 * 1024 * 1024) {
+      setToastMsg('Document is too large. Use a file under 18MB for now.');
+      setShowToast(true);
+      return;
+    }
+
+    setIsDrafting(true);
+    try {
+      const fileData = await fileToBase64(file);
+      const response = await fetch('/api/extract-document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: file.name,
+          fileType: file.type,
+          fileData,
+        }),
+      });
+      const data = await response.json();
+      if (!data.success || !data.document) throw new Error(data.error || 'Document extraction failed');
+
+      const documentMeta = data.document as SourceDocumentMeta;
+      setDraft((current) => ({
+        ...current,
+        sourceDocument: documentMeta,
+        sourceDocumentId: documentMeta.sourceDocumentId,
+        sourceDocumentName: documentMeta.fileName,
+        sourceConfidence: documentMeta.confidence,
+        sourceReviewRequired: documentMeta.reviewRequired,
+      }));
+      setAssistantSource(formatSourceDocumentForPrompt(documentMeta));
+      setAssistantPrompt((current) => current || `Convert ${file.name} into an editable LET learning module`);
+      setAiOpen(true);
+      setToastMsg(documentMeta.reviewRequired
+        ? 'Document extracted. Review is required before publishing.'
+        : 'Document extracted and ready for AI module drafting.');
+      setShowToast(true);
+    } catch (error) {
+      console.warn('Document extraction failed', error);
+      setToastMsg('Unable to extract this document. Try PDF, DOCX, PPTX, TXT, or Markdown.');
+      setShowToast(true);
+    } finally {
+      setIsDrafting(false);
+    }
+  };
+
   const deleteModule = async () => {
     if (!draft.id || isCreatingNew) {
       createNewDraft();
@@ -581,6 +693,8 @@ export default function InstructorModules() {
 
   const generateAIDraft = async () => {
     const prompt = assistantPrompt.trim() || draft.title || 'LET review module';
+    const sourceDocument = draft.sourceDocument || null;
+    const sourceChunks = sourceDocument?.chunks || [];
     setIsDrafting(true);
     try {
       const response = await fetch('/api/course-builder', {
@@ -589,6 +703,8 @@ export default function InstructorModules() {
         body: JSON.stringify({
           topic: prompt,
           sourceText: assistantSource,
+          sourceDocument,
+          sourceChunks,
           subject: selectedSubject.title,
           partCount: Math.max(2, draft.parts.length || 2),
         }),
@@ -605,14 +721,12 @@ export default function InstructorModules() {
         competencies: aiModule.competencies?.length ? aiModule.competencies : current.competencies,
         prerequisiteModuleIds: aiModule.prerequisiteTopics || current.prerequisiteModuleIds,
         examBlueprint: aiModule.examBlueprint || current.examBlueprint,
-        parts: aiModule.parts?.length ? aiModule.parts.map((part: any, index: number) => ({
-          ...blankPart(index),
-          ...part,
-          id: part.id || `ai-part-${index + 1}-${Date.now()}`,
-          textbookSection: { ...blankPart(index).textbookSection, ...(part.textbookSection || {}) },
-          lessonBlocks: part.lessonBlocks?.length ? part.lessonBlocks : blankPart(index).lessonBlocks,
-          miniQuiz: part.miniQuiz?.length ? part.miniQuiz : [blankQuestion(`ai-part-${index + 1}-q1`)],
-        })) : current.parts,
+        sourceDocument: current.sourceDocument,
+        sourceDocumentId: current.sourceDocumentId,
+        sourceDocumentName: current.sourceDocumentName,
+        sourceConfidence: current.sourceConfidence,
+        sourceReviewRequired: current.sourceReviewRequired,
+        parts: aiModule.parts?.length ? aiModule.parts.map((part: any, index: number) => groundAIPart(part, index, sourceDocument)) : current.parts,
         finalExam: aiModule.finalExam?.length ? aiModule.finalExam : current.finalExam,
       }));
       setToastMsg('AI Course Builder drafted a module. Review and approve by saving/publishing.');
@@ -697,6 +811,11 @@ export default function InstructorModules() {
       certificateEnabled: draft.certificateEnabled,
       certificateTemplateId: draft.certificateTemplateId || '',
       certificateRequirementNote: draft.certificateRequirementNote || '',
+      sourceDocument: draft.sourceDocument || null,
+      sourceDocumentId: draft.sourceDocumentId || draft.sourceDocument?.sourceDocumentId || '',
+      sourceDocumentName: draft.sourceDocumentName || draft.sourceDocument?.fileName || '',
+      sourceConfidence: draft.sourceConfidence || draft.sourceDocument?.confidence || '',
+      sourceReviewRequired: !!(draft.sourceReviewRequired || draft.sourceDocument?.reviewRequired),
       attemptPolicy: draft.attemptPolicy,
       flowItems: draft.flowItems,
       createdBy: user?.uid || 'instructor',
@@ -1010,6 +1129,7 @@ export default function InstructorModules() {
         sourceText={assistantSource}
         setSourceText={setAssistantSource}
         isWorking={isDrafting}
+        onUploadDocument={uploadSourceDocument}
         onDraft={generateAIDraft}
         onProofread={() => rewriteActiveReading('proofread')}
         onParaphrase={() => rewriteActiveReading('paraphrase')}
@@ -1169,6 +1289,7 @@ function FloatingAIHelper({
   sourceText,
   setSourceText,
   isWorking,
+  onUploadDocument,
   onDraft,
   onProofread,
   onParaphrase,
@@ -1180,6 +1301,7 @@ function FloatingAIHelper({
   sourceText: string;
   setSourceText: (value: string) => void;
   isWorking: boolean;
+  onUploadDocument: (file: File) => void;
   onDraft: () => void;
   onProofread: () => void;
   onParaphrase: () => void;
@@ -1216,14 +1338,16 @@ function FloatingAIHelper({
           </label>
           <input
             type="file"
-            accept=".txt,.md,.csv"
+            accept=".pdf,.docx,.pptx,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
             onChange={async (event) => {
               const file = event.target.files?.[0];
               if (!file) return;
-              setSourceText(await file.text());
+              await onUploadDocument(file);
+              event.currentTarget.value = '';
             }}
             className="mt-2 text-xs font-bold text-on-surface-variant"
           />
+          <p className="mt-2 text-[11px] text-on-surface-variant/60">Supports PDF, DOCX, PPTX, TXT, and Markdown. AI only creates a draft; instructors still approve and publish.</p>
           <div className="grid grid-cols-1 gap-2 mt-3">
             <button onClick={onDraft} disabled={isWorking} className="rounded-xl bg-primary text-on-primary px-4 py-3 text-sm font-bold disabled:opacity-50 inline-flex items-center justify-center gap-2">
               <Sparkles size={16} />
@@ -1331,6 +1455,14 @@ function PartsStep({
           <Field label="Textbook reading body">
             <textarea value={activePart.textbookSection.body} onChange={(event) => updatePart({ textbookSection: { ...activePart.textbookSection, body: event.target.value } })} rows={7} className="input resize-y leading-relaxed" />
           </Field>
+          {activePart.textbookSection.sourceTextSnippet && (
+            <div className="rounded-2xl border border-primary/15 bg-primary/5 p-4">
+              <p className="text-[10px] font-black uppercase tracking-widest text-primary mb-2">
+                Source reference / {activePart.textbookSection.sourcePage ? `Page ${activePart.textbookSection.sourcePage}` : activePart.textbookSection.sourceSlide ? `Slide ${activePart.textbookSection.sourceSlide}` : 'Document chunk'} / {activePart.textbookSection.aiConfidence || 'medium'}
+              </p>
+              <p className="text-xs text-on-surface-variant leading-relaxed">{activePart.textbookSection.sourceTextSnippet}</p>
+            </div>
+          )}
           <div className="space-y-3">
             <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Mini lesson blocks</p>
             {activePart.lessonBlocks.map((block, index) => (

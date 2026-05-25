@@ -31,6 +31,8 @@ import {
   JourneyModule,
   JourneyModulePart,
   JourneyQuestion,
+  ModuleLearningState,
+  journeyModules,
 } from '../lib/learningJourney';
 import { createNotification } from '../lib/notifications';
 
@@ -51,6 +53,7 @@ interface QuestProgress {
   proctorWarnings?: number;
   examLockedUntil?: number;
   examStartedAt?: number;
+  moduleState?: ModuleLearningState;
   status: 'in_progress' | 'completed';
 }
 
@@ -78,6 +81,7 @@ const defaultProgress: QuestProgress = {
   phase: 'intro',
   partScores: {},
   weakPartIds: [],
+  moduleState: 'available',
   status: 'in_progress',
 };
 
@@ -219,7 +223,9 @@ export default function LearningQuest() {
   }, [user?.uid, module.id, currentPart?.id]);
 
   const persistProgress = async (nextProgress: QuestProgress) => {
-    setProgress(nextProgress);
+    const moduleState = getModuleState(nextProgress, parts.length);
+    const normalizedProgress = { ...nextProgress, moduleState };
+    setProgress(normalizedProgress);
     setSelectedAnswer(null);
     setWrittenAnswer('');
     setLastQuestionResult(null);
@@ -227,7 +233,7 @@ export default function LearningQuest() {
     setLastGradeScore(null);
 
     try {
-      localStorage.setItem(localProgressKey, JSON.stringify(nextProgress));
+      localStorage.setItem(localProgressKey, JSON.stringify(normalizedProgress));
     } catch (error) {
       console.warn('Unable to save local module progress', error);
     }
@@ -240,24 +246,25 @@ export default function LearningQuest() {
         {
           userId: user.uid,
           moduleId: module.id,
-          status: nextProgress.status,
-          currentPartIndex: nextProgress.currentPartIndex,
-          phase: nextProgress.phase,
-          partScores: nextProgress.partScores,
-          finalScore: nextProgress.finalScore ?? null,
-          firstFinalScore: nextProgress.firstFinalScore ?? null,
-          latestFinalScore: nextProgress.latestFinalScore ?? nextProgress.finalScore ?? null,
-          finalAttemptCount: nextProgress.finalAttemptCount || 0,
-          timeSpentSeconds: nextProgress.timeSpentSeconds || 0,
-          failedAttempts: nextProgress.failedAttempts || 0,
-          mustReread: !!nextProgress.mustReread,
-          weakPartIds: nextProgress.weakPartIds || [],
-          proctorWarnings: nextProgress.proctorWarnings || 0,
-          examLockedUntil: nextProgress.examLockedUntil || null,
-          examStartedAt: nextProgress.examStartedAt || null,
-          progressPercent: computeProgressPercent(nextProgress, parts.length),
+          status: normalizedProgress.status,
+          moduleState,
+          currentPartIndex: normalizedProgress.currentPartIndex,
+          phase: normalizedProgress.phase,
+          partScores: normalizedProgress.partScores,
+          finalScore: normalizedProgress.finalScore ?? null,
+          firstFinalScore: normalizedProgress.firstFinalScore ?? null,
+          latestFinalScore: normalizedProgress.latestFinalScore ?? normalizedProgress.finalScore ?? null,
+          finalAttemptCount: normalizedProgress.finalAttemptCount || 0,
+          timeSpentSeconds: normalizedProgress.timeSpentSeconds || 0,
+          failedAttempts: normalizedProgress.failedAttempts || 0,
+          mustReread: !!normalizedProgress.mustReread,
+          weakPartIds: normalizedProgress.weakPartIds || [],
+          proctorWarnings: normalizedProgress.proctorWarnings || 0,
+          examLockedUntil: normalizedProgress.examLockedUntil || null,
+          examStartedAt: normalizedProgress.examStartedAt || null,
+          progressPercent: computeProgressPercent(normalizedProgress, parts.length),
           lastAccessedAt: serverTimestamp(),
-          completedAt: nextProgress.status === 'completed' ? serverTimestamp() : null,
+          completedAt: normalizedProgress.status === 'completed' ? serverTimestamp() : null,
         },
         { merge: true },
       );
@@ -327,6 +334,7 @@ export default function LearningQuest() {
               proctorWarnings: data.proctorWarnings || 0,
               examLockedUntil: data.examLockedUntil || undefined,
               examStartedAt: data.examStartedAt || undefined,
+              moduleState: data.moduleState || undefined,
               status: data.status === 'completed' ? 'completed' : 'in_progress',
             };
           }
@@ -614,6 +622,70 @@ export default function LearningQuest() {
     persistProgress({ ...progress, currentPartIndex: nextIndex, phase: 'read', partScores });
   };
 
+  const unlockNextModules = async () => {
+    if (!user) return;
+    try {
+      const modulesSnap = await getDocs(query(collection(db, 'modules'), where('isPublished', '==', true)));
+      const remoteModules = modulesSnap.docs.map((moduleDoc) => normalizeFirestoreModule(moduleDoc.id, moduleDoc.data()));
+      const remoteIds = new Set(remoteModules.map((item) => item.id));
+      const availableModules = [...remoteModules, ...journeyModules.filter((item) => !remoteIds.has(item.id))]
+        .filter((item: any) => {
+          if (!item.publishScope || item.publishScope === 'public') return true;
+          return !!user.activeClassId && (item.classIds || []).includes(user.activeClassId);
+        })
+        .sort((a, b) => (a.subjectId.localeCompare(b.subjectId)) || (a.topicId.localeCompare(b.topicId)) || (a.level - b.level) || a.title.localeCompare(b.title));
+
+      const dependentModules = availableModules.filter((item: any) => item.prerequisiteModuleIds?.includes(module.id));
+      const sameTrack = availableModules.filter((item) => item.subjectId === module.subjectId && item.topicId === module.topicId);
+      const currentIndex = sameTrack.findIndex((item) => item.id === module.id);
+      const nextByOrder = currentIndex >= 0 ? sameTrack[currentIndex + 1] : null;
+      const targets = [...new Map([...dependentModules, nextByOrder].filter(Boolean).map((item: any) => [item.id, item])).values()].slice(0, 2);
+
+      for (const nextModule of targets) {
+        const progressRef = doc(db, 'moduleProgress', `${user.uid}_${nextModule.id}`);
+        const existing = await getDoc(progressRef);
+        const existingData = existing.exists() ? existing.data() : null;
+        if (existingData?.status === 'completed' || ['in_progress', 'ready_for_final_exam', 'review_required', 'mastered'].includes(existingData?.moduleState)) continue;
+        await setDoc(progressRef, {
+          userId: user.uid,
+          moduleId: nextModule.id,
+          status: 'in_progress',
+          moduleState: 'available',
+          currentPartIndex: 0,
+          phase: 'intro',
+          partScores: {},
+          progressPercent: 0,
+          unlockedByModuleId: module.id,
+          unlockedAt: serverTimestamp(),
+          lastAccessedAt: serverTimestamp(),
+        }, { merge: true });
+      }
+
+      if (targets.length) {
+        await createNotification({
+          title: `Next module unlocked: ${targets[0].title}`,
+          body: `You passed ${module.title}. Continue with the next module in your journey.`,
+          type: 'module_unlocked',
+          targetLink: `/quest?moduleId=${targets[0].id}`,
+          recipientIds: [user.uid],
+          createdBy: 'system',
+        });
+        try {
+          const profileRef = doc(db, 'learnerProfiles', user.uid);
+          await updateDoc(profileRef, {
+            nextRecommendedModuleId: targets[0].id,
+            lastUnlockedModuleId: targets[0].id,
+            lastUpdatedAt: serverTimestamp(),
+          });
+        } catch (profileError) {
+          console.warn('Unable to set next recommended module', profileError);
+        }
+      }
+    } catch (error) {
+      console.warn('Unable to unlock next module', error);
+    }
+  };
+
   const submitFinalExam = async () => {
     setIsGrading(true);
     const grades: Record<string, GradeResult> = {};
@@ -716,6 +788,7 @@ export default function LearningQuest() {
       } catch (error) {
         console.warn('Unable to update learner profile mastery', error);
       }
+      await unlockNextModules();
     }
   };
 
@@ -1416,6 +1489,17 @@ function computeProgressPercent(progress: QuestProgress, partCount: number) {
   const base = Math.round((completedParts / Math.max(partCount + 1, 1)) * 100);
   if (progress.phase === 'finalExam') return Math.max(base, 85);
   return Math.min(95, base);
+}
+
+function getModuleState(progress: QuestProgress, partCount: number): ModuleLearningState {
+  if (progress.status === 'completed' && (progress.finalScore || 0) >= 95) return 'mastered';
+  if (progress.status === 'completed') return 'completed';
+  if (progress.mustReread || (progress.failedAttempts || 0) > 0) return 'review_required';
+  if (progress.phase === 'finalExam') return 'ready_for_final_exam';
+  if (partCount > 0 && Object.keys(progress.partScores || {}).length >= partCount) return 'ready_for_final_exam';
+  if (Object.keys(progress.partScores || {}).length === 0 && progress.phase === 'intro') return 'available';
+  if (progress.phase === 'read' && Object.keys(progress.partScores || {}).length > 0) return 'paused';
+  return 'in_progress';
 }
 
 function getLearningState(progress: QuestProgress, partCount: number) {

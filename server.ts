@@ -1,6 +1,8 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
+import JSZip from 'jszip';
+import { PDFParse } from 'pdf-parse';
 
 const AI_GATEWAY = 'https://ai.gateway.lovable.dev/v1/chat/completions';
 const DEFAULT_MODEL = 'google/gemini-3-flash-preview';
@@ -38,6 +40,161 @@ function tokenSimilarity(a: string, b: string) {
   return overlap / Math.max(aTokens.size, bTokens.size);
 }
 
+type SourceChunk = {
+  id: string;
+  sourcePage?: number;
+  sourceSlide?: number;
+  sourcePart?: string;
+  text: string;
+  sourceTextSnippet: string;
+};
+
+function decodeBase64File(fileData = '') {
+  const clean = String(fileData).replace(/^data:[^;]+;base64,/, '');
+  return Buffer.from(clean, 'base64');
+}
+
+function cleanExtractedText(text = '') {
+  return String(text)
+    .replace(/\r/g, '\n')
+    .replace(/\t/g, ' ')
+    .replace(/[ ]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function stripXml(value = '') {
+  return value
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function chunkText(text: string, sourceDocumentId: string, preferredSourcePart = 'document') {
+  const clean = cleanExtractedText(text);
+  const paragraphs = clean.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+  const chunks: SourceChunk[] = [];
+  let buffer = '';
+
+  paragraphs.forEach((paragraph) => {
+    if ((buffer + '\n\n' + paragraph).length > 1500 && buffer.trim()) {
+      chunks.push({
+        id: `${sourceDocumentId}-chunk-${chunks.length + 1}`,
+        sourcePart: preferredSourcePart,
+        text: buffer.trim(),
+        sourceTextSnippet: buffer.trim().slice(0, 320),
+      });
+      buffer = paragraph;
+      return;
+    }
+    buffer = buffer ? `${buffer}\n\n${paragraph}` : paragraph;
+  });
+
+  if (buffer.trim()) {
+    chunks.push({
+      id: `${sourceDocumentId}-chunk-${chunks.length + 1}`,
+      sourcePart: preferredSourcePart,
+      text: buffer.trim(),
+      sourceTextSnippet: buffer.trim().slice(0, 320),
+    });
+  }
+
+  return chunks.length ? chunks : [{
+    id: `${sourceDocumentId}-chunk-1`,
+    sourcePart: preferredSourcePart,
+    text: clean.slice(0, 1500),
+    sourceTextSnippet: clean.slice(0, 320),
+  }];
+}
+
+function computeExtractionConfidence(text: string, fileName: string) {
+  const clean = cleanExtractedText(text);
+  const wordCount = clean.split(/\s+/).filter(Boolean).length;
+  const suspiciousSymbols = (clean.match(/[�□■]/g) || []).length;
+  const warnings: string[] = [];
+
+  if (wordCount < 80) warnings.push('Very little text was extracted. The document may be scanned or image-heavy.');
+  if (suspiciousSymbols > 5) warnings.push('Some extracted characters look corrupted. Review the source carefully.');
+  if (/\.pdf$/i.test(fileName) && wordCount < 150) warnings.push('PDF extraction may need OCR if the source is scanned.');
+
+  const confidence = warnings.length === 0 && wordCount > 250
+    ? 'high'
+    : wordCount > 80
+      ? 'medium'
+      : 'needs_review';
+  return { confidence, reviewRequired: confidence !== 'high', warnings, wordCount };
+}
+
+async function extractPdf(buffer: Buffer, sourceDocumentId: string) {
+  const parser = new PDFParse({ data: buffer });
+  try {
+    const result = await parser.getText();
+    const chunks = result.pages.flatMap((page: any) => {
+      const text = cleanExtractedText(page.text || '');
+      if (!text) return [];
+      return chunkText(text, `${sourceDocumentId}-p${page.num}`, `Page ${page.num}`).map((chunk, index) => ({
+        ...chunk,
+        id: `${sourceDocumentId}-page-${page.num}-chunk-${index + 1}`,
+        sourcePage: page.num,
+      }));
+    });
+    return {
+      text: cleanExtractedText(result.text),
+      chunks,
+    };
+  } finally {
+    await parser.destroy();
+  }
+}
+
+async function extractDocx(buffer: Buffer, sourceDocumentId: string) {
+  const zip = await JSZip.loadAsync(buffer);
+  const documentXml = await zip.file('word/document.xml')?.async('string');
+  if (!documentXml) throw new Error('Unable to read DOCX document.xml');
+  const paragraphs = [...documentXml.matchAll(/<w:p[\s\S]*?<\/w:p>/g)]
+    .map((match) => stripXml(match[0]))
+    .filter(Boolean);
+  const text = cleanExtractedText(paragraphs.join('\n\n'));
+  return {
+    text,
+    chunks: chunkText(text, sourceDocumentId, 'DOCX body'),
+  };
+}
+
+async function extractPptx(buffer: Buffer, sourceDocumentId: string) {
+  const zip = await JSZip.loadAsync(buffer);
+  const slideFiles = Object.keys(zip.files)
+    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+    .sort((a, b) => Number(a.match(/slide(\d+)\.xml/)?.[1] || 0) - Number(b.match(/slide(\d+)\.xml/)?.[1] || 0));
+  const chunks: SourceChunk[] = [];
+  const slideTexts: string[] = [];
+
+  for (const slideFile of slideFiles) {
+    const slideNumber = Number(slideFile.match(/slide(\d+)\.xml/)?.[1] || chunks.length + 1);
+    const xml = await zip.file(slideFile)?.async('string');
+    const text = cleanExtractedText(stripXml(xml || ''));
+    if (!text) continue;
+    slideTexts.push(`Slide ${slideNumber}\n${text}`);
+    chunks.push({
+      id: `${sourceDocumentId}-slide-${slideNumber}`,
+      sourceSlide: slideNumber,
+      sourcePart: `Slide ${slideNumber}`,
+      text,
+      sourceTextSnippet: text.slice(0, 320),
+    });
+  }
+
+  return {
+    text: cleanExtractedText(slideTexts.join('\n\n')),
+    chunks,
+  };
+}
+
 function deterministicGrade({ studentAnswer, expectedAnswer = '', acceptedAnswers = [] }: any) {
   const normalizedStudent = normalizeAnswer(studentAnswer);
   const candidates = [expectedAnswer, ...acceptedAnswers].filter(Boolean);
@@ -57,7 +214,7 @@ async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || Number(process.argv[process.argv.indexOf('--port') + 1]) || 8080;
 
-  app.use(express.json({ limit: '2mb' }));
+  app.use(express.json({ limit: '28mb' }));
 
   // AI question drafting (structured output via tool calling)
   app.post('/api/draft-questions', async (req: any, res: any) => {
@@ -125,8 +282,59 @@ async function startServer() {
     }
   });
 
+  app.post('/api/extract-document', async (req: any, res: any) => {
+    try {
+      const { fileName = 'uploaded-document', fileType = '', fileData = '' } = req.body || {};
+      if (!fileData) return res.status(400).json({ success: false, error: 'fileData required' });
+      const lowerName = String(fileName).toLowerCase();
+      const sourceDocumentId = `src-${Date.now()}-${String(fileName).replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 40)}`;
+      const buffer = decodeBase64File(fileData);
+      const mimeOrName = `${fileType} ${lowerName}`;
+
+      let extracted: { text: string; chunks: SourceChunk[] };
+      if (mimeOrName.includes('pdf') || lowerName.endsWith('.pdf')) {
+        extracted = await extractPdf(buffer, sourceDocumentId);
+      } else if (lowerName.endsWith('.docx') || mimeOrName.includes('wordprocessingml')) {
+        extracted = await extractDocx(buffer, sourceDocumentId);
+      } else if (lowerName.endsWith('.pptx') || mimeOrName.includes('presentationml')) {
+        extracted = await extractPptx(buffer, sourceDocumentId);
+      } else if (lowerName.endsWith('.txt') || lowerName.endsWith('.md') || mimeOrName.includes('text/')) {
+        const text = cleanExtractedText(buffer.toString('utf8'));
+        extracted = { text, chunks: chunkText(text, sourceDocumentId, 'Text file') };
+      } else {
+        return res.status(400).json({ success: false, error: 'Unsupported file type. Use PDF, DOCX, PPTX, TXT, or Markdown.' });
+      }
+
+      const quality = computeExtractionConfidence(extracted.text, lowerName);
+      const chunks = extracted.chunks.slice(0, 40).map((chunk, index) => ({
+        ...chunk,
+        id: chunk.id || `${sourceDocumentId}-chunk-${index + 1}`,
+        text: cleanExtractedText(chunk.text).slice(0, 1800),
+        sourceTextSnippet: cleanExtractedText(chunk.sourceTextSnippet || chunk.text).slice(0, 320),
+      }));
+
+      res.json({
+        success: true,
+        document: {
+          sourceDocumentId,
+          fileName,
+          fileType,
+          extractedText: cleanExtractedText(extracted.text).slice(0, 18000),
+          chunks,
+          confidence: quality.confidence,
+          reviewRequired: quality.reviewRequired,
+          warnings: quality.warnings,
+          wordCount: quality.wordCount,
+        },
+      });
+    } catch (error: any) {
+      console.error('extract-document error:', error.message);
+      res.status(500).json({ success: false, error: error.message || 'Unable to extract document text' });
+    }
+  });
+
   app.post('/api/course-builder', async (req: any, res: any) => {
-    const { topic = '', sourceText = '', subject = 'LET Review', partCount = 2 } = req.body || {};
+    const { topic = '', sourceText = '', sourceDocument = null, sourceChunks = [], subject = 'LET Review', partCount = 2 } = req.body || {};
     if (!String(topic || sourceText).trim()) return res.status(400).json({ success: false, error: 'topic or sourceText required' });
 
     try {
@@ -140,10 +348,21 @@ async function startServer() {
             role: 'user',
             content: `Subject: ${subject}
 Topic/instruction: ${topic}
-Source content:
-${String(sourceText).slice(0, 7000)}
+Source document metadata:
+${sourceDocument ? JSON.stringify({
+  sourceDocumentId: sourceDocument.sourceDocumentId,
+  fileName: sourceDocument.fileName,
+  confidence: sourceDocument.confidence,
+  reviewRequired: sourceDocument.reviewRequired,
+  warnings: sourceDocument.warnings || [],
+}).slice(0, 1200) : 'No uploaded document'}
 
-Create a concise module with ${Math.max(2, Math.min(Number(partCount) || 2, 5))} ordered parts. Include objectives, textbook-style sections, mini quizzes, final exam questions, competencies, prerequisite topic suggestions, and an exam blueprint.`,
+Source content with chunk/page labels:
+${(Array.isArray(sourceChunks) && sourceChunks.length
+  ? sourceChunks.map((chunk: any, index: number) => `[chunk ${index + 1}${chunk.sourcePage ? ` page ${chunk.sourcePage}` : ''}${chunk.sourceSlide ? ` slide ${chunk.sourceSlide}` : ''}] ${chunk.text}`).join('\n\n')
+  : String(sourceText)).slice(0, 9000)}
+
+Create a concise module with ${Math.max(2, Math.min(Number(partCount) || 2, 5))} ordered parts. Include objectives, textbook-style sections, mini quizzes, activities where useful, final exam questions, competencies, prerequisite topic suggestions, and an exam blueprint. For every part, keep sourceDocumentId, sourcePage or sourceSlide when known, sourceTextSnippet, and aiConfidence. If the extraction confidence is medium or needs_review, mark aiConfidence as needs_review where the source is unclear.`,
           },
         ],
         tools: [{
@@ -207,8 +426,13 @@ Create a concise module with ${Math.max(2, Math.min(Number(partCount) || 2, 5))}
                               title: { type: 'string' },
                               body: { type: 'string' },
                               estimatedReadMinutes: { type: 'number' },
+                              sourceDocumentId: { type: 'string' },
+                              sourcePage: { type: 'number' },
+                              sourceSlide: { type: 'number' },
+                              sourceTextSnippet: { type: 'string' },
+                              aiConfidence: { type: 'string', enum: ['high', 'medium', 'needs_review'] },
                             },
-                            required: ['title', 'body', 'estimatedReadMinutes'],
+                            required: ['title', 'body', 'estimatedReadMinutes', 'sourceTextSnippet', 'aiConfidence'],
                             additionalProperties: false,
                           },
                           lessonBlocks: {
@@ -224,6 +448,15 @@ Create a concise module with ${Math.max(2, Math.min(Number(partCount) || 2, 5))}
                             },
                           },
                           miniQuiz: { type: 'array', items: { $ref: '#/$defs/question' } },
+                          activity: {
+                            type: 'object',
+                            properties: {
+                              title: { type: 'string' },
+                              prompt: { type: 'string' },
+                            },
+                            required: ['title', 'prompt'],
+                            additionalProperties: false,
+                          },
                         },
                         required: ['id', 'title', 'objective', 'textbookSection', 'lessonBlocks', 'miniQuiz'],
                         additionalProperties: false,
