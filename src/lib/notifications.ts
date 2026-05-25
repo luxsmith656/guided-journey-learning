@@ -11,6 +11,7 @@ export interface NotificationPayload {
   recipientIds?: string[];
   roleRecipients?: NotificationRole[];
   classId?: string;
+  moduleId?: string;
   createdBy?: string;
   createdByEmail?: string;
 }
@@ -31,6 +32,7 @@ export async function createNotification(payload: NotificationPayload) {
     recipientIds,
     roleRecipients,
     classId: payload.classId || '',
+    moduleId: payload.moduleId || '',
     readBy: [],
     createdBy: payload.createdBy || '',
     createdByEmail: payload.createdByEmail || '',

@@ -355,6 +355,12 @@ export default function StudentTodo() {
                       Assignment {dueDate ? `/ ${isOverdue ? 'Overdue' : 'Due'} ${dueDate.toLocaleString()}` : '/ No due date'}
                     </p>
                     <h2 className="text-lg font-extrabold text-on-surface">{assignment.title}</h2>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {assignment.className && (
+                        <span className="rounded-full bg-primary/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-primary">{assignment.className}</span>
+                      )}
+                      <span className="rounded-full bg-surface-container px-3 py-1 text-[10px] font-black uppercase tracking-widest text-on-surface-variant">{assignment.moduleTitle || 'Class assignment'}</span>
+                    </div>
                     <p className="text-sm text-on-surface-variant mt-1">{assignment.instructions}</p>
                     <p className="text-xs text-on-surface-variant/50 mt-2">For file work, submit a Drive or image link with access enabled until grading is complete.</p>
                     {submission && (

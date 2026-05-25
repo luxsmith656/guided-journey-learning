@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { addDoc, collection, doc, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
-import { CheckCircle2, ClipboardList, MessageSquare, Plus, RotateCcw } from 'lucide-react';
+import { BookOpen, CheckCircle2, ClipboardList, MessageSquare, Plus, RotateCcw, Users } from 'lucide-react';
 import InstructorLayout from '../components/InstructorLayout';
 import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
@@ -10,6 +10,7 @@ import { createNotification, getClassRecipientIds } from '../lib/notifications';
 export default function InstructorAssignments() {
   const { user } = useAuth();
   const [classes, setClasses] = useState<any[]>([]);
+  const [modules, setModules] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, { grade: string; comment: string }>>({});
@@ -37,15 +38,36 @@ export default function InstructorAssignments() {
       const rows = snapshot.docs.map((assignmentDoc) => ({ id: assignmentDoc.id, ...assignmentDoc.data() }));
       setAssignments(rows);
     });
+    const unsubModules = onSnapshot(collection(db, 'modules'), (snapshot) => {
+      const rows = snapshot.docs.map((moduleDoc) => ({ id: moduleDoc.id, ...moduleDoc.data() }))
+        .filter((module: any) => (
+          user.role === 'admin' ||
+          module.authorId === user.uid ||
+          module.createdBy === user.uid ||
+          module.authorEmail === user.email
+        ));
+      setModules(rows);
+    });
     const unsubSubmissions = onSnapshot(collection(db, 'assignmentSubmissions'), (snapshot) => {
       setSubmissions(snapshot.docs.map((submissionDoc) => ({ id: submissionDoc.id, ...submissionDoc.data() })));
     });
     return () => {
       unsubClasses();
       unsubAssignments();
+      unsubModules();
       unsubSubmissions();
     };
   }, [user]);
+
+  const selectedClass = classes.find((classItem) => classItem.id === draft.classId);
+  const moduleOptions = modules
+    .filter((module) => (
+      !draft.classId ||
+      module.publishScope === 'public' ||
+      !module.classIds?.length ||
+      module.classIds.includes(draft.classId)
+    ))
+    .sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')));
 
   const reviewSubmission = async (submission: any, status: 'graded' | 'returned' | 'complete') => {
     const draftReview = reviewDrafts[submission.id] || { grade: submission.grade || '', comment: submission.comment || '' };
@@ -91,11 +113,15 @@ export default function InstructorAssignments() {
       setShowToast(true);
       return;
     }
+    const selectedModule = moduleOptions.find((module) => module.id === draft.moduleId);
     try {
       await addDoc(collection(db, 'assignments'), {
         ...draft,
         title: draft.title.trim(),
         instructions: draft.instructions.trim(),
+        className: selectedClass?.className || '',
+        moduleId: selectedModule?.id || '',
+        moduleTitle: selectedModule?.title || '',
         instructorId: user.uid,
         instructorEmail: user.email,
         instructorName: user.fullName || user.email,
@@ -109,12 +135,13 @@ export default function InstructorAssignments() {
           await createNotification({
             title: `New assignment: ${draft.title.trim()}`,
             body: draft.dueAt
-              ? `Your instructor posted an assignment due ${new Date(draft.dueAt).toLocaleString()}. Submit a Drive or external link with access enabled.`
-              : 'Your instructor posted a new assignment. Submit a Drive or external link with access enabled.',
+              ? `Your instructor posted an assignment${selectedModule ? ` for ${selectedModule.title}` : ` for ${selectedClass?.className || 'your class'}`} due ${new Date(draft.dueAt).toLocaleString()}. Submit a Drive or external link with access enabled.`
+              : `Your instructor posted a new assignment${selectedModule ? ` for ${selectedModule.title}` : ` for ${selectedClass?.className || 'your class'}`}. Submit a Drive or external link with access enabled.`,
             type: 'assignment_created',
             targetLink: '/student/todo',
             recipientIds,
             classId: draft.classId,
+            moduleId: selectedModule?.id || '',
             createdBy: user.uid,
             createdByEmail: user.email,
           });
@@ -122,7 +149,7 @@ export default function InstructorAssignments() {
       } catch (notificationError) {
         console.warn('Assignment notification was not sent', notificationError);
       }
-      setDraft((current) => ({ ...current, title: '', instructions: '', dueAt: '' }));
+      setDraft((current) => ({ ...current, title: '', instructions: '', dueAt: '', moduleId: '' }));
       setToastMsg('Assignment published.');
       setShowToast(true);
     } catch (error) {
@@ -136,9 +163,9 @@ export default function InstructorAssignments() {
     <InstructorLayout title="Assignments">
       <div className="p-4 md:p-8 max-w-6xl mx-auto w-full text-on-surface space-y-6">
         <section className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-sm">
-          <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Separate assignment workflow</p>
+          <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Class and module assignment workflow</p>
           <h1 className="text-3xl font-extrabold font-headline">Assignments</h1>
-          <p className="text-sm text-on-surface-variant mt-2">Create link-based submissions. Students should submit Google Drive or external links with access enabled.</p>
+          <p className="text-sm text-on-surface-variant mt-2">Create class assignments, optionally attach them to a module, and notify students in their To Do list.</p>
         </section>
 
         <section className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
@@ -147,10 +174,39 @@ export default function InstructorAssignments() {
             <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Assignment title" className="input" />
             <textarea value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} rows={5} placeholder="Instructions, rubric, link access reminder..." className="input resize-none" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <select value={draft.classId} onChange={(event) => setDraft({ ...draft, classId: event.target.value })} className="input font-bold">
+              <select value={draft.classId} onChange={(event) => setDraft({ ...draft, classId: event.target.value, moduleId: '' })} className="input font-bold">
                 {classes.map((classItem) => <option key={classItem.id} value={classItem.id}>{classItem.className}</option>)}
               </select>
               <input type="datetime-local" value={draft.dueAt} onChange={(event) => setDraft({ ...draft, dueAt: event.target.value })} className="input" />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_220px] gap-4">
+              <select value={draft.moduleId} onChange={(event) => setDraft({ ...draft, moduleId: event.target.value })} className="input font-bold">
+                <option value="">Class-only assignment</option>
+                {moduleOptions.map((module) => <option key={module.id} value={module.id}>{module.title}</option>)}
+              </select>
+              <select value={draft.submissionType} onChange={(event) => setDraft({ ...draft, submissionType: event.target.value })} className="input font-bold">
+                <option value="link">Link submission</option>
+                <option value="text">Written response</option>
+                <option value="image">Image/link proof</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="rounded-xl border border-outline-variant/30 bg-surface-container/30 p-4">
+                <div className="flex items-center gap-2 text-primary">
+                  <Users size={16} />
+                  <p className="text-[10px] font-black uppercase tracking-widest">Class target</p>
+                </div>
+                <p className="mt-2 text-sm font-extrabold text-on-surface">{selectedClass?.className || 'Choose a class'}</p>
+                <p className="text-xs text-on-surface-variant/60">Students in this class receive the assignment notification.</p>
+              </div>
+              <div className="rounded-xl border border-outline-variant/30 bg-surface-container/30 p-4">
+                <div className="flex items-center gap-2 text-primary">
+                  <BookOpen size={16} />
+                  <p className="text-[10px] font-black uppercase tracking-widest">Module link</p>
+                </div>
+                <p className="mt-2 text-sm font-extrabold text-on-surface">{moduleOptions.find((module) => module.id === draft.moduleId)?.title || 'Class-only assignment'}</p>
+                <p className="text-xs text-on-surface-variant/60">Attach only when this should appear beside a module journey.</p>
+              </div>
             </div>
             <label className="flex items-center justify-between gap-4 bg-surface-container rounded-xl px-4 py-4">
               <span>
@@ -179,6 +235,14 @@ export default function InstructorAssignments() {
             <article key={assignment.id} className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-sm">
               <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">{assignment.dueAt ? `Due ${new Date(assignment.dueAt).toLocaleString()}` : 'No due date'}</p>
               <h2 className="font-extrabold text-on-surface">{assignment.title}</h2>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <span className="rounded-full bg-primary/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-primary">
+                  {assignment.className || classes.find((classItem) => classItem.id === assignment.classId)?.className || 'Class'}
+                </span>
+                <span className="rounded-full bg-surface-container px-3 py-1 text-[10px] font-black uppercase tracking-widest text-on-surface-variant">
+                  {assignment.moduleTitle || modules.find((module) => module.id === assignment.moduleId)?.title || 'Class-only'}
+                </span>
+              </div>
               <p className="text-sm text-on-surface-variant mt-1">{assignment.instructions}</p>
               <div className="mt-4 space-y-3">
                 {assignmentSubmissions.map((submission) => {

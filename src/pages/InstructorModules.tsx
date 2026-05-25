@@ -99,7 +99,6 @@ interface BuilderModule {
 
 type FlowItem = BuilderModule['flowItems'][number];
 type SimulatorDevice = 'wide' | 'laptop' | 'ipad' | 'phone';
-type SimulatorShell = 'windows' | 'macos' | 'ios' | 'android';
 
 const defaultUnlockRules = {
   minScorePercent: 85,
@@ -1251,7 +1250,6 @@ function ModuleStudentPreview({
   const [dragFlowIndex, setDragFlowIndex] = useState<number | null>(null);
   const [activeFlowItemId, setActiveFlowItemId] = useState(draft.flowItems[0]?.id || '');
   const [device, setDevice] = useState<SimulatorDevice>('laptop');
-  const [shell, setShell] = useState<SimulatorShell>('windows');
   const [showSimulator, setShowSimulator] = useState(true);
   const [isFocusOpen, setIsFocusOpen] = useState(false);
 
@@ -1389,17 +1387,6 @@ function ModuleStudentPreview({
                   </button>
                 ))}
               </div>
-              <div className="flex rounded-xl bg-slate-800 p-1">
-                {(['windows', 'macos', 'ios', 'android'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => setShell(mode)}
-                    className={`rounded-lg px-2.5 py-1.5 text-xs font-black uppercase tracking-widest ${shell === mode ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}
-                  >
-                    {mode === 'macos' ? 'mac' : mode}
-                  </button>
-                ))}
-              </div>
               <button onClick={() => setShowSimulator(false)} className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-3 py-2 text-xs font-bold text-slate-300 hover:text-white">
                 <Minimize2 size={14} />
                 Minimize
@@ -1416,7 +1403,6 @@ function ModuleStudentPreview({
               flowItems={draft.flowItems}
               activeItemIndex={activeFlowIndex}
               device={device}
-              shell={shell}
             />
           </div>
         </section>
@@ -1485,7 +1471,7 @@ function LiveFlowEditor({
   const isExam = activeItem.type === 'exam';
 
   return (
-    <div className="max-h-[720px] overflow-y-auto bg-white p-5 lg:p-8">
+    <div className="max-h-[720px] overflow-y-auto bg-surface p-5 lg:p-8">
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="flex flex-col gap-3 border-b border-outline-variant/30 pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
@@ -1789,7 +1775,6 @@ function StudentSimulatorFrame({
   flowItems,
   activeItemIndex,
   device,
-  shell,
 }: {
   draft: BuilderModule;
   activeItem: FlowItem;
@@ -1798,7 +1783,6 @@ function StudentSimulatorFrame({
   flowItems: FlowItem[];
   activeItemIndex: number;
   device: SimulatorDevice;
-  shell: SimulatorShell;
 }) {
   const widthClass = {
     wide: 'max-w-[1380px]',
@@ -1807,6 +1791,7 @@ function StudentSimulatorFrame({
     phone: 'max-w-[430px]',
   }[device];
   const isPhone = device === 'phone';
+  const shell = device === 'phone' ? 'android' : device === 'ipad' ? 'ios' : 'windows';
   const isTouchShell = shell === 'ios' || shell === 'android';
   const progressPercent = Math.min(100, Math.round(((activeItemIndex + 1) / Math.max(flowItems.length, 1)) * 100));
   const quiz = activePart.miniQuiz[0] || blankQuestion(`${activePart.id}-simulator`);
@@ -1816,47 +1801,40 @@ function StudentSimulatorFrame({
 
   return (
     <div className={`mx-auto transition-all duration-200 ${widthClass}`}>
-      <div className={`${isTouchShell ? 'rounded-[2rem] bg-slate-950 p-2 shadow-2xl shadow-slate-400/40' : 'rounded-2xl border border-slate-300 bg-white shadow-2xl shadow-slate-300/40'} overflow-hidden`}>
-        <div className={`${isTouchShell ? 'rounded-[1.5rem] overflow-hidden bg-slate-50' : 'bg-white'}`}>
+      <div className={`${isTouchShell ? 'rounded-[2rem] bg-slate-950 p-2 shadow-2xl shadow-slate-400/40' : 'rounded-2xl border border-slate-300 bg-white shadow-2xl shadow-slate-300/40 dark:border-outline-variant dark:bg-surface-container-lowest dark:shadow-black/30'} overflow-hidden`}>
+        <div className={`${isTouchShell ? 'rounded-[1.5rem] overflow-hidden bg-surface dark:bg-surface' : 'bg-surface-container-lowest'}`}>
           <div className={`${isTouchShell ? 'bg-slate-950 px-5 py-3 text-white' : shell === 'windows' ? 'bg-slate-900 px-4 py-3 text-slate-200' : 'border-b border-slate-200 bg-slate-50 px-5 py-3 text-slate-500'} flex items-center gap-3`}>
-            {shell === 'macos' && (
-              <div className="flex gap-2">
-                <span className="h-3 w-3 rounded-full bg-red-400" />
-                <span className="h-3 w-3 rounded-full bg-amber-400" />
-                <span className="h-3 w-3 rounded-full bg-emerald-400" />
-              </div>
-            )}
             {shell === 'windows' && <span className="h-3 w-3 rounded-sm bg-primary" />}
             {isTouchShell && <div className="mx-auto h-1.5 w-20 rounded-full bg-white/30" />}
             {!isTouchShell && (
-              <div className="mx-auto hidden w-full max-w-md items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-1.5 text-xs font-medium text-slate-400 sm:flex">
+              <div className="mx-auto hidden w-full max-w-md items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-1.5 text-xs font-medium text-slate-400 sm:flex dark:border-outline-variant dark:bg-surface-container dark:text-on-surface-variant">
                 letmastery.edu/learn/module
               </div>
             )}
             {shell === 'android' && <span className="h-2 w-2 rounded-full bg-emerald-400" />}
           </div>
 
-          <div className={`bg-slate-50 ${isPhone ? 'px-4 py-5' : 'px-6 py-8 lg:px-10 lg:py-10'}`}>
+          <div className={`max-h-[720px] overflow-y-auto bg-slate-50 dark:bg-surface ${isPhone ? 'px-4 py-5' : 'px-6 py-8 lg:px-10 lg:py-10'}`}>
             <header className={`mx-auto mb-6 flex max-w-6xl items-start justify-between gap-4 ${isPhone ? 'flex-col' : 'flex-row'}`}>
               <div className="flex items-start gap-4">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm dark:border-outline-variant dark:bg-surface-container dark:text-on-surface">
                   <ArrowLeft size={18} />
                 </div>
                 <div>
-                  <h2 className="font-headline text-2xl font-black leading-tight text-slate-950">{draft.title || 'Untitled module'}</h2>
-                  <p className="mt-1 text-xs font-black uppercase tracking-widest text-slate-400">{subtitle}</p>
+                  <h2 className="font-headline text-2xl font-black leading-tight text-slate-950 dark:text-on-surface">{draft.title || 'Untitled module'}</h2>
+                  <p className="mt-1 text-xs font-black uppercase tracking-widest text-slate-400 dark:text-on-surface-variant/70">{subtitle}</p>
                 </div>
               </div>
-              <span className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm">
+              <span className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm dark:bg-surface-container dark:text-on-surface-variant">
                 <Save size={13} />
                 Reviewing
               </span>
             </header>
 
             <div className={`mx-auto grid max-w-6xl gap-5 ${isPhone || device === 'ipad' ? 'grid-cols-1' : 'grid-cols-[300px_1fr]'}`}>
-              <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-outline-variant dark:bg-surface-container-lowest">
                 <div className="mb-4 flex items-center justify-between">
-                  <p className="text-xs font-black uppercase tracking-widest text-slate-400">Topic book</p>
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-400 dark:text-on-surface-variant/70">Topic book</p>
                   <span className="text-xs font-black text-primary">{progressPercent}%</span>
                 </div>
                 <div className="space-y-2">
@@ -1864,29 +1842,29 @@ function StudentSimulatorFrame({
                     const isActivePart = activeItem.refId === part.id;
                     const isDone = index < activePartIndex || activeItem.type === 'exam';
                     return (
-                      <div key={part.id} className={`rounded-xl border p-3 ${isActivePart ? 'border-primary bg-primary/10' : 'border-slate-200 bg-slate-50'}`}>
+                      <div key={part.id} className={`rounded-xl border p-3 ${isActivePart ? 'border-primary bg-primary/10' : 'border-slate-200 bg-slate-50 dark:border-outline-variant dark:bg-surface-container'}`}>
                         <div className="flex items-start gap-3">
                           <span className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${isDone || isActivePart ? 'border-emerald-500 text-emerald-500' : 'border-slate-300 text-slate-300'}`}>
                             <CheckCircle2 size={13} />
                           </span>
                           <div className="min-w-0">
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Lesson {index + 1}</p>
-                            <p className="line-clamp-2 text-sm font-black text-slate-950">{part.title}</p>
-                            <p className="mt-1 line-clamp-2 text-xs text-slate-500">{part.textbookSection.title}</p>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-on-surface-variant/60">Lesson {index + 1}</p>
+                            <p className="line-clamp-2 text-sm font-black text-slate-950 dark:text-on-surface">{part.title}</p>
+                            <p className="mt-1 line-clamp-2 text-xs text-slate-500 dark:text-on-surface-variant">{part.textbookSection.title}</p>
                           </div>
                         </div>
                       </div>
                     );
                   })}
-                  <div className={`rounded-xl border p-3 ${activeItem.type === 'exam' ? 'border-primary bg-primary/10' : 'border-slate-200 bg-slate-50'}`}>
+                  <div className={`rounded-xl border p-3 ${activeItem.type === 'exam' ? 'border-primary bg-primary/10' : 'border-slate-200 bg-slate-50 dark:border-outline-variant dark:bg-surface-container'}`}>
                     <div className="flex items-start gap-3">
                       <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-primary text-primary">
                         <Award size={13} />
                       </span>
                       <div>
-                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Gate</p>
-                        <p className="text-sm font-black text-slate-950">Final module exam</p>
-                        <p className="mt-1 text-xs text-slate-500">Pass at {draft.unlockRules.minScorePercent}% to unlock next module</p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-on-surface-variant/60">Gate</p>
+                        <p className="text-sm font-black text-slate-950 dark:text-on-surface">Final module exam</p>
+                        <p className="mt-1 text-xs text-slate-500 dark:text-on-surface-variant">Pass at {draft.unlockRules.minScorePercent}% to unlock next module</p>
                       </div>
                     </div>
                   </div>
@@ -1894,29 +1872,29 @@ function StudentSimulatorFrame({
               </aside>
 
               <main className="space-y-5">
-                <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-outline-variant dark:bg-surface-container-lowest">
                   <div className="mb-3 flex items-center justify-between">
-                    <p className="text-xs font-black uppercase tracking-widest text-slate-400">Module path</p>
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-400 dark:text-on-surface-variant/70">Module path</p>
                     <span className="text-xs font-black text-primary">{progressPercent}%</span>
                   </div>
                   <div className="flex gap-2">
                     {flowItems.map((item) => (
-                      <div key={item.id} className={`h-2 flex-1 rounded-full ${item.id === activeItem.id || flowItems.findIndex((flow) => flow.id === item.id) < activeItemIndex ? 'bg-emerald-500' : 'bg-slate-200'}`} />
+                      <div key={item.id} className={`h-2 flex-1 rounded-full ${item.id === activeItem.id || flowItems.findIndex((flow) => flow.id === item.id) < activeItemIndex ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-surface-container'}`} />
                     ))}
                   </div>
                 </section>
 
-                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-outline-variant dark:bg-surface-container-lowest">
                   {activeItem.type === 'exam' ? (
                     <div className="space-y-5">
                       <p className="text-xs font-black uppercase tracking-widest text-primary">Final assessment</p>
-                      <h3 className="font-headline text-2xl font-black text-slate-950">Final module exam</h3>
+                      <h3 className="font-headline text-2xl font-black text-slate-950 dark:text-on-surface">Final module exam</h3>
                       {(draft.finalExam || []).slice(0, 3).map((question, index) => (
-                        <div key={question.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="text-sm font-black text-slate-900">{index + 1}. {question.stem}</p>
+                        <div key={question.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-outline-variant dark:bg-surface-container">
+                          <p className="text-sm font-black text-slate-900 dark:text-on-surface">{index + 1}. {question.stem}</p>
                           <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
                             {(question.options || []).map((option) => (
-                              <div key={option.id} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600">{option.text}</div>
+                              <div key={option.id} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600 dark:border-outline-variant dark:bg-surface-container-lowest dark:text-on-surface-variant">{option.text}</div>
                             ))}
                           </div>
                         </div>
@@ -1926,43 +1904,43 @@ function StudentSimulatorFrame({
                     <div className="space-y-6">
                       <div>
                         <p className="text-xs font-black uppercase tracking-widest text-primary">Part {activePartIndex + 1} {activeItem.type}</p>
-                        <h3 className="mt-3 font-headline text-2xl font-black text-slate-950">{activePart.textbookSection.title}</h3>
-                        <p className="mt-2 text-sm font-semibold text-slate-400">{activePart.textbookSection.estimatedReadMinutes} min read</p>
+                        <h3 className="mt-3 font-headline text-2xl font-black text-slate-950 dark:text-on-surface">{activePart.textbookSection.title}</h3>
+                        <p className="mt-2 text-sm font-semibold text-slate-400 dark:text-on-surface-variant/70">{activePart.textbookSection.estimatedReadMinutes} min read</p>
                       </div>
                       {activeItem.type !== 'quiz' && (
                         <>
                           <div className="rounded-xl border-l-4 border-primary bg-primary/10 px-5 py-4 text-base font-bold text-primary">{activePart.objective}</div>
-                          <p className="whitespace-pre-line text-base leading-8 text-slate-700">{activePart.textbookSection.body}</p>
+                          <p className="whitespace-pre-line text-base leading-8 text-slate-700 dark:text-on-surface-variant">{activePart.textbookSection.body}</p>
                         </>
                       )}
                       {activeItem.type === 'lesson' && activePart.lessonBlocks.length > 0 && (
                         <div className="space-y-3">
                           {activePart.lessonBlocks.map((block, index) => (
-                            <div key={`${block.type}-${index}`} className={block.type === 'callout' ? 'rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900' : 'text-base leading-7 text-slate-600'}>
+                            <div key={`${block.type}-${index}`} className={block.type === 'callout' ? 'rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900 dark:bg-amber-500/10 dark:text-amber-200' : 'text-base leading-7 text-slate-600 dark:text-on-surface-variant'}>
                               {block.content}
                             </div>
                           ))}
                         </div>
                       )}
                       {activeItem.type === 'activity' && activePart.activity?.prompt && (
-                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                          <p className="font-black text-slate-950">{activePart.activity.title || 'Practice activity'}</p>
-                          <p className="mt-2 text-sm leading-6 text-slate-600">{activePart.activity.prompt}</p>
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-outline-variant dark:bg-surface-container">
+                          <p className="font-black text-slate-950 dark:text-on-surface">{activePart.activity.title || 'Practice activity'}</p>
+                          <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-on-surface-variant">{activePart.activity.prompt}</p>
                         </div>
                       )}
                       {(activeItem.type === 'quiz' || activeItem.type === 'lesson') && (
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 dark:border-outline-variant dark:bg-surface-container">
                           <p className="text-xs font-black uppercase tracking-widest text-primary">Mini quiz</p>
-                          <p className="mt-3 text-base font-black text-slate-900">{quiz.stem}</p>
+                          <p className="mt-3 text-base font-black text-slate-900 dark:text-on-surface">{quiz.stem}</p>
                           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
                             {(quiz.options || []).map((option) => (
-                              <div key={option.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">{option.text}</div>
+                              <div key={option.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 dark:border-outline-variant dark:bg-surface-container-lowest dark:text-on-surface-variant">{option.text}</div>
                             ))}
                           </div>
                         </div>
                       )}
                       <div className="flex flex-wrap gap-2">
-                        <button className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700">Bookmark</button>
+                        <button className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700 dark:bg-surface-container dark:text-on-surface-variant">Bookmark</button>
                         <button className="rounded-full bg-primary px-4 py-2 text-xs font-black text-white">Save notes</button>
                       </div>
                       <button className="flex w-full items-center justify-between rounded-xl bg-primary px-5 py-4 text-left font-black text-white">
@@ -2019,8 +1997,8 @@ function FocusedSimulatorOverlay({
   const isExam = activeItem.type === 'exam';
 
   return (
-    <div className="fixed inset-0 z-[80] overflow-y-auto bg-white text-on-surface">
-      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-outline-variant/30 bg-white/95 px-4 backdrop-blur lg:px-8">
+    <div className="fixed inset-0 z-[80] overflow-y-auto bg-surface text-on-surface">
+      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-outline-variant/30 bg-surface-container-lowest/95 px-4 backdrop-blur lg:px-8">
         <div className="flex min-w-0 items-center gap-4">
           <button onClick={onClose} className="rounded-full p-2 text-on-surface-variant hover:bg-surface-container" title="Back to split workspace">
             <ArrowLeft size={20} />
@@ -2117,7 +2095,7 @@ function FlowNavigatorBubble({
 }) {
   return (
     <div className="group fixed bottom-7 left-1/2 z-[90] -translate-x-1/2">
-      <div className="invisible absolute bottom-16 left-1/2 mb-2 w-80 -translate-x-1/2 translate-y-2 rounded-2xl border border-outline-variant/30 bg-white p-2 opacity-0 shadow-2xl transition-all group-hover:visible group-hover:translate-y-0 group-hover:opacity-100">
+      <div className="invisible absolute bottom-16 left-1/2 mb-2 w-80 -translate-x-1/2 translate-y-2 rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-2 opacity-0 shadow-2xl transition-all group-hover:visible group-hover:translate-y-0 group-hover:opacity-100">
         <p className="border-b border-outline-variant/20 px-3 py-2 text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Jump to</p>
         <div className="mt-2 max-h-72 space-y-1 overflow-y-auto">
           {flowItems.map((item, index) => (
