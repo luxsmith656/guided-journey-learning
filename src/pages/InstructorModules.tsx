@@ -1359,7 +1359,7 @@ function ModuleStudentPreview({
       </section>
 
       {showSimulator ? (
-        <section className="border-t-4 border-primary/15 bg-slate-100">
+        <section className="border-t-4 border-primary/15 bg-surface">
           <div className="flex flex-col gap-3 bg-slate-900 px-4 py-3 text-slate-200 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-3">
               <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-white">
@@ -1394,7 +1394,7 @@ function ModuleStudentPreview({
             </div>
           </div>
 
-          <div className="p-4 sm:p-6 lg:p-8">
+          <div className="overflow-x-auto bg-surface p-4 sm:p-6 lg:p-8">
             <StudentSimulatorFrame
               draft={draft}
               activeItem={activeItem}
@@ -1787,10 +1787,11 @@ function StudentSimulatorFrame({
   const widthClass = {
     wide: 'max-w-[1380px]',
     laptop: 'max-w-[1120px]',
-    ipad: 'max-w-[820px]',
-    phone: 'max-w-[430px]',
+    ipad: 'w-[760px] max-w-[86vw]',
+    phone: 'w-[390px] max-w-[78vw]',
   }[device];
   const isPhone = device === 'phone';
+  const frameScaleClass = device === 'phone' ? 'scale-[0.82] sm:scale-[0.88]' : device === 'ipad' ? 'scale-[0.9] xl:scale-100' : '';
   const shell = device === 'phone' ? 'android' : device === 'ipad' ? 'ios' : 'windows';
   const isTouchShell = shell === 'ios' || shell === 'android';
   const progressPercent = Math.min(100, Math.round(((activeItemIndex + 1) / Math.max(flowItems.length, 1)) * 100));
@@ -1800,7 +1801,7 @@ function StudentSimulatorFrame({
     : `${activeItem.type === 'textbook' ? 'Textbook' : activeItem.type === 'lesson' ? 'Lesson' : activeItem.type === 'quiz' ? 'Mini quiz' : 'Activity'} ${activePartIndex + 1}`;
 
   return (
-    <div className={`mx-auto transition-all duration-200 ${widthClass}`}>
+    <div className={`mx-auto origin-top transition-all duration-200 ${widthClass} ${frameScaleClass}`}>
       <div className={`${isTouchShell ? 'rounded-[2rem] bg-slate-950 p-2 shadow-2xl shadow-slate-400/40' : 'rounded-2xl border border-slate-300 bg-white shadow-2xl shadow-slate-300/40 dark:border-outline-variant dark:bg-surface-container-lowest dark:shadow-black/30'} overflow-hidden`}>
         <div className={`${isTouchShell ? 'rounded-[1.5rem] overflow-hidden bg-surface dark:bg-surface' : 'bg-surface-container-lowest'}`}>
           <div className={`${isTouchShell ? 'bg-slate-950 px-5 py-3 text-white' : shell === 'windows' ? 'bg-slate-900 px-4 py-3 text-slate-200' : 'border-b border-slate-200 bg-slate-50 px-5 py-3 text-slate-500'} flex items-center gap-3`}>
