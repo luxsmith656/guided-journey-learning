@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ArrowLeft,
   Bot,
   BookOpen,
+  Check,
   CheckCircle2,
+  ChevronUp,
   ClipboardList,
   Copy,
   FileQuestion,
@@ -10,11 +13,17 @@ import {
   Eye,
   GripVertical,
   Layers3,
+  Maximize2,
+  Monitor,
+  MoreVertical,
   Plus,
   Save,
   Search,
   Settings2,
   Sparkles,
+  Smartphone,
+  Tablet,
+  Target,
   Trash2,
   Wand2,
   X,
@@ -1050,6 +1059,8 @@ export default function InstructorModules() {
                   updateFinalOption={updateFinalOption}
                   reorderFlowItem={reorderFlowItem}
                   resetFlowOrder={resetFlowOrder}
+                  onSave={saveModule}
+                  onOpenAI={() => setAiOpen(true)}
                 />
               )}
 
@@ -1188,6 +1199,8 @@ function ModuleStudentPreview({
   updateFinalOption,
   reorderFlowItem,
   resetFlowOrder,
+  onSave,
+  onOpenAI,
 }: {
   draft: BuilderModule;
   updateDraft: (field: keyof BuilderModule, value: any) => void;
@@ -1198,85 +1211,746 @@ function ModuleStudentPreview({
   updateFinalOption: (questionIndex: number, optionId: string, text: string) => void;
   reorderFlowItem: (fromIndex: number, toIndex: number) => void;
   resetFlowOrder: () => void;
+  onSave: () => void;
+  onOpenAI: () => void;
 }) {
   const [dragFlowIndex, setDragFlowIndex] = useState<number | null>(null);
+  const [activeFlowItemId, setActiveFlowItemId] = useState(draft.flowItems[0]?.id || '');
+  const [device, setDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
+  const [isFocusOpen, setIsFocusOpen] = useState(false);
+
+  useEffect(() => {
+    if (!draft.flowItems.length) return;
+    if (!draft.flowItems.some((item) => item.id === activeFlowItemId)) {
+      setActiveFlowItemId(draft.flowItems[0].id);
+    }
+  }, [activeFlowItemId, draft.flowItems]);
+
+  const activeFlowIndex = Math.max(0, draft.flowItems.findIndex((item) => item.id === activeFlowItemId));
+  const activeItem = draft.flowItems[activeFlowIndex] || draft.flowItems[0];
+  const resolvedPartIndex = activeItem?.refId === 'finalExam' ? -1 : draft.parts.findIndex((part) => part.id === activeItem?.refId);
+  const activePartIndex = resolvedPartIndex >= 0 ? resolvedPartIndex : 0;
+  const activePart = draft.parts[activePartIndex] || blankPart(0);
+
+  if (!draft.flowItems.length) {
+    return (
+      <div className="rounded-2xl border border-outline-variant/40 bg-surface-container/30 p-6 text-center">
+        <p className="font-headline text-xl font-extrabold text-on-surface">No student flow yet</p>
+        <p className="mt-2 text-sm text-on-surface-variant">Add at least one part to generate the student simulator.</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[230px_1fr] gap-5">
-      <aside className="rounded-2xl border border-outline-variant/40 bg-surface-container/30 p-4 h-fit">
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <p className="text-xs font-black uppercase tracking-widest text-primary">Student flow</p>
-          <button onClick={resetFlowOrder} className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant hover:text-primary">Reset</button>
+    <div className="overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm">
+      <div className="flex flex-col gap-3 border-b border-outline-variant/40 bg-surface-container-lowest p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-widest text-primary">Live editor + student simulator</p>
+          <h3 className="font-headline text-xl font-extrabold text-on-surface">{draft.title || 'Untitled module'}</h3>
+          <p className="mt-1 text-xs text-on-surface-variant">Edit the module in the top workspace and watch the student view update below.</p>
         </div>
-        <div className="space-y-2">
-          {draft.flowItems.map((item, index) => (
-            <div
-              key={item.id}
-              draggable
-              onDragStart={() => setDragFlowIndex(index)}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={() => {
-                if (dragFlowIndex != null) reorderFlowItem(dragFlowIndex, index);
-                setDragFlowIndex(null);
-              }}
-              className={`rounded-xl border p-3 cursor-grab active:cursor-grabbing ${index === 0 ? 'border-primary bg-primary/10' : 'border-outline-variant/30 bg-surface-container/40'}`}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">{index + 1}. {item.type}</p>
-                  <p className="text-sm font-extrabold text-on-surface line-clamp-2">{item.title}</p>
-                </div>
-                <GripVertical size={14} className="text-on-surface-variant/50 shrink-0" />
-              </div>
-            </div>
-          ))}
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setIsFocusOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container px-4 py-2.5 text-sm font-bold text-on-surface">
+            <Maximize2 size={16} />
+            Focus simulator
+          </button>
+          <button onClick={resetFlowOrder} className="rounded-xl border border-outline-variant/40 bg-surface-container px-4 py-2.5 text-xs font-black uppercase tracking-widest text-on-surface-variant">
+            Reset flow
+          </button>
         </div>
-      </aside>
+      </div>
 
-      <section className="space-y-5">
-        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-6">
-          <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Guided module preview</p>
-          <input value={draft.title} onChange={(event) => updateDraft('title', event.target.value)} placeholder="Untitled module" className="w-full bg-transparent text-2xl font-extrabold font-headline text-on-surface outline-none border-b border-transparent focus:border-primary/30" />
-          <textarea value={draft.description} onChange={(event) => updateDraft('description', event.target.value)} rows={2} placeholder="Student-facing description will appear here." className="mt-2 w-full bg-transparent text-sm text-on-surface-variant outline-none resize-none border-b border-transparent focus:border-primary/30" />
-        </div>
+      <section className="grid min-h-[620px] grid-cols-1 xl:grid-cols-[280px_1fr]">
+        <aside className="border-b border-outline-variant/40 bg-surface-container/40 xl:border-b-0 xl:border-r">
+          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-outline-variant/30 bg-surface-container-lowest px-4 py-3">
+            <p className="text-xs font-black uppercase tracking-widest text-on-surface-variant">Student flow</p>
+            <span className="text-[10px] font-black uppercase tracking-widest text-primary">Drag to reorder</span>
+          </div>
+          <div className="max-h-[620px] space-y-2 overflow-y-auto p-3">
+            {draft.flowItems.map((item, index) => {
+              const isActive = item.id === activeItem?.id;
+              return (
+                <button
+                  key={item.id}
+                  draggable
+                  onClick={() => setActiveFlowItemId(item.id)}
+                  onDragStart={() => setDragFlowIndex(index)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => {
+                    if (dragFlowIndex != null) reorderFlowItem(dragFlowIndex, index);
+                    setDragFlowIndex(null);
+                    setActiveFlowItemId(item.id);
+                  }}
+                  className={`flex w-full cursor-grab items-start gap-3 rounded-xl border p-3 text-left shadow-sm transition-colors active:cursor-grabbing ${
+                    isActive
+                      ? 'border-primary bg-primary/10 text-on-surface ring-1 ring-primary/30'
+                      : 'border-outline-variant/30 bg-surface-container-lowest hover:border-primary/40'
+                  }`}
+                >
+                  <GripVertical size={15} className={isActive ? 'mt-1 shrink-0 text-primary' : 'mt-1 shrink-0 text-on-surface-variant/40'} />
+                  <span className="min-w-0">
+                    <span className={`block text-[10px] font-black uppercase tracking-widest ${isActive ? 'text-primary' : 'text-on-surface-variant/50'}`}>
+                      {index + 1}. {item.type}
+                    </span>
+                    <span className="line-clamp-2 text-sm font-extrabold text-on-surface">{item.title}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </aside>
 
-        {draft.parts.map((part, partIndex) => {
-          const quiz = part.miniQuiz[0] || blankQuestion(`${part.id}-preview`);
-          return (
-            <div key={part.id} className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-6 space-y-4">
-              <p className="text-xs font-black uppercase tracking-widest text-primary">Lesson {partIndex + 1} live edit</p>
-              <input value={part.title} onChange={(event) => updatePartAtIndex(partIndex, { title: event.target.value })} className="w-full bg-transparent text-xl font-extrabold text-on-surface outline-none border-b border-outline-variant/20 focus:border-primary/40" />
-              <textarea value={part.objective} onChange={(event) => updatePartAtIndex(partIndex, { objective: event.target.value })} rows={2} className="w-full bg-surface-container border border-outline-variant/30 rounded-xl p-3 text-sm font-medium outline-none focus:border-primary/40 resize-none" />
-              <input value={part.textbookSection.title} onChange={(event) => updatePartAtIndex(partIndex, { textbookSection: { ...part.textbookSection, title: event.target.value } })} className="w-full bg-transparent font-extrabold text-on-surface outline-none border-b border-outline-variant/20 focus:border-primary/40" />
-              <textarea value={part.textbookSection.body} onChange={(event) => updatePartAtIndex(partIndex, { textbookSection: { ...part.textbookSection, body: event.target.value } })} rows={6} className="w-full bg-surface-container border border-outline-variant/30 rounded-xl p-4 text-sm text-on-surface-variant leading-relaxed outline-none focus:border-primary/40 resize-y" />
-              <div className="rounded-xl border border-outline-variant/30 bg-surface-container/40 p-4 space-y-3">
-                <p className="text-xs font-black uppercase tracking-widest text-primary">Mini quiz</p>
-                <textarea value={quiz.stem} onChange={(event) => updateMiniQuestionAtPart(partIndex, { stem: event.target.value })} rows={2} className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm font-bold outline-none focus:border-primary/40 resize-none" />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {(quiz.options || []).map((option) => (
-                    <input key={option.id} value={option.text} onChange={(event) => updateMiniOptionAtPart(partIndex, option.id, event.target.value)} className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-3 text-sm font-semibold text-on-surface outline-none focus:border-primary/40" />
-                  ))}
-                </div>
-                <textarea value={quiz.explanation} onChange={(event) => updateMiniQuestionAtPart(partIndex, { explanation: event.target.value })} rows={2} className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-xs font-medium outline-none focus:border-primary/40 resize-none" />
-              </div>
-            </div>
-          );
-        })}
-
-        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-6 space-y-4">
-          <p className="text-xs font-black uppercase tracking-widest text-primary">Final exam live edit</p>
-          {draft.finalExam.map((question, questionIndex) => (
-            <div key={question.id} className="rounded-xl border border-outline-variant/30 bg-surface-container/30 p-4 space-y-3">
-              <textarea value={question.stem} onChange={(event) => updateFinalQuestion(questionIndex, { stem: event.target.value })} rows={2} className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm font-bold outline-none focus:border-primary/40 resize-none" />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {(question.options || []).map((option) => (
-                  <input key={option.id} value={option.text} onChange={(event) => updateFinalOption(questionIndex, option.id, event.target.value)} className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-3 text-sm font-semibold text-on-surface outline-none focus:border-primary/40" />
-                ))}
-              </div>
-              <textarea value={question.explanation} onChange={(event) => updateFinalQuestion(questionIndex, { explanation: event.target.value })} rows={2} className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-xs font-medium outline-none focus:border-primary/40 resize-none" />
-            </div>
-          ))}
+        <div className="flex min-w-0 flex-col">
+          <LiveFlowEditor
+            draft={draft}
+            activeItem={activeItem}
+            activeItemIndex={activeFlowIndex}
+            activePart={activePart}
+            activePartIndex={activePartIndex}
+            updateDraft={updateDraft}
+            updatePartAtIndex={updatePartAtIndex}
+            updateMiniQuestionAtPart={updateMiniQuestionAtPart}
+            updateMiniOptionAtPart={updateMiniOptionAtPart}
+            updateFinalQuestion={updateFinalQuestion}
+            updateFinalOption={updateFinalOption}
+          />
         </div>
       </section>
+
+      <section className="border-t-4 border-primary/15 bg-slate-100">
+        <div className="flex flex-col gap-2 bg-slate-900 px-4 py-3 text-slate-200 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-white">
+              <span className="h-1.5 w-1.5 rounded-full bg-white" />
+              Live preview
+            </span>
+            <span className="text-sm font-bold text-slate-300">Student View Simulator</span>
+          </div>
+          <div className="flex items-center gap-1">
+            {([
+              ['desktop', Monitor],
+              ['tablet', Tablet],
+              ['mobile', Smartphone],
+            ] as const).map(([mode, Icon]) => (
+              <button
+                key={mode}
+                onClick={() => setDevice(mode)}
+                className={`rounded-lg p-2 ${device === mode ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}
+                title={`${mode} preview`}
+              >
+                <Icon size={16} />
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-4 sm:p-6 lg:p-8">
+          <StudentSimulatorFrame
+            draft={draft}
+            activeItem={activeItem}
+            activePart={activePart}
+            activePartIndex={activePartIndex}
+            device={device}
+          />
+        </div>
+      </section>
+
+      {isFocusOpen && (
+        <FocusedSimulatorOverlay
+          draft={draft}
+          activeItem={activeItem}
+          activeItemIndex={activeFlowIndex}
+          activePart={activePart}
+          activePartIndex={activePartIndex}
+          flowItems={draft.flowItems}
+          onClose={() => setIsFocusOpen(false)}
+          onSelectFlowItem={setActiveFlowItemId}
+          onSave={onSave}
+          onOpenAI={onOpenAI}
+          updateDraft={updateDraft}
+          updatePartAtIndex={updatePartAtIndex}
+          updateMiniQuestionAtPart={updateMiniQuestionAtPart}
+          updateMiniOptionAtPart={updateMiniOptionAtPart}
+          updateFinalQuestion={updateFinalQuestion}
+          updateFinalOption={updateFinalOption}
+        />
+      )}
+    </div>
+  );
+}
+
+function LiveFlowEditor({
+  draft,
+  activeItem,
+  activeItemIndex,
+  activePart,
+  activePartIndex,
+  updateDraft,
+  updatePartAtIndex,
+  updateMiniQuestionAtPart,
+  updateMiniOptionAtPart,
+  updateFinalQuestion,
+  updateFinalOption,
+}: {
+  draft: BuilderModule;
+  activeItem: FlowItem;
+  activeItemIndex: number;
+  activePart: JourneyModulePart;
+  activePartIndex: number;
+  updateDraft: (field: keyof BuilderModule, value: any) => void;
+  updatePartAtIndex: (partIndex: number, patch: Partial<JourneyModulePart>) => void;
+  updateMiniQuestionAtPart: (partIndex: number, patch: Partial<JourneyQuestion>) => void;
+  updateMiniOptionAtPart: (partIndex: number, optionId: string, text: string) => void;
+  updateFinalQuestion: (questionIndex: number, patch: Partial<JourneyQuestion>) => void;
+  updateFinalOption: (questionIndex: number, optionId: string, text: string) => void;
+}) {
+  const isExam = activeItem.type === 'exam';
+
+  return (
+    <div className="max-h-[720px] overflow-y-auto bg-white p-5 lg:p-8">
+      <div className="mx-auto max-w-4xl space-y-6">
+        <div className="flex flex-col gap-3 border-b border-outline-variant/30 pb-5 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-widest text-primary">
+              {activeItemIndex + 1}. {activeItem.type} live edit
+            </p>
+            <h3 className="mt-2 font-headline text-2xl font-extrabold text-on-surface">
+              {isExam ? 'Final module exam' : activePart.title}
+            </h3>
+          </div>
+          <div className="flex items-center gap-2 text-on-surface-variant">
+            <span className="rounded-full bg-surface-container px-3 py-1 text-[10px] font-black uppercase tracking-widest">
+              Student-facing
+            </span>
+            <MoreVertical size={18} />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-5">
+          <p className="text-xs font-black uppercase tracking-widest text-on-surface-variant/50">Module header</p>
+          <input
+            value={draft.title}
+            onChange={(event) => updateDraft('title', event.target.value)}
+            placeholder="Untitled module"
+            className="mt-2 w-full border-0 border-b border-transparent bg-transparent p-0 font-headline text-2xl font-extrabold text-on-surface outline-none focus:border-primary/40 focus:ring-0"
+          />
+          <textarea
+            value={draft.description}
+            onChange={(event) => updateDraft('description', event.target.value)}
+            rows={2}
+            placeholder="Student-facing description"
+            className="mt-3 w-full resize-none rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 text-sm font-medium text-on-surface-variant outline-none focus:border-primary/40"
+          />
+        </div>
+
+        {isExam ? (
+          <FinalExamLiveEditor
+            questions={draft.finalExam}
+            updateFinalQuestion={updateFinalQuestion}
+            updateFinalOption={updateFinalOption}
+            variant="split"
+          />
+        ) : (
+          <PartLiveEditorCards
+            part={activePart}
+            partIndex={activePartIndex}
+            activeItem={activeItem}
+            updatePartAtIndex={updatePartAtIndex}
+            updateMiniQuestionAtPart={updateMiniQuestionAtPart}
+            updateMiniOptionAtPart={updateMiniOptionAtPart}
+            variant="split"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PartLiveEditorCards({
+  part,
+  partIndex,
+  activeItem,
+  updatePartAtIndex,
+  updateMiniQuestionAtPart,
+  updateMiniOptionAtPart,
+  variant,
+}: {
+  part: JourneyModulePart;
+  partIndex: number;
+  activeItem: FlowItem;
+  updatePartAtIndex: (partIndex: number, patch: Partial<JourneyModulePart>) => void;
+  updateMiniQuestionAtPart: (partIndex: number, patch: Partial<JourneyQuestion>) => void;
+  updateMiniOptionAtPart: (partIndex: number, optionId: string, text: string) => void;
+  variant: 'split' | 'focus';
+}) {
+  const question = part.miniQuiz[0] || blankQuestion(`${part.id}-live`);
+  const updatePart = (patch: Partial<JourneyModulePart>) => updatePartAtIndex(partIndex, patch);
+  const updateTextbook = (patch: Partial<JourneyModulePart['textbookSection']>) => {
+    updatePart({ textbookSection: { ...part.textbookSection, ...patch } });
+  };
+  const cardTone = variant === 'focus' ? 'rounded-xl' : 'rounded-2xl';
+
+  return (
+    <div className="space-y-8">
+      <LiveEditorCard
+        icon={<Target size={17} className="text-primary" />}
+        title="Learning Objective"
+        className={cardTone}
+      >
+        <textarea
+          value={part.objective}
+          onChange={(event) => updatePart({ objective: event.target.value })}
+          rows={2}
+          className="w-full resize-none rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-4 text-base font-medium leading-relaxed text-on-surface outline-none focus:border-primary/40"
+        />
+      </LiveEditorCard>
+
+      <LiveEditorCard
+        icon={<BookOpen size={17} className="text-primary" />}
+        title="Text Content"
+        meta={activeItem.type === 'textbook' || activeItem.type === 'lesson' ? 'Editing current flow item' : undefined}
+        className={cardTone}
+      >
+        <input
+          value={part.title}
+          onChange={(event) => updatePart({ title: event.target.value })}
+          className="w-full border-0 border-b border-transparent bg-transparent p-0 text-xl font-extrabold text-on-surface outline-none focus:border-primary/40 focus:ring-0"
+        />
+        <input
+          value={part.textbookSection.title}
+          onChange={(event) => updateTextbook({ title: event.target.value })}
+          className="mt-5 w-full border-0 border-b border-transparent bg-transparent p-0 text-base font-extrabold text-on-surface outline-none focus:border-primary/40 focus:ring-0"
+        />
+        <textarea
+          value={part.textbookSection.body}
+          onChange={(event) => updateTextbook({ body: event.target.value })}
+          rows={variant === 'focus' ? 6 : 5}
+          className="mt-4 w-full resize-y rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-4 text-sm leading-relaxed text-on-surface-variant outline-none focus:border-primary/40"
+        />
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-[1fr_160px]">
+          <input
+            value={part.textbookSection.mediaUrl || ''}
+            onChange={(event) => updateTextbook({ mediaUrl: event.target.value })}
+            placeholder="Video or Canva embed link"
+            className="rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 text-sm font-medium outline-none focus:border-primary/40"
+          />
+          <input
+            type="number"
+            min={1}
+            value={part.textbookSection.estimatedReadMinutes}
+            onChange={(event) => updateTextbook({ estimatedReadMinutes: Number(event.target.value) })}
+            className="rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 text-sm font-bold outline-none focus:border-primary/40"
+            aria-label="Estimated read minutes"
+          />
+        </div>
+      </LiveEditorCard>
+
+      {activeItem.type === 'activity' && (
+        <LiveEditorCard icon={<ClipboardList size={17} className="text-primary" />} title="Activity" className={cardTone}>
+          <input
+            value={part.activity?.title || ''}
+            onChange={(event) => updatePart({ activity: { title: event.target.value, prompt: part.activity?.prompt || '' } })}
+            placeholder="Activity title"
+            className="w-full rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 text-sm font-bold outline-none focus:border-primary/40"
+          />
+          <textarea
+            value={part.activity?.prompt || ''}
+            onChange={(event) => updatePart({ activity: { title: part.activity?.title || 'Practice activity', prompt: event.target.value } })}
+            rows={4}
+            placeholder="What should students do?"
+            className="mt-3 w-full resize-y rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 text-sm leading-relaxed outline-none focus:border-primary/40"
+          />
+        </LiveEditorCard>
+      )}
+
+      <LiveEditorCard
+        icon={<FileQuestion size={17} className="text-primary" />}
+        title="Mini Quiz"
+        meta={question.type?.replace('_', ' ') || 'multiple choice'}
+        className={cardTone}
+      >
+        <QuestionLiveEditor
+          question={question}
+          onQuestion={(patch) => updateMiniQuestionAtPart(partIndex, patch)}
+          onOption={(optionId, text) => updateMiniOptionAtPart(partIndex, optionId, text)}
+        />
+      </LiveEditorCard>
+    </div>
+  );
+}
+
+function LiveEditorCard({
+  icon,
+  title,
+  meta,
+  className = 'rounded-2xl',
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  meta?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={`${className} overflow-hidden border border-outline-variant/40 bg-surface-container-lowest shadow-sm`}>
+      <div className="flex items-center justify-between gap-3 border-b border-outline-variant/30 bg-surface-container/40 px-5 py-4">
+        <h4 className="flex items-center gap-2 text-sm font-extrabold text-on-surface">
+          {icon}
+          {title}
+        </h4>
+        <div className="flex items-center gap-3 text-xs font-medium capitalize text-on-surface-variant">
+          {meta && <span>{meta}</span>}
+          <MoreVertical size={16} className="text-on-surface-variant/60" />
+        </div>
+      </div>
+      <div className="p-5">{children}</div>
+    </section>
+  );
+}
+
+function QuestionLiveEditor({
+  question,
+  onQuestion,
+  onOption,
+}: {
+  question: JourneyQuestion;
+  onQuestion: (patch: Partial<JourneyQuestion>) => void;
+  onOption: (optionId: string, text: string) => void;
+}) {
+  return (
+    <div className="space-y-5">
+      <label className="block">
+        <span className="text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Question</span>
+        <textarea
+          value={question.stem}
+          onChange={(event) => onQuestion({ stem: event.target.value })}
+          rows={2}
+          className="mt-2 w-full resize-none rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 text-sm font-bold text-on-surface outline-none focus:border-primary/40"
+        />
+      </label>
+
+      <div>
+        <p className="text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Options</p>
+        <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+          {(question.options || []).map((option) => {
+            const isCorrect = question.correctOptionId === option.id;
+            return (
+              <label key={option.id} className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${isCorrect ? 'border-primary bg-primary/10 ring-1 ring-primary/30' : 'border-outline-variant/30 bg-surface-container'}`}>
+                <input
+                  type="radio"
+                  checked={isCorrect}
+                  onChange={() => onQuestion({ correctOptionId: option.id })}
+                  className="h-4 w-4 accent-primary"
+                />
+                <input
+                  value={option.text}
+                  onChange={(event) => onOption(option.id, event.target.value)}
+                  className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm font-semibold text-on-surface outline-none focus:ring-0"
+                />
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
+      <label className="block">
+        <span className="text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Rationale shown after answer</span>
+        <textarea
+          value={question.explanation}
+          onChange={(event) => onQuestion({ explanation: event.target.value })}
+          rows={2}
+          className="mt-2 w-full resize-none rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 text-sm font-medium text-on-surface-variant outline-none focus:border-primary/40"
+        />
+      </label>
+    </div>
+  );
+}
+
+function FinalExamLiveEditor({
+  questions,
+  updateFinalQuestion,
+  updateFinalOption,
+  variant,
+}: {
+  questions: JourneyQuestion[];
+  updateFinalQuestion: (questionIndex: number, patch: Partial<JourneyQuestion>) => void;
+  updateFinalOption: (questionIndex: number, optionId: string, text: string) => void;
+  variant: 'split' | 'focus';
+}) {
+  return (
+    <div className="space-y-5">
+      <div className="rounded-2xl border border-primary/15 bg-primary/5 p-4">
+        <p className="text-xs font-black uppercase tracking-widest text-primary">Final exam blueprint</p>
+        <p className="mt-1 text-sm text-on-surface-variant">These questions gate module completion and should cover all important parts.</p>
+      </div>
+      {questions.map((question, questionIndex) => (
+        <LiveEditorCard
+          key={question.id}
+          icon={<FileQuestion size={17} className="text-primary" />}
+          title={`Final exam question ${questionIndex + 1}`}
+          meta={question.difficulty || 'medium'}
+          className={variant === 'focus' ? 'rounded-xl' : 'rounded-2xl'}
+        >
+          <QuestionLiveEditor
+            question={question}
+            onQuestion={(patch) => updateFinalQuestion(questionIndex, patch)}
+            onOption={(optionId, text) => updateFinalOption(questionIndex, optionId, text)}
+          />
+        </LiveEditorCard>
+      ))}
+    </div>
+  );
+}
+
+function StudentSimulatorFrame({
+  draft,
+  activeItem,
+  activePart,
+  activePartIndex,
+  device,
+}: {
+  draft: BuilderModule;
+  activeItem: FlowItem;
+  activePart: JourneyModulePart;
+  activePartIndex: number;
+  device: 'desktop' | 'tablet' | 'mobile';
+}) {
+  const widthClass = device === 'mobile' ? 'max-w-[390px]' : device === 'tablet' ? 'max-w-[760px]' : 'max-w-[1120px]';
+  const quiz = activePart.miniQuiz[0] || blankQuestion(`${activePart.id}-simulator`);
+
+  return (
+    <div className={`mx-auto transition-all duration-200 ${widthClass}`}>
+      <div className="overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-2xl shadow-slate-300/40">
+        <div className="flex items-center gap-3 border-b border-slate-200 bg-slate-50 px-5 py-3">
+          <div className="flex gap-2">
+            <span className="h-3 w-3 rounded-full bg-red-400" />
+            <span className="h-3 w-3 rounded-full bg-amber-400" />
+            <span className="h-3 w-3 rounded-full bg-emerald-400" />
+          </div>
+          <div className="mx-auto hidden w-full max-w-md items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-1.5 text-xs font-medium text-slate-400 sm:flex">
+            letmastery.edu/learn/module
+          </div>
+        </div>
+        <article className={`mx-auto min-h-[420px] bg-white ${device === 'mobile' ? 'px-5 py-7' : 'px-8 py-10 lg:px-24 lg:py-16'}`}>
+          <h2 className="font-headline text-3xl font-black tracking-tight text-slate-950">{draft.title || 'Untitled module'}</h2>
+          <p className="mt-3 max-w-3xl text-base leading-relaxed text-slate-500">{draft.description || 'Student-facing module description appears here.'}</p>
+          <div className="my-8 h-px bg-slate-100" />
+
+          {activeItem.type === 'exam' ? (
+            <div className="space-y-5">
+              <p className="text-xs font-black uppercase tracking-widest text-indigo-600">Final assessment preview</p>
+              {(draft.finalExam || []).slice(0, 3).map((question, index) => (
+                <div key={question.id} className="rounded-xl border border-slate-200 bg-slate-50 p-5">
+                  <p className="text-sm font-black text-slate-900">{index + 1}. {question.stem}</p>
+                  <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+                    {(question.options || []).map((option) => (
+                      <div key={option.id} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600">{option.text}</div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-8">
+              <div>
+                <p className="text-xs font-black uppercase tracking-widest text-indigo-600">Part {activePartIndex + 1}</p>
+                <h3 className="mt-2 font-headline text-2xl font-black text-slate-950">{activePart.title}</h3>
+                <div className="mt-5 border-l-4 border-indigo-600 bg-indigo-50 px-5 py-4 text-base font-semibold text-indigo-900">{activePart.objective}</div>
+              </div>
+
+              {activeItem.type !== 'quiz' && (
+                <section className="space-y-4">
+                  <h4 className="text-lg font-black text-slate-950">{activePart.textbookSection.title}</h4>
+                  <p className="whitespace-pre-line text-base leading-8 text-slate-600">{activePart.textbookSection.body}</p>
+                </section>
+              )}
+
+              {activeItem.type === 'lesson' && activePart.lessonBlocks.length > 0 && (
+                <section className="space-y-3">
+                  {activePart.lessonBlocks.map((block, index) => (
+                    <div key={`${block.type}-${index}`} className={block.type === 'callout' ? 'rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900' : 'text-base leading-7 text-slate-600'}>
+                      {block.content}
+                    </div>
+                  ))}
+                </section>
+              )}
+
+              {(activeItem.type === 'quiz' || activeItem.type === 'lesson') && (
+                <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                  <p className="text-xs font-black uppercase tracking-widest text-indigo-600">Mini quiz</p>
+                  <p className="mt-3 text-base font-black text-slate-900">{quiz.stem}</p>
+                  <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                    {(quiz.options || []).map((option) => (
+                      <div key={option.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">{option.text}</div>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+        </article>
+      </div>
+    </div>
+  );
+}
+
+function FocusedSimulatorOverlay({
+  draft,
+  activeItem,
+  activeItemIndex,
+  activePart,
+  activePartIndex,
+  flowItems,
+  onClose,
+  onSelectFlowItem,
+  onSave,
+  onOpenAI,
+  updateDraft,
+  updatePartAtIndex,
+  updateMiniQuestionAtPart,
+  updateMiniOptionAtPart,
+  updateFinalQuestion,
+  updateFinalOption,
+}: {
+  draft: BuilderModule;
+  activeItem: FlowItem;
+  activeItemIndex: number;
+  activePart: JourneyModulePart;
+  activePartIndex: number;
+  flowItems: FlowItem[];
+  onClose: () => void;
+  onSelectFlowItem: (id: string) => void;
+  onSave: () => void;
+  onOpenAI: () => void;
+  updateDraft: (field: keyof BuilderModule, value: any) => void;
+  updatePartAtIndex: (partIndex: number, patch: Partial<JourneyModulePart>) => void;
+  updateMiniQuestionAtPart: (partIndex: number, patch: Partial<JourneyQuestion>) => void;
+  updateMiniOptionAtPart: (partIndex: number, optionId: string, text: string) => void;
+  updateFinalQuestion: (questionIndex: number, patch: Partial<JourneyQuestion>) => void;
+  updateFinalOption: (questionIndex: number, optionId: string, text: string) => void;
+}) {
+  const isExam = activeItem.type === 'exam';
+
+  return (
+    <div className="fixed inset-0 z-[80] overflow-y-auto bg-white text-on-surface">
+      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-outline-variant/30 bg-white/95 px-4 backdrop-blur lg:px-8">
+        <div className="flex min-w-0 items-center gap-4">
+          <button onClick={onClose} className="rounded-full p-2 text-on-surface-variant hover:bg-surface-container" title="Back to split workspace">
+            <ArrowLeft size={20} />
+          </button>
+          <div className="min-w-0">
+            <p className="text-xs font-black uppercase tracking-widest text-primary">Focused module workspace</p>
+            <input
+              value={draft.title}
+              onChange={(event) => updateDraft('title', event.target.value)}
+              className="w-full border-0 bg-transparent p-0 font-headline text-lg font-black text-on-surface outline-none focus:ring-0"
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={onOpenAI} className="hidden items-center gap-2 rounded-xl bg-surface-container px-4 py-2 text-sm font-bold text-on-surface sm:inline-flex">
+            <Bot size={16} />
+            AI
+          </button>
+          <button onClick={onClose} className="hidden items-center gap-2 rounded-xl bg-surface-container px-4 py-2 text-sm font-bold text-on-surface sm:inline-flex">
+            <Eye size={16} />
+            Split view
+          </button>
+          <button onClick={onSave} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-on-primary shadow-sm">
+            <Save size={16} />
+            Save changes
+          </button>
+        </div>
+      </header>
+
+      <main className="pb-36">
+        <div className="mx-auto max-w-4xl px-5 py-10 lg:py-14">
+          <div className="mb-10 text-center">
+            <p className="text-sm font-black uppercase tracking-widest text-on-surface-variant/70">
+              {activeItemIndex + 1}. {activeItem.type} live edit
+            </p>
+            {isExam ? (
+              <h2 className="mt-3 font-headline text-4xl font-black tracking-tight text-on-surface">Final module exam</h2>
+            ) : (
+              <input
+                value={activePart.title}
+                onChange={(event) => updatePartAtIndex(activePartIndex, { title: event.target.value })}
+                className="mx-auto mt-3 w-full max-w-3xl border-0 bg-transparent p-0 text-center font-headline text-4xl font-black tracking-tight text-on-surface outline-none focus:ring-0"
+              />
+            )}
+          </div>
+
+          {isExam ? (
+            <FinalExamLiveEditor
+              questions={draft.finalExam}
+              updateFinalQuestion={updateFinalQuestion}
+              updateFinalOption={updateFinalOption}
+              variant="focus"
+            />
+          ) : (
+            <PartLiveEditorCards
+              part={activePart}
+              partIndex={activePartIndex}
+              activeItem={activeItem}
+              updatePartAtIndex={updatePartAtIndex}
+              updateMiniQuestionAtPart={updateMiniQuestionAtPart}
+              updateMiniOptionAtPart={updateMiniOptionAtPart}
+              variant="focus"
+            />
+          )}
+        </div>
+      </main>
+
+      <FlowNavigatorBubble
+        activeItem={activeItem}
+        flowItems={flowItems}
+        onSelect={(item) => onSelectFlowItem(item.id)}
+      />
+
+      <div className="fixed bottom-6 right-6 z-[90] flex flex-col gap-3">
+        <button onClick={onOpenAI} className="flex h-12 w-12 items-center justify-center rounded-full border border-outline-variant/40 bg-white text-on-surface-variant shadow-lg" title="AI edit helper">
+          <Bot size={20} />
+        </button>
+        <button onClick={onSave} className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-on-primary shadow-xl" title="Save changes">
+          <Check size={24} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FlowNavigatorBubble({
+  activeItem,
+  flowItems,
+  onSelect,
+}: {
+  activeItem: FlowItem;
+  flowItems: FlowItem[];
+  onSelect: (item: FlowItem) => void;
+}) {
+  return (
+    <div className="group fixed bottom-7 left-1/2 z-[90] -translate-x-1/2">
+      <div className="invisible absolute bottom-16 left-1/2 mb-2 w-80 -translate-x-1/2 translate-y-2 rounded-2xl border border-outline-variant/30 bg-white p-2 opacity-0 shadow-2xl transition-all group-hover:visible group-hover:translate-y-0 group-hover:opacity-100">
+        <p className="border-b border-outline-variant/20 px-3 py-2 text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Jump to</p>
+        <div className="mt-2 max-h-72 space-y-1 overflow-y-auto">
+          {flowItems.map((item, index) => (
+            <button
+              key={item.id}
+              onClick={() => onSelect(item)}
+              className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm font-bold ${activeItem.id === item.id ? 'bg-primary/10 text-primary' : 'text-on-surface-variant hover:bg-surface-container'}`}
+            >
+              <span className="truncate">{index + 1}. {item.type}: {item.title}</span>
+              {activeItem.id === item.id && <Check size={14} />}
+            </button>
+          ))}
+        </div>
+      </div>
+      <button className="flex items-center gap-3 rounded-full bg-slate-950 px-6 py-3 text-sm font-black text-white shadow-2xl">
+        <Layers3 size={17} />
+        <span className="max-w-[260px] truncate">{activeItem.type}: {activeItem.title}</span>
+        <ChevronUp size={15} className="text-white/60" />
+      </button>
     </div>
   );
 }
