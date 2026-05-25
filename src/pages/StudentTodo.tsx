@@ -3,6 +3,7 @@ import { addDoc, collection, doc, onSnapshot, query, serverTimestamp, setDoc, wh
 import { CalendarDays, CalendarPlus, CheckCircle2, ChevronRight, ClipboardList, Image, Link2, MessageSquareText, Send } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import StudentLayout from '../components/StudentLayout';
+import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
 import { buildStudyPlan, getRecallInsights, StudyPlanItem } from '../lib/learningInsights';
@@ -40,6 +41,8 @@ export default function StudentTodo() {
   const [submissionWarning, setSubmissionWarning] = useState('');
   const [draftsLoaded, setDraftsLoaded] = useState(false);
   const [draftSavedAt, setDraftSavedAt] = useState(0);
+  const [toastMsg, setToastMsg] = useState('');
+  const [showToast, setShowToast] = useState(false);
 
   useEffect(() => {
     const moduleQuery = query(collection(db, 'modules'), where('isPublished', '==', true));
@@ -201,40 +204,64 @@ export default function StudentTodo() {
   }, [todoItems, assignmentItems, reminders, studyPlan]);
 
   const addReminder = async () => {
-    if (!user || !reminderDraft.title.trim()) return;
-    await addDoc(collection(db, 'studyReminders'), {
-      userId: user.uid,
-      title: reminderDraft.title.trim(),
-      remindAt: reminderDraft.remindAt,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-    setReminderDraft({ title: '', remindAt: todayInputValue() });
+    if (!user || !reminderDraft.title.trim()) {
+      setToastMsg('Add a reminder title before saving.');
+      setShowToast(true);
+      return;
+    }
+    try {
+      await addDoc(collection(db, 'studyReminders'), {
+        userId: user.uid,
+        title: reminderDraft.title.trim(),
+        remindAt: reminderDraft.remindAt,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setReminderDraft({ title: '', remindAt: todayInputValue() });
+      setToastMsg('Reminder saved to your calendar.');
+      setShowToast(true);
+    } catch (error) {
+      console.warn('Unable to save reminder', error);
+      setToastMsg('Unable to save reminder.');
+      setShowToast(true);
+    }
   };
 
   const submitAssignment = async (assignment: any) => {
     if (!user) return;
     const draft = submissionDrafts[assignment.id] || { type: assignment.submissionType || 'link', content: '' };
-    if (!draft.content.trim()) return;
-    await setDoc(doc(db, 'assignmentSubmissions', `${user.uid}_${assignment.id}`), {
-      assignmentId: assignment.id,
-      assignmentTitle: assignment.title,
-      classId: assignment.classId || '',
-      instructorId: assignment.instructorId || '',
-      userId: user.uid,
-      studentName: user.fullName || user.email,
-      studentEmail: user.email,
-      type: draft.type,
-      content: draft.content.trim(),
-      status: 'submitted',
-      submittedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-    setSubmissionDrafts((drafts) => {
-      const nextDrafts = { ...drafts, [assignment.id]: { ...draft, content: '' } };
-      localStorage.setItem(submissionDraftStorageKey(user.uid), JSON.stringify(nextDrafts));
-      return nextDrafts;
-    });
+    if (!draft.content.trim()) {
+      setToastMsg('Add your answer or link before submitting.');
+      setShowToast(true);
+      return;
+    }
+    try {
+      await setDoc(doc(db, 'assignmentSubmissions', `${user.uid}_${assignment.id}`), {
+        assignmentId: assignment.id,
+        assignmentTitle: assignment.title,
+        classId: assignment.classId || '',
+        instructorId: assignment.instructorId || '',
+        userId: user.uid,
+        studentName: user.fullName || user.email,
+        studentEmail: user.email,
+        type: draft.type,
+        content: draft.content.trim(),
+        status: 'submitted',
+        submittedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      setSubmissionDrafts((drafts) => {
+        const nextDrafts = { ...drafts, [assignment.id]: { ...draft, content: '' } };
+        localStorage.setItem(submissionDraftStorageKey(user.uid), JSON.stringify(nextDrafts));
+        return nextDrafts;
+      });
+      setToastMsg('Assignment submitted. Your instructor can now review it.');
+      setShowToast(true);
+    } catch (error) {
+      console.warn('Unable to submit assignment', error);
+      setToastMsg('Unable to submit assignment.');
+      setShowToast(true);
+    }
   };
 
   return (
@@ -416,6 +443,12 @@ export default function StudentTodo() {
           )}
         </section>
       </div>
+      <Toast
+        isVisible={showToast}
+        message={toastMsg}
+        onClose={() => setShowToast(false)}
+        type={toastMsg.includes('Unable') || toastMsg.includes('Add ') ? 'error' : 'success'}
+      />
     </StudentLayout>
   );
 }

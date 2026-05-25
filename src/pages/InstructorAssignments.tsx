@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { addDoc, collection, doc, onSnapshot, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { CheckCircle2, ClipboardList, MessageSquare, Plus, RotateCcw } from 'lucide-react';
 import InstructorLayout from '../components/InstructorLayout';
+import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
 import { createNotification, getClassRecipientIds } from '../lib/notifications';
@@ -12,6 +13,8 @@ export default function InstructorAssignments() {
   const [assignments, setAssignments] = useState<any[]>([]);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, { grade: string; comment: string }>>({});
+  const [toastMsg, setToastMsg] = useState('');
+  const [showToast, setShowToast] = useState(false);
   const [draft, setDraft] = useState({
     title: '',
     instructions: '',
@@ -46,67 +49,87 @@ export default function InstructorAssignments() {
 
   const reviewSubmission = async (submission: any, status: 'graded' | 'returned' | 'complete') => {
     const draftReview = reviewDrafts[submission.id] || { grade: submission.grade || '', comment: submission.comment || '' };
-    await updateDoc(doc(db, 'assignmentSubmissions', submission.id), {
-      grade: draftReview.grade,
-      comment: draftReview.comment,
-      status,
-      reviewedBy: user?.uid || '',
-      reviewedAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
     try {
-      await createNotification({
-        title: `Assignment feedback: ${submission.assignmentTitle}`,
-        body: status === 'returned'
-          ? 'Your instructor returned this assignment for revision.'
-          : status === 'complete'
-            ? 'Your instructor marked this assignment complete.'
-            : 'Your instructor posted feedback or a grade.',
-        type: 'assignment_feedback',
-        targetLink: '/student/todo',
-        recipientIds: [submission.userId],
-        classId: submission.classId,
-        createdBy: user?.uid,
-        createdByEmail: user?.email,
+      await updateDoc(doc(db, 'assignmentSubmissions', submission.id), {
+        grade: draftReview.grade,
+        comment: draftReview.comment,
+        status,
+        reviewedBy: user?.uid || '',
+        reviewedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
+      try {
+        await createNotification({
+          title: `Assignment feedback: ${submission.assignmentTitle}`,
+          body: status === 'returned'
+            ? 'Your instructor returned this assignment for revision.'
+            : status === 'complete'
+              ? 'Your instructor marked this assignment complete.'
+              : 'Your instructor posted feedback or a grade.',
+          type: 'assignment_feedback',
+          targetLink: '/student/todo',
+          recipientIds: [submission.userId],
+          classId: submission.classId,
+          createdBy: user?.uid,
+          createdByEmail: user?.email,
+        });
+      } catch (notificationError) {
+        console.warn('Assignment feedback notification was not sent', notificationError);
+      }
+      setToastMsg(status === 'returned' ? 'Submission returned for revision.' : status === 'complete' ? 'Submission marked complete.' : 'Grade and feedback saved.');
+      setShowToast(true);
     } catch (error) {
-      console.warn('Assignment feedback notification was not sent', error);
+      console.warn('Assignment feedback could not be saved', error);
+      setToastMsg('Unable to save assignment feedback.');
+      setShowToast(true);
     }
   };
 
   const createAssignment = async () => {
-    if (!user || !draft.title.trim() || !draft.classId) return;
-    await addDoc(collection(db, 'assignments'), {
-      ...draft,
-      title: draft.title.trim(),
-      instructions: draft.instructions.trim(),
-      instructorId: user.uid,
-      instructorEmail: user.email,
-      instructorName: user.fullName || user.email,
-      status: 'published',
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    if (!user || !draft.title.trim() || !draft.classId) {
+      setToastMsg('Add an assignment title and class before publishing.');
+      setShowToast(true);
+      return;
+    }
     try {
-      const recipientIds = await getClassRecipientIds(draft.classId);
-      if (recipientIds.length) {
-        await createNotification({
-          title: `New assignment: ${draft.title.trim()}`,
-          body: draft.dueAt
-            ? `Your instructor posted an assignment due ${new Date(draft.dueAt).toLocaleString()}. Submit a Drive or external link with access enabled.`
-            : 'Your instructor posted a new assignment. Submit a Drive or external link with access enabled.',
-          type: 'assignment_created',
-          targetLink: '/student/todo',
-          recipientIds,
-          classId: draft.classId,
-          createdBy: user.uid,
-          createdByEmail: user.email,
-        });
+      await addDoc(collection(db, 'assignments'), {
+        ...draft,
+        title: draft.title.trim(),
+        instructions: draft.instructions.trim(),
+        instructorId: user.uid,
+        instructorEmail: user.email,
+        instructorName: user.fullName || user.email,
+        status: 'published',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      try {
+        const recipientIds = await getClassRecipientIds(draft.classId);
+        if (recipientIds.length) {
+          await createNotification({
+            title: `New assignment: ${draft.title.trim()}`,
+            body: draft.dueAt
+              ? `Your instructor posted an assignment due ${new Date(draft.dueAt).toLocaleString()}. Submit a Drive or external link with access enabled.`
+              : 'Your instructor posted a new assignment. Submit a Drive or external link with access enabled.',
+            type: 'assignment_created',
+            targetLink: '/student/todo',
+            recipientIds,
+            classId: draft.classId,
+            createdBy: user.uid,
+            createdByEmail: user.email,
+          });
+        }
+      } catch (notificationError) {
+        console.warn('Assignment notification was not sent', notificationError);
       }
+      setDraft((current) => ({ ...current, title: '', instructions: '', dueAt: '' }));
+      setToastMsg('Assignment published.');
+      setShowToast(true);
     } catch (error) {
       console.warn('Assignment notification was not sent', error);
+      setToastMsg('Unable to publish assignment.');
+      setShowToast(true);
     }
-    setDraft((current) => ({ ...current, title: '', instructions: '', dueAt: '' }));
   };
 
   return (
@@ -210,6 +233,12 @@ export default function InstructorAssignments() {
           })}
         </section>
       </div>
+      <Toast
+        isVisible={showToast}
+        message={toastMsg}
+        onClose={() => setShowToast(false)}
+        type={toastMsg.includes('Unable') || toastMsg.includes('Add ') ? 'error' : 'success'}
+      />
     </InstructorLayout>
   );
 }

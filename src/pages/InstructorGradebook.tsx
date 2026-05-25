@@ -3,6 +3,7 @@ import { collection, doc, getDocs, onSnapshot, query, updateDoc, where } from 'f
 import { Award, BookOpen, Clock, Eye, EyeOff, ShieldAlert, Trophy, Users } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import InstructorLayout from '../components/InstructorLayout';
+import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
 import { journeyModules } from '../lib/learningJourney';
@@ -18,6 +19,8 @@ export default function InstructorGradebook() {
   const [modules, setModules] = useState<any[]>(journeyModules);
   const [selectedClassId, setSelectedClassId] = useState('');
   const [selectedModuleId, setSelectedModuleId] = useState('all');
+  const [toastMsg, setToastMsg] = useState('');
+  const [showToast, setShowToast] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -112,7 +115,17 @@ export default function InstructorGradebook() {
 
   const updateClassSetting = async (field: 'showGradesToStudents' | 'leaderboardEnabled', value: boolean) => {
     if (!selectedClass) return;
-    await updateDoc(doc(db, 'classes', selectedClass.id), { [field]: value });
+    try {
+      await updateDoc(doc(db, 'classes', selectedClass.id), { [field]: value });
+      setToastMsg(field === 'showGradesToStudents'
+        ? `Grade visibility ${value ? 'enabled' : 'hidden'} for this class.`
+        : `Leaderboard ${value ? 'enabled' : 'hidden'} for this class.`);
+      setShowToast(true);
+    } catch (error) {
+      console.warn('Unable to update class gradebook setting', error);
+      setToastMsg('Unable to update gradebook setting.');
+      setShowToast(true);
+    }
   };
 
   return (
@@ -224,6 +237,12 @@ export default function InstructorGradebook() {
           </div>
         </section>
       </div>
+      <Toast
+        isVisible={showToast}
+        message={toastMsg}
+        onClose={() => setShowToast(false)}
+        type={toastMsg.includes('Unable') ? 'error' : 'success'}
+      />
     </InstructorLayout>
   );
 }

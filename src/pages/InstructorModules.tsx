@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from 'firebase/firestore';
 import DashboardLayout from '../components/DashboardLayout';
+import DeleteConfirmModal from '../components/DeleteConfirmModal';
 import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
 import { JourneyModulePart, JourneyQuestion, journeyModules, journeySubjects } from '../lib/learningJourney';
@@ -293,6 +294,9 @@ export default function InstructorModules() {
   const [aiOpen, setAiOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [showToast, setShowToast] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<'module' | 'part' | null>(null);
+  const [pendingPartDeleteIndex, setPendingPartDeleteIndex] = useState<number | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     const modulesQuery = query(collection(db, 'modules'), orderBy('updatedAt', 'desc'));
@@ -421,7 +425,7 @@ export default function InstructorModules() {
     setBuilderMode('preview');
   };
 
-  const createNewDraft = () => {
+  const createNewDraft = (options?: { silent?: boolean }) => {
     const topicId = selectedSubject.topics[0]?.id || journeySubjects[0].topics[0].id;
     const parts = [blankPart(0)];
     const finalExam = [blankQuestion('final-q1')];
@@ -432,8 +436,10 @@ export default function InstructorModules() {
     setActiveStep('outline');
     setActivePartIndex(0);
     setBuilderMode('preview');
-    setToastMsg('New module draft created. Fill Step 1, then save it.');
-    setShowToast(true);
+    if (!options?.silent) {
+      setToastMsg('New module draft created. Fill Step 1, then save it.');
+      setShowToast(true);
+    }
   };
 
   const addPart = () => {
@@ -441,6 +447,8 @@ export default function InstructorModules() {
     setDraft((current) => ({ ...current, parts: nextParts, flowItems: buildDefaultFlow(nextParts, current.finalExam) }));
     setActivePartIndex(nextParts.length - 1);
     setActiveStep('parts');
+    setToastMsg('New module part added.');
+    setShowToast(true);
   };
 
   const removePart = (indexToRemove: number) => {
@@ -448,6 +456,13 @@ export default function InstructorModules() {
     const safeParts = nextParts.length ? nextParts : [blankPart(0)];
     setDraft((current) => ({ ...current, parts: safeParts, flowItems: buildDefaultFlow(safeParts, current.finalExam) }));
     setActivePartIndex(Math.max(0, indexToRemove - 1));
+    setToastMsg('Module part removed.');
+    setShowToast(true);
+  };
+
+  const requestRemovePart = (indexToRemove: number) => {
+    setPendingPartDeleteIndex(indexToRemove);
+    setDeleteTarget('part');
   };
 
   const addFinalQuestion = () => {
@@ -499,16 +514,30 @@ export default function InstructorModules() {
       setShowToast(true);
       return;
     }
-    if (!window.confirm(`Delete "${draft.title}"? This removes it from assigned classes and student journeys.`)) return;
+    setDeleteTarget('module');
+  };
+
+  const confirmDeleteAction = async () => {
     try {
-      await deleteDoc(doc(db, 'modules', draft.id));
-      setToastMsg('Module deleted');
-      setShowToast(true);
-      createNewDraft();
+      setIsDeleting(true);
+      if (deleteTarget === 'part' && pendingPartDeleteIndex != null) {
+        removePart(pendingPartDeleteIndex);
+        return;
+      }
+      if (deleteTarget === 'module' && draft.id) {
+        await deleteDoc(doc(db, 'modules', draft.id));
+        setToastMsg('Module deleted.');
+        setShowToast(true);
+        createNewDraft({ silent: true });
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `modules/${draft.id}`);
-      setToastMsg('Unable to delete module');
+      setToastMsg('Unable to delete. Please try again.');
       setShowToast(true);
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
+      setPendingPartDeleteIndex(null);
     }
   };
 
@@ -773,7 +802,7 @@ export default function InstructorModules() {
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="font-headline font-extrabold text-lg">Modules</h2>
-                <button onClick={createNewDraft} className="w-10 h-10 rounded-xl bg-primary text-on-primary flex items-center justify-center" title="Create module">
+                <button onClick={() => createNewDraft()} className="w-10 h-10 rounded-xl bg-primary text-on-primary flex items-center justify-center" title="Create module">
                   <Plus size={18} />
                 </button>
               </div>
@@ -919,6 +948,7 @@ export default function InstructorModules() {
                   updatePartLessonBlock={updatePartLessonBlock}
                   addPart={addPart}
                   removePart={removePart}
+                  requestRemovePart={requestRemovePart}
                   reorderPart={reorderPart}
                   duplicatePart={duplicatePart}
                 />
@@ -955,6 +985,21 @@ export default function InstructorModules() {
         message={toastMsg}
         onClose={() => setShowToast(false)}
         type={toastMsg.includes('Unable') || toastMsg.includes('required') ? 'error' : 'success'}
+      />
+
+      <DeleteConfirmModal
+        isOpen={!!deleteTarget}
+        onClose={() => {
+          if (isDeleting) return;
+          setDeleteTarget(null);
+          setPendingPartDeleteIndex(null);
+        }}
+        onConfirm={confirmDeleteAction}
+        title={deleteTarget === 'module' ? 'Delete module?' : 'Remove this part?'}
+        message={deleteTarget === 'module'
+          ? `This will remove "${draft.title || 'this module'}" from assigned classes and student journeys.`
+          : 'This removes the selected learning part, its reading, mini lesson, quiz, and flow item.'}
+        isDeleting={isDeleting}
       />
 
       <FloatingAIHelper
@@ -1215,6 +1260,7 @@ function PartsStep({
   updatePartLessonBlock,
   addPart,
   removePart,
+  requestRemovePart,
   reorderPart,
   duplicatePart,
 }: {
@@ -1226,6 +1272,7 @@ function PartsStep({
   updatePartLessonBlock: (blockIndex: number, content: string) => void;
   addPart: () => void;
   removePart: (index: number) => void;
+  requestRemovePart: (index: number) => void;
   reorderPart: (fromIndex: number, toIndex: number) => void;
   duplicatePart: (partIndex: number) => void;
 }) {
@@ -1298,7 +1345,7 @@ function PartsStep({
           <ChecklistItem done={activePart.lessonBlocks.length > 0} label="Mini lesson" />
           <ChecklistItem done={activePart.miniQuiz.length > 0} label="Mini quiz" />
           <ChecklistItem done={!!activePart.activity?.prompt} label="Optional activity" />
-          <button onClick={() => removePart(activePartIndex)} className="w-full mt-4 rounded-xl bg-error/10 text-error px-4 py-3 text-xs font-bold inline-flex items-center justify-center gap-2">
+          <button onClick={() => requestRemovePart(activePartIndex)} className="w-full mt-4 rounded-xl bg-error/10 text-error px-4 py-3 text-xs font-bold inline-flex items-center justify-center gap-2">
             <Trash2 size={14} />
             Remove part
           </button>

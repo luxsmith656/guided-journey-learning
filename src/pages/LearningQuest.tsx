@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
 import {
   findJourneyModule,
@@ -131,6 +132,8 @@ export default function LearningQuest() {
   const [appealComment, setAppealComment] = useState('');
   const [appealSent, setAppealSent] = useState(false);
   const [proctorMessage, setProctorMessage] = useState('');
+  const [toastMsg, setToastMsg] = useState('');
+  const [showToast, setShowToast] = useState(false);
   const [lessonNote, setLessonNote] = useState('');
   const [lessonHighlights, setLessonHighlights] = useState<LessonHighlight[]>([]);
   const [activeHighlightId, setActiveHighlightId] = useState('');
@@ -503,9 +506,13 @@ export default function LearningQuest() {
       });
       setAppealComment('');
       setAppealSent(true);
+      setToastMsg('Instructor review request sent.');
+      setShowToast(true);
     } catch (error) {
       console.warn('Unable to submit grade review request', error);
       setProctorMessage('Could not send the review request. Please try again.');
+      setToastMsg('Unable to send review request.');
+      setShowToast(true);
     }
   };
 
@@ -523,6 +530,8 @@ export default function LearningQuest() {
       updatedAt: serverTimestamp(),
     }, { merge: true });
     setProctorMessage('Lesson note saved.');
+    setToastMsg('Lesson note saved.');
+    setShowToast(true);
   };
 
   const captureSelectedText = () => {
@@ -680,6 +689,11 @@ export default function LearningQuest() {
     if (score < FINAL_PASSING_SCORE) {
       setFinalAnswers({});
       setFinalGrades({});
+      setToastMsg('Final exam submitted. Guided review opened.');
+      setShowToast(true);
+    } else {
+      setToastMsg('Final exam submitted and module completed.');
+      setShowToast(true);
     }
 
     if (score >= FINAL_PASSING_SCORE && user) {
@@ -1386,6 +1400,12 @@ export default function LearningQuest() {
           </motion.div>
         </div>
       </main>
+      <Toast
+        isVisible={showToast}
+        message={toastMsg}
+        onClose={() => setShowToast(false)}
+        type={toastMsg.includes('Unable') ? 'error' : 'success'}
+      />
     </div>
   );
 }
