@@ -11,14 +11,21 @@ import {
   FileQuestion,
   Award,
   Eye,
+  EyeOff,
   GripVertical,
   Layers3,
   Maximize2,
+  MessageCircle,
+  Minimize2,
   Monitor,
   MoreVertical,
+  Paperclip,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Save,
   Search,
+  Send,
   Settings2,
   Sparkles,
   Smartphone,
@@ -91,6 +98,8 @@ interface BuilderModule {
 }
 
 type FlowItem = BuilderModule['flowItems'][number];
+type SimulatorDevice = 'wide' | 'laptop' | 'ipad' | 'phone';
+type SimulatorShell = 'windows' | 'macos' | 'ios' | 'android';
 
 const defaultUnlockRules = {
   minScorePercent: 85,
@@ -365,6 +374,7 @@ export default function InstructorModules() {
   const [isCreatingNew, setIsCreatingNew] = useState(false);
   const [moduleFilter, setModuleFilter] = useState<'all' | 'published' | 'draft'>('all');
   const [builderMode, setBuilderMode] = useState<'edit' | 'preview'>('preview');
+  const [moduleRailCollapsed, setModuleRailCollapsed] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [showToast, setShowToast] = useState(false);
@@ -700,8 +710,8 @@ export default function InstructorModules() {
     setShowToast(true);
   };
 
-  const generateAIDraft = async () => {
-    const prompt = assistantPrompt.trim() || draft.title || 'LET review module';
+  const generateAIDraft = async (promptOverride?: string) => {
+    const prompt = promptOverride?.trim() || assistantPrompt.trim() || draft.title || 'LET review module';
     const sourceDocument = draft.sourceDocument || null;
     const sourceChunks = sourceDocument?.chunks || [];
     setIsDrafting(true);
@@ -755,7 +765,7 @@ export default function InstructorModules() {
     }
   };
 
-  const rewriteActiveReading = async (mode: 'proofread' | 'paraphrase') => {
+  const rewriteActiveReading = async (mode: 'proofread' | 'paraphrase', instructionOverride?: string) => {
     if (!activePart?.textbookSection?.body?.trim()) {
       setToastMsg('Add reading text first, then ask AI to improve it.');
       setShowToast(true);
@@ -770,7 +780,7 @@ export default function InstructorModules() {
         body: JSON.stringify({
           mode,
           text: activePart.textbookSection.body,
-          instruction: assistantPrompt,
+          instruction: instructionOverride || assistantPrompt,
         }),
       });
       const data = await response.json();
@@ -925,76 +935,104 @@ export default function InstructorModules() {
           </div>
         </section>
 
-        <section className="grid grid-cols-1 xl:grid-cols-[300px_1fr] gap-6">
+        <section className={`grid grid-cols-1 gap-6 transition-[grid-template-columns] duration-200 ${moduleRailCollapsed ? 'xl:grid-cols-[72px_1fr]' : 'xl:grid-cols-[320px_1fr]'}`}>
           <aside className="space-y-4">
-            <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="font-headline font-extrabold text-lg">Modules</h2>
-                <button onClick={() => createNewDraft()} className="w-10 h-10 rounded-xl bg-primary text-on-primary flex items-center justify-center" title="Create module">
+            {moduleRailCollapsed ? (
+              <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-3 shadow-sm flex xl:flex-col items-center gap-3">
+                <button
+                  onClick={() => setModuleRailCollapsed(false)}
+                  className="w-11 h-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center"
+                  title="Expand modules"
+                >
+                  <PanelLeftOpen size={18} />
+                </button>
+                <button
+                  onClick={() => createNewDraft()}
+                  className="w-11 h-11 rounded-xl bg-primary text-on-primary flex items-center justify-center"
+                  title="Create module"
+                >
                   <Plus size={18} />
                 </button>
+                <div className="hidden xl:flex min-h-[160px] items-center justify-center">
+                  <p className="rotate-90 whitespace-nowrap text-[10px] font-black uppercase tracking-widest text-on-surface-variant/60">
+                    {filteredModules.length} modules
+                  </p>
+                </div>
               </div>
+            ) : (
+              <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="font-headline font-extrabold text-lg">Modules</h2>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setModuleRailCollapsed(true)} className="w-10 h-10 rounded-xl bg-surface-container text-on-surface-variant border border-outline-variant/30 flex items-center justify-center" title="Collapse modules">
+                      <PanelLeftClose size={18} />
+                    </button>
+                    <button onClick={() => createNewDraft()} className="w-10 h-10 rounded-xl bg-primary text-on-primary flex items-center justify-center" title="Create module">
+                      <Plus size={18} />
+                    </button>
+                  </div>
+                </div>
 
-              <div className="relative mb-4">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/40" size={16} />
-                <input
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                  placeholder="Search module, subject, topic"
-                  className="w-full bg-surface-container border border-outline-variant/30 rounded-xl py-3 pl-10 pr-3 text-sm font-medium outline-none focus:border-primary/40"
-                />
-              </div>
-              <div className="grid grid-cols-3 gap-2 mb-4">
-                {[
-                  { id: 'all', label: 'All' },
-                  { id: 'published', label: 'Published' },
-                  { id: 'draft', label: 'Drafts' },
-                ].map((filter) => (
-                  <button
-                    key={filter.id}
-                    onClick={() => setModuleFilter(filter.id as typeof moduleFilter)}
-                    className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest border ${
-                      moduleFilter === filter.id ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container text-on-surface-variant border-outline-variant/30'
-                    }`}
-                  >
-                    {filter.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
-                {!selectedModuleId && (
-                  <button className="w-full text-left rounded-xl border p-4 transition-all border-primary bg-primary/10">
-                    <p className="font-extrabold text-on-surface leading-tight">{draft.title || 'Blank new module'}</p>
-                    <p className="text-[11px] text-on-surface-variant/60 mt-1 line-clamp-2">Unsaved blank module / Step 1 ready</p>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-primary mt-2">Fill the outline, parts, quizzes, then save</p>
-                  </button>
-                )}
-                {filteredModules.map((module) => {
-                  const subject = journeySubjects.find((item) => item.id === module.subjectId);
-                  const topic = subject?.topics.find((item) => item.id === module.topicId);
-                  const isSelected = selectedModuleId === module.id;
-
-                  return (
+                <div className="relative mb-4">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/40" size={16} />
+                  <input
+                    value={searchTerm}
+                    onChange={(event) => setSearchTerm(event.target.value)}
+                    placeholder="Search module, subject, topic"
+                    className="w-full bg-surface-container border border-outline-variant/30 rounded-xl py-3 pl-10 pr-3 text-sm font-medium outline-none focus:border-primary/40"
+                  />
+                </div>
+                <div className="grid grid-cols-3 gap-2 mb-4">
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'published', label: 'Published' },
+                    { id: 'draft', label: 'Drafts' },
+                  ].map((filter) => (
                     <button
-                      key={module.id}
-                      onClick={() => selectModule(module)}
-                      className={`w-full text-left rounded-xl border p-4 transition-all ${
-                        isSelected ? 'border-primary bg-primary/10' : 'border-outline-variant/30 bg-surface-container/30 hover:border-primary/40'
+                      key={filter.id}
+                      onClick={() => setModuleFilter(filter.id as typeof moduleFilter)}
+                      className={`rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest border ${
+                        moduleFilter === filter.id ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container text-on-surface-variant border-outline-variant/30'
                       }`}
                     >
-                      <p className="font-extrabold text-on-surface leading-tight">{module.title}</p>
-                      <p className="text-[11px] text-on-surface-variant/60 mt-1 line-clamp-2">{subject?.title || 'Subject'} / {topic?.title || 'Topic'}</p>
-                      <p className="text-[11px] text-on-surface-variant/50 mt-1 line-clamp-1">Author: {module.authorName || 'Instructor'}</p>
-                      <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/40 mt-2">
-                        {module.parts.length} parts / {module.finalExam.length} exam items / {module.isTemplate ? 'Template' : module.isPublished ? 'Published' : 'Draft'}
-                      </p>
+                      {filter.label}
                     </button>
-                  );
-                })}
-              </div>
-            </div>
+                  ))}
+                </div>
 
+                <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
+                  {!selectedModuleId && (
+                    <button className="w-full text-left rounded-xl border p-4 transition-all border-primary bg-primary/10">
+                      <p className="font-extrabold text-on-surface leading-tight">{draft.title || 'Blank new module'}</p>
+                      <p className="text-[11px] text-on-surface-variant/60 mt-1 line-clamp-2">Unsaved blank module / Step 1 ready</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-primary mt-2">Fill the outline, parts, quizzes, then save</p>
+                    </button>
+                  )}
+                  {filteredModules.map((module) => {
+                    const subject = journeySubjects.find((item) => item.id === module.subjectId);
+                    const topic = subject?.topics.find((item) => item.id === module.topicId);
+                    const isSelected = selectedModuleId === module.id;
+
+                    return (
+                      <button
+                        key={module.id}
+                        onClick={() => selectModule(module)}
+                        className={`w-full text-left rounded-xl border p-4 transition-all ${
+                          isSelected ? 'border-primary bg-primary/10' : 'border-outline-variant/30 bg-surface-container/30 hover:border-primary/40'
+                        }`}
+                      >
+                        <p className="font-extrabold text-on-surface leading-tight">{module.title}</p>
+                        <p className="text-[11px] text-on-surface-variant/60 mt-1 line-clamp-2">{subject?.title || 'Subject'} / {topic?.title || 'Topic'}</p>
+                        <p className="text-[11px] text-on-surface-variant/50 mt-1 line-clamp-1">Author: {module.authorName || 'Instructor'}</p>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/40 mt-2">
+                          {module.parts.length} parts / {module.finalExam.length} exam items / {module.isPublished ? 'Published' : 'Draft'}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </aside>
 
           <main className="bg-surface-container-lowest border border-outline-variant rounded-2xl shadow-sm overflow-hidden">
@@ -1017,10 +1055,6 @@ export default function InstructorModules() {
                   <button onClick={duplicateModule} className="inline-flex items-center justify-center gap-2 rounded-xl bg-surface-container text-on-surface px-4 py-2.5 font-bold text-sm border border-outline-variant/40">
                     <Copy size={16} />
                     Duplicate
-                  </button>
-                  <button onClick={saveAsTemplate} className="inline-flex items-center justify-center gap-2 rounded-xl bg-surface-container text-on-surface px-4 py-2.5 font-bold text-sm border border-outline-variant/40">
-                    <Sparkles size={16} />
-                    Template
                   </button>
                   <button onClick={saveModule} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-on-primary px-4 py-2.5 font-bold text-sm shadow-sm">
                     <Save size={16} />
@@ -1142,8 +1176,8 @@ export default function InstructorModules() {
         isWorking={isDrafting}
         onUploadDocument={uploadSourceDocument}
         onDraft={generateAIDraft}
-        onProofread={() => rewriteActiveReading('proofread')}
-        onParaphrase={() => rewriteActiveReading('paraphrase')}
+        onProofread={(instruction) => rewriteActiveReading('proofread', instruction)}
+        onParaphrase={(instruction) => rewriteActiveReading('paraphrase', instruction)}
       />
     </DashboardLayout>
   );
@@ -1216,7 +1250,9 @@ function ModuleStudentPreview({
 }) {
   const [dragFlowIndex, setDragFlowIndex] = useState<number | null>(null);
   const [activeFlowItemId, setActiveFlowItemId] = useState(draft.flowItems[0]?.id || '');
-  const [device, setDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
+  const [device, setDevice] = useState<SimulatorDevice>('laptop');
+  const [shell, setShell] = useState<SimulatorShell>('windows');
+  const [showSimulator, setShowSimulator] = useState(true);
   const [isFocusOpen, setIsFocusOpen] = useState(false);
 
   useEffect(() => {
@@ -1250,6 +1286,13 @@ function ModuleStudentPreview({
           <p className="mt-1 text-xs text-on-surface-variant">Edit the module in the top workspace and watch the student view update below.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setShowSimulator((current) => !current)}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container px-4 py-2.5 text-sm font-bold text-on-surface"
+          >
+            {showSimulator ? <EyeOff size={16} /> : <Eye size={16} />}
+            {showSimulator ? 'Hide simulator' : 'Show simulator'}
+          </button>
           <button onClick={() => setIsFocusOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container px-4 py-2.5 text-sm font-bold text-on-surface">
             <Maximize2 size={16} />
             Focus simulator
@@ -1317,43 +1360,78 @@ function ModuleStudentPreview({
         </div>
       </section>
 
-      <section className="border-t-4 border-primary/15 bg-slate-100">
-        <div className="flex flex-col gap-2 bg-slate-900 px-4 py-3 text-slate-200 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-white">
-              <span className="h-1.5 w-1.5 rounded-full bg-white" />
-              Live preview
-            </span>
-            <span className="text-sm font-bold text-slate-300">Student View Simulator</span>
-          </div>
-          <div className="flex items-center gap-1">
-            {([
-              ['desktop', Monitor],
-              ['tablet', Tablet],
-              ['mobile', Smartphone],
-            ] as const).map(([mode, Icon]) => (
-              <button
-                key={mode}
-                onClick={() => setDevice(mode)}
-                className={`rounded-lg p-2 ${device === mode ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}
-                title={`${mode} preview`}
-              >
-                <Icon size={16} />
+      {showSimulator ? (
+        <section className="border-t-4 border-primary/15 bg-slate-100">
+          <div className="flex flex-col gap-3 bg-slate-900 px-4 py-3 text-slate-200 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-white">
+                <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                Live preview
+              </span>
+              <span className="text-sm font-bold text-slate-300">Student View Simulator</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex rounded-xl bg-slate-800 p-1">
+                {([
+                  ['wide', Monitor, 'Wide'],
+                  ['laptop', Monitor, 'Laptop'],
+                  ['ipad', Tablet, 'iPad'],
+                  ['phone', Smartphone, 'Phone'],
+                ] as const).map(([mode, Icon, label]) => (
+                  <button
+                    key={mode}
+                    onClick={() => setDevice(mode)}
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-bold ${device === mode ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}
+                    title={`${label} preview`}
+                  >
+                    <Icon size={14} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="flex rounded-xl bg-slate-800 p-1">
+                {(['windows', 'macos', 'ios', 'android'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setShell(mode)}
+                    className={`rounded-lg px-2.5 py-1.5 text-xs font-black uppercase tracking-widest ${shell === mode ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    {mode === 'macos' ? 'mac' : mode}
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => setShowSimulator(false)} className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-3 py-2 text-xs font-bold text-slate-300 hover:text-white">
+                <Minimize2 size={14} />
+                Minimize
               </button>
-            ))}
+            </div>
           </div>
-        </div>
 
-        <div className="p-4 sm:p-6 lg:p-8">
-          <StudentSimulatorFrame
-            draft={draft}
-            activeItem={activeItem}
-            activePart={activePart}
-            activePartIndex={activePartIndex}
-            device={device}
-          />
-        </div>
-      </section>
+          <div className="p-4 sm:p-6 lg:p-8">
+            <StudentSimulatorFrame
+              draft={draft}
+              activeItem={activeItem}
+              activePart={activePart}
+              activePartIndex={activePartIndex}
+              flowItems={draft.flowItems}
+              activeItemIndex={activeFlowIndex}
+              device={device}
+              shell={shell}
+            />
+          </div>
+        </section>
+      ) : (
+        <button
+          onClick={() => setShowSimulator(true)}
+          className="flex w-full items-center justify-between border-t border-outline-variant/40 bg-slate-900 px-4 py-3 text-left text-sm font-bold text-slate-200"
+        >
+          <span className="inline-flex items-center gap-2">
+            <Eye size={16} />
+            Student simulator minimized
+          </span>
+          <span className="text-xs font-black uppercase tracking-widest text-slate-400">Show preview</span>
+        </button>
+      )}
 
       {isFocusOpen && (
         <FocusedSimulatorOverlay
@@ -1708,88 +1786,196 @@ function StudentSimulatorFrame({
   activeItem,
   activePart,
   activePartIndex,
+  flowItems,
+  activeItemIndex,
   device,
+  shell,
 }: {
   draft: BuilderModule;
   activeItem: FlowItem;
   activePart: JourneyModulePart;
   activePartIndex: number;
-  device: 'desktop' | 'tablet' | 'mobile';
+  flowItems: FlowItem[];
+  activeItemIndex: number;
+  device: SimulatorDevice;
+  shell: SimulatorShell;
 }) {
-  const widthClass = device === 'mobile' ? 'max-w-[390px]' : device === 'tablet' ? 'max-w-[760px]' : 'max-w-[1120px]';
+  const widthClass = {
+    wide: 'max-w-[1380px]',
+    laptop: 'max-w-[1120px]',
+    ipad: 'max-w-[820px]',
+    phone: 'max-w-[430px]',
+  }[device];
+  const isPhone = device === 'phone';
+  const isTouchShell = shell === 'ios' || shell === 'android';
+  const progressPercent = Math.min(100, Math.round(((activeItemIndex + 1) / Math.max(flowItems.length, 1)) * 100));
   const quiz = activePart.miniQuiz[0] || blankQuestion(`${activePart.id}-simulator`);
+  const subtitle = activeItem.type === 'exam'
+    ? 'Final module exam'
+    : `${activeItem.type === 'textbook' ? 'Textbook' : activeItem.type === 'lesson' ? 'Lesson' : activeItem.type === 'quiz' ? 'Mini quiz' : 'Activity'} ${activePartIndex + 1}`;
 
   return (
     <div className={`mx-auto transition-all duration-200 ${widthClass}`}>
-      <div className="overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-2xl shadow-slate-300/40">
-        <div className="flex items-center gap-3 border-b border-slate-200 bg-slate-50 px-5 py-3">
-          <div className="flex gap-2">
-            <span className="h-3 w-3 rounded-full bg-red-400" />
-            <span className="h-3 w-3 rounded-full bg-amber-400" />
-            <span className="h-3 w-3 rounded-full bg-emerald-400" />
+      <div className={`${isTouchShell ? 'rounded-[2rem] bg-slate-950 p-2 shadow-2xl shadow-slate-400/40' : 'rounded-2xl border border-slate-300 bg-white shadow-2xl shadow-slate-300/40'} overflow-hidden`}>
+        <div className={`${isTouchShell ? 'rounded-[1.5rem] overflow-hidden bg-slate-50' : 'bg-white'}`}>
+          <div className={`${isTouchShell ? 'bg-slate-950 px-5 py-3 text-white' : shell === 'windows' ? 'bg-slate-900 px-4 py-3 text-slate-200' : 'border-b border-slate-200 bg-slate-50 px-5 py-3 text-slate-500'} flex items-center gap-3`}>
+            {shell === 'macos' && (
+              <div className="flex gap-2">
+                <span className="h-3 w-3 rounded-full bg-red-400" />
+                <span className="h-3 w-3 rounded-full bg-amber-400" />
+                <span className="h-3 w-3 rounded-full bg-emerald-400" />
+              </div>
+            )}
+            {shell === 'windows' && <span className="h-3 w-3 rounded-sm bg-primary" />}
+            {isTouchShell && <div className="mx-auto h-1.5 w-20 rounded-full bg-white/30" />}
+            {!isTouchShell && (
+              <div className="mx-auto hidden w-full max-w-md items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-1.5 text-xs font-medium text-slate-400 sm:flex">
+                letmastery.edu/learn/module
+              </div>
+            )}
+            {shell === 'android' && <span className="h-2 w-2 rounded-full bg-emerald-400" />}
           </div>
-          <div className="mx-auto hidden w-full max-w-md items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-1.5 text-xs font-medium text-slate-400 sm:flex">
-            letmastery.edu/learn/module
-          </div>
-        </div>
-        <article className={`mx-auto min-h-[420px] bg-white ${device === 'mobile' ? 'px-5 py-7' : 'px-8 py-10 lg:px-24 lg:py-16'}`}>
-          <h2 className="font-headline text-3xl font-black tracking-tight text-slate-950">{draft.title || 'Untitled module'}</h2>
-          <p className="mt-3 max-w-3xl text-base leading-relaxed text-slate-500">{draft.description || 'Student-facing module description appears here.'}</p>
-          <div className="my-8 h-px bg-slate-100" />
 
-          {activeItem.type === 'exam' ? (
-            <div className="space-y-5">
-              <p className="text-xs font-black uppercase tracking-widest text-indigo-600">Final assessment preview</p>
-              {(draft.finalExam || []).slice(0, 3).map((question, index) => (
-                <div key={question.id} className="rounded-xl border border-slate-200 bg-slate-50 p-5">
-                  <p className="text-sm font-black text-slate-900">{index + 1}. {question.stem}</p>
-                  <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
-                    {(question.options || []).map((option) => (
-                      <div key={option.id} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600">{option.text}</div>
-                    ))}
+          <div className={`bg-slate-50 ${isPhone ? 'px-4 py-5' : 'px-6 py-8 lg:px-10 lg:py-10'}`}>
+            <header className={`mx-auto mb-6 flex max-w-6xl items-start justify-between gap-4 ${isPhone ? 'flex-col' : 'flex-row'}`}>
+              <div className="flex items-start gap-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm">
+                  <ArrowLeft size={18} />
+                </div>
+                <div>
+                  <h2 className="font-headline text-2xl font-black leading-tight text-slate-950">{draft.title || 'Untitled module'}</h2>
+                  <p className="mt-1 text-xs font-black uppercase tracking-widest text-slate-400">{subtitle}</p>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-600 shadow-sm">
+                <Save size={13} />
+                Reviewing
+              </span>
+            </header>
+
+            <div className={`mx-auto grid max-w-6xl gap-5 ${isPhone || device === 'ipad' ? 'grid-cols-1' : 'grid-cols-[300px_1fr]'}`}>
+              <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-4 flex items-center justify-between">
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-400">Topic book</p>
+                  <span className="text-xs font-black text-primary">{progressPercent}%</span>
+                </div>
+                <div className="space-y-2">
+                  {draft.parts.map((part, index) => {
+                    const isActivePart = activeItem.refId === part.id;
+                    const isDone = index < activePartIndex || activeItem.type === 'exam';
+                    return (
+                      <div key={part.id} className={`rounded-xl border p-3 ${isActivePart ? 'border-primary bg-primary/10' : 'border-slate-200 bg-slate-50'}`}>
+                        <div className="flex items-start gap-3">
+                          <span className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${isDone || isActivePart ? 'border-emerald-500 text-emerald-500' : 'border-slate-300 text-slate-300'}`}>
+                            <CheckCircle2 size={13} />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Lesson {index + 1}</p>
+                            <p className="line-clamp-2 text-sm font-black text-slate-950">{part.title}</p>
+                            <p className="mt-1 line-clamp-2 text-xs text-slate-500">{part.textbookSection.title}</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className={`rounded-xl border p-3 ${activeItem.type === 'exam' ? 'border-primary bg-primary/10' : 'border-slate-200 bg-slate-50'}`}>
+                    <div className="flex items-start gap-3">
+                      <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-primary text-primary">
+                        <Award size={13} />
+                      </span>
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Gate</p>
+                        <p className="text-sm font-black text-slate-950">Final module exam</p>
+                        <p className="mt-1 text-xs text-slate-500">Pass at {draft.unlockRules.minScorePercent}% to unlock next module</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="space-y-8">
-              <div>
-                <p className="text-xs font-black uppercase tracking-widest text-indigo-600">Part {activePartIndex + 1}</p>
-                <h3 className="mt-2 font-headline text-2xl font-black text-slate-950">{activePart.title}</h3>
-                <div className="mt-5 border-l-4 border-indigo-600 bg-indigo-50 px-5 py-4 text-base font-semibold text-indigo-900">{activePart.objective}</div>
-              </div>
+              </aside>
 
-              {activeItem.type !== 'quiz' && (
-                <section className="space-y-4">
-                  <h4 className="text-lg font-black text-slate-950">{activePart.textbookSection.title}</h4>
-                  <p className="whitespace-pre-line text-base leading-8 text-slate-600">{activePart.textbookSection.body}</p>
-                </section>
-              )}
-
-              {activeItem.type === 'lesson' && activePart.lessonBlocks.length > 0 && (
-                <section className="space-y-3">
-                  {activePart.lessonBlocks.map((block, index) => (
-                    <div key={`${block.type}-${index}`} className={block.type === 'callout' ? 'rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900' : 'text-base leading-7 text-slate-600'}>
-                      {block.content}
-                    </div>
-                  ))}
-                </section>
-              )}
-
-              {(activeItem.type === 'quiz' || activeItem.type === 'lesson') && (
-                <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                  <p className="text-xs font-black uppercase tracking-widest text-indigo-600">Mini quiz</p>
-                  <p className="mt-3 text-base font-black text-slate-900">{quiz.stem}</p>
-                  <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                    {(quiz.options || []).map((option) => (
-                      <div key={option.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">{option.text}</div>
+              <main className="space-y-5">
+                <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="text-xs font-black uppercase tracking-widest text-slate-400">Module path</p>
+                    <span className="text-xs font-black text-primary">{progressPercent}%</span>
+                  </div>
+                  <div className="flex gap-2">
+                    {flowItems.map((item) => (
+                      <div key={item.id} className={`h-2 flex-1 rounded-full ${item.id === activeItem.id || flowItems.findIndex((flow) => flow.id === item.id) < activeItemIndex ? 'bg-emerald-500' : 'bg-slate-200'}`} />
                     ))}
                   </div>
                 </section>
-              )}
+
+                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  {activeItem.type === 'exam' ? (
+                    <div className="space-y-5">
+                      <p className="text-xs font-black uppercase tracking-widest text-primary">Final assessment</p>
+                      <h3 className="font-headline text-2xl font-black text-slate-950">Final module exam</h3>
+                      {(draft.finalExam || []).slice(0, 3).map((question, index) => (
+                        <div key={question.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                          <p className="text-sm font-black text-slate-900">{index + 1}. {question.stem}</p>
+                          <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+                            {(question.options || []).map((option) => (
+                              <div key={option.id} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600">{option.text}</div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-widest text-primary">Part {activePartIndex + 1} {activeItem.type}</p>
+                        <h3 className="mt-3 font-headline text-2xl font-black text-slate-950">{activePart.textbookSection.title}</h3>
+                        <p className="mt-2 text-sm font-semibold text-slate-400">{activePart.textbookSection.estimatedReadMinutes} min read</p>
+                      </div>
+                      {activeItem.type !== 'quiz' && (
+                        <>
+                          <div className="rounded-xl border-l-4 border-primary bg-primary/10 px-5 py-4 text-base font-bold text-primary">{activePart.objective}</div>
+                          <p className="whitespace-pre-line text-base leading-8 text-slate-700">{activePart.textbookSection.body}</p>
+                        </>
+                      )}
+                      {activeItem.type === 'lesson' && activePart.lessonBlocks.length > 0 && (
+                        <div className="space-y-3">
+                          {activePart.lessonBlocks.map((block, index) => (
+                            <div key={`${block.type}-${index}`} className={block.type === 'callout' ? 'rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-900' : 'text-base leading-7 text-slate-600'}>
+                              {block.content}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {activeItem.type === 'activity' && activePart.activity?.prompt && (
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                          <p className="font-black text-slate-950">{activePart.activity.title || 'Practice activity'}</p>
+                          <p className="mt-2 text-sm leading-6 text-slate-600">{activePart.activity.prompt}</p>
+                        </div>
+                      )}
+                      {(activeItem.type === 'quiz' || activeItem.type === 'lesson') && (
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                          <p className="text-xs font-black uppercase tracking-widest text-primary">Mini quiz</p>
+                          <p className="mt-3 text-base font-black text-slate-900">{quiz.stem}</p>
+                          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                            {(quiz.options || []).map((option) => (
+                              <div key={option.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700">{option.text}</div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        <button className="rounded-full bg-slate-100 px-4 py-2 text-xs font-black text-slate-700">Bookmark</button>
+                        <button className="rounded-full bg-primary px-4 py-2 text-xs font-black text-white">Save notes</button>
+                      </div>
+                      <button className="flex w-full items-center justify-between rounded-xl bg-primary px-5 py-4 text-left font-black text-white">
+                        Continue to next step
+                        <ChevronUp size={18} className="rotate-90" />
+                      </button>
+                    </div>
+                  )}
+                </section>
+              </main>
             </div>
-          )}
-        </article>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1975,76 +2161,181 @@ function FloatingAIHelper({
   sourceText: string;
   setSourceText: (value: string) => void;
   isWorking: boolean;
-  onUploadDocument: (file: File) => void;
-  onDraft: () => void;
-  onProofread: () => void;
-  onParaphrase: () => void;
+  onUploadDocument: (file: File) => void | Promise<void>;
+  onDraft: (instruction?: string) => void | Promise<void>;
+  onProofread: (instruction?: string) => void | Promise<void>;
+  onParaphrase: (instruction?: string) => void | Promise<void>;
 }) {
+  const [message, setMessage] = useState('');
+  const [messages, setMessages] = useState<{ role: 'assistant' | 'user'; text: string }[]>([
+    { role: 'assistant', text: 'Tell me what to do with this module. I can proofread, paraphrase, fix grammar, or draft a full module from an uploaded document.' },
+  ]);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [dragStart, setDragStart] = useState<{ pointerX: number; pointerY: number; originX: number; originY: number } | null>(null);
+
+  useEffect(() => {
+    if (isOpen) return;
+    setOffset({ x: 0, y: 0 });
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!dragStart) return;
+    const handleMove = (event: PointerEvent) => {
+      setOffset({
+        x: dragStart.originX + event.clientX - dragStart.pointerX,
+        y: dragStart.originY + event.clientY - dragStart.pointerY,
+      });
+    };
+    const handleUp = () => setDragStart(null);
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+    };
+  }, [dragStart]);
+
+  const addMessage = (role: 'assistant' | 'user', text: string) => {
+    setMessages((current) => [...current.slice(-5), { role, text }]);
+  };
+
+  const runChatAction = async () => {
+    const text = message.trim();
+    if (!text || isWorking) return;
+    const lower = text.toLowerCase();
+    setMessage('');
+    setPrompt(text);
+    addMessage('user', text);
+
+    try {
+      if (text.length > 260 && !sourceText.trim()) {
+        setSourceText(text);
+      }
+
+      if (lower.includes('proof') || lower.includes('grammar') || lower.includes('correct') || lower.includes('fix spelling')) {
+        addMessage('assistant', 'I will clean up the active reading section and keep the meaning intact.');
+        await Promise.resolve(onProofread(text));
+        addMessage('assistant', 'Proofreading request sent. Review the active text before saving.');
+        return;
+      }
+
+      if (lower.includes('paraphrase') || lower.includes('rewrite') || lower.includes('simplify') || lower.includes('make it clearer')) {
+        addMessage('assistant', 'I will rewrite the active reading section in a clearer student-friendly style.');
+        await Promise.resolve(onParaphrase(text));
+        addMessage('assistant', 'Paraphrase request sent. Check the updated section before publishing.');
+        return;
+      }
+
+      if (lower.includes('draft') || lower.includes('generate') || lower.includes('convert') || lower.includes('build') || lower.includes('module') || lower.includes('quiz') || lower.includes('exam')) {
+        addMessage('assistant', 'I will create an editable draft using your prompt and any uploaded source document. You still approve and publish.');
+        await Promise.resolve(onDraft(text));
+        addMessage('assistant', 'Draft request sent. The Studio will keep it editable.');
+        return;
+      }
+
+      addMessage('assistant', 'I can help if you ask things like “proofread this part,” “paraphrase the reading,” or “generate a module from the uploaded PDF.”');
+    } catch (error) {
+      console.warn('AI helper action failed', error);
+      addMessage('assistant', 'I could not complete that request. Try a shorter instruction or upload the source document again.');
+    }
+  };
+
   return (
-    <div className="fixed right-6 bottom-24 z-[90]">
+    <div
+      className="fixed right-6 bottom-24 z-[90]"
+      style={isOpen ? { transform: `translate(${offset.x}px, ${offset.y}px)` } : undefined}
+    >
       {isOpen && (
-        <div className="mb-3 w-[min(360px,calc(100vw-2.5rem))] rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-2xl p-4">
-          <div className="flex items-center justify-between mb-3">
+        <div className="mb-3 flex h-[min(620px,calc(100vh-8rem))] w-[min(390px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-2xl">
+          <div
+            className="flex cursor-grab items-center justify-between border-b border-outline-variant/40 bg-surface-container px-4 py-3 active:cursor-grabbing"
+            onPointerDown={(event) => {
+              setDragStart({ pointerX: event.clientX, pointerY: event.clientY, originX: offset.x, originY: offset.y });
+            }}
+          >
             <div className="flex items-center gap-2 text-primary text-xs font-black uppercase tracking-widest">
-              <Bot size={16} />
-              AI edit helper
+              <MessageCircle size={16} />
+              AI module chat
             </div>
-            <button onClick={() => setIsOpen(false)} className="p-1 rounded-lg hover:bg-surface-container text-on-surface-variant">
+            <button
+              onClick={(event) => {
+                event.stopPropagation();
+                setIsOpen(false);
+              }}
+              className="p-1 rounded-lg hover:bg-surface-container-lowest text-on-surface-variant"
+            >
               <X size={16} />
             </button>
           </div>
-          <textarea
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            rows={4}
-            placeholder="Type a topic or instruction, e.g. draft a LET module about assessment validity."
-            className="w-full bg-surface-container border border-transparent rounded-xl px-4 py-3 text-sm font-medium resize-none outline-none focus:border-primary/30"
-          />
-          <label className="block mt-3">
-            <span className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Paste or upload lesson content</span>
+
+          <div className="flex-1 space-y-3 overflow-y-auto p-4">
+            {messages.map((item, index) => (
+              <div key={`${item.role}-${index}`} className={`flex ${item.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${item.role === 'user' ? 'bg-primary text-on-primary' : 'bg-surface-container text-on-surface'}`}>
+                  {item.text}
+                </div>
+              </div>
+            ))}
+            {sourceText.trim() && (
+              <div className="rounded-xl border border-primary/15 bg-primary/5 px-4 py-3 text-xs font-semibold text-primary">
+                Source context is ready. Ask me to convert, generate quizzes, or build a module from it.
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-outline-variant/40 p-3">
             <textarea
-              value={sourceText}
-              onChange={(event) => setSourceText(event.target.value)}
-              rows={4}
-              placeholder="Paste reviewer notes, a lesson draft, or document text for AI to divide into objectives, sections, quizzes, and exam items."
-              className="mt-2 w-full bg-surface-container border border-transparent rounded-xl px-4 py-3 text-sm font-medium resize-none outline-none focus:border-primary/30"
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                  event.preventDefault();
+                  runChatAction();
+                }
+              }}
+              rows={3}
+              placeholder="Ask: proofread this part, paraphrase the reading, or generate a module from the uploaded PDF..."
+              className="w-full resize-none rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 text-sm font-medium outline-none focus:border-primary/40"
             />
-          </label>
-          <input
-            type="file"
-            accept=".pdf,.docx,.pptx,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            onChange={async (event) => {
-              const file = event.target.files?.[0];
-              if (!file) return;
-              await onUploadDocument(file);
-              event.currentTarget.value = '';
-            }}
-            className="mt-2 text-xs font-bold text-on-surface-variant"
-          />
-          <p className="mt-2 text-[11px] text-on-surface-variant/60">Supports PDF, DOCX, PPTX, TXT, and Markdown. AI only creates a draft; instructors still approve and publish.</p>
-          <div className="grid grid-cols-1 gap-2 mt-3">
-            <button onClick={onDraft} disabled={isWorking} className="rounded-xl bg-primary text-on-primary px-4 py-3 text-sm font-bold disabled:opacity-50 inline-flex items-center justify-center gap-2">
-              <Sparkles size={16} />
-              AI Course Builder
-            </button>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={onProofread} disabled={isWorking} className="rounded-xl bg-surface-container text-on-surface px-4 py-3 text-xs font-black uppercase tracking-widest border border-outline-variant/30 disabled:opacity-50">
-                Proofread
-              </button>
-              <button onClick={onParaphrase} disabled={isWorking} className="rounded-xl bg-surface-container text-on-surface px-4 py-3 text-xs font-black uppercase tracking-widest border border-outline-variant/30 disabled:opacity-50">
-                Paraphrase
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-outline-variant/40 bg-surface-container px-3 py-2 text-xs font-black uppercase tracking-widest text-on-surface-variant">
+                <Paperclip size={14} />
+                Upload
+                <input
+                  type="file"
+                  accept=".pdf,.docx,.pptx,.txt,.md,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                  onChange={async (event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    addMessage('user', `Uploaded ${file.name}`);
+                    await onUploadDocument(file);
+                    addMessage('assistant', 'I extracted the document. Tell me how you want it converted into the module draft.');
+                    event.currentTarget.value = '';
+                  }}
+                  className="hidden"
+                />
+              </label>
+              <button
+                onClick={runChatAction}
+                disabled={isWorking || !message.trim()}
+                className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-on-primary disabled:opacity-50"
+              >
+                {isWorking ? <Sparkles size={15} /> : <Send size={15} />}
+                Send
               </button>
             </div>
           </div>
         </div>
       )}
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-14 h-14 rounded-full bg-primary text-on-primary shadow-xl flex items-center justify-center"
-        title="AI edit helper"
-      >
-        {isOpen ? <X size={22} /> : <Bot size={24} />}
-      </button>
+      {!isOpen && (
+        <button
+          onClick={() => setIsOpen(true)}
+          className="w-14 h-14 rounded-full bg-primary text-on-primary shadow-xl flex items-center justify-center"
+          title="AI edit helper"
+        >
+          <Bot size={24} />
+        </button>
+      )}
     </div>
   );
 }
