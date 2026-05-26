@@ -1,18 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 import {
   ArrowRight,
-  BookOpen,
-  CheckCircle2,
-  ClipboardCheck,
-  FileQuestion,
   GraduationCap,
   Library,
-  Lock,
   Map,
-  PlayCircle,
-  Plus,
   Search,
 } from 'lucide-react';
 import StudentLayout from '../components/StudentLayout';
@@ -79,7 +72,7 @@ function moduleProgressState(progress: any, isClassAssigned: boolean) {
 
 export default function StudentCourses() {
   const navigate = useNavigate();
-  const { user, refreshUser } = useAuth();
+  const { user } = useAuth();
   const allowedSubjects = useMemo(() => {
     const track = (user as any)?.reviewTrack;
     if (track === 'elementary') return journeySubjects.filter((subject) => subject.id !== 'major');
@@ -205,35 +198,6 @@ export default function StudentCourses() {
     navigate(`/quest?moduleId=${module.id}`);
   };
 
-  const openModule = (module: JourneyModule, locked: boolean) => {
-    if (locked) return;
-    if (progressByModule[module.id]) {
-      navigate(`/quest?moduleId=${module.id}`);
-      return;
-    }
-    startReview(module);
-  };
-
-  const archiveModule = async (moduleId: string) => {
-    if (!user) return;
-    const archived = new Set((user as any).archivedModuleIds || []);
-    archived.add(moduleId);
-    await updateDoc(doc(db, 'users', user.uid), { archivedModuleIds: Array.from(archived) });
-    await refreshUser();
-  };
-
-  const archiveClass = async () => {
-    if (!user?.activeClassId) return;
-    const archived = new Set((user as any).archivedClassIds || []);
-    archived.add(user.activeClassId);
-    await updateDoc(doc(db, 'users', user.uid), {
-      archivedClassIds: Array.from(archived),
-      activeClassId: null,
-      learningMode: 'self_review',
-    });
-    await refreshUser();
-  };
-
   return (
     <StudentLayout title="LET Reviewers">
       <div className="space-y-6">
@@ -245,65 +209,19 @@ export default function StudentCourses() {
                 LET review center
               </div>
               <h1 className="text-2xl md:text-3xl font-extrabold font-headline text-on-surface tracking-tight">
-                Active reviewers are separated from public modules you can explore.
+                Explore public LET reviewers by track and topic.
               </h1>
               <p className="text-sm text-on-surface-variant mt-3 leading-relaxed">
-                Public reviewers do not count as progress until you click Start Review. Class reviewers appear only when a real enrolled class assigns them.
+                Public reviewers do not count as progress until you click Start Review. Continue started modules from your dashboard.
               </p>
             </div>
 
             <div className="grid grid-cols-3 gap-3 min-w-full lg:min-w-[360px]">
-              <Stat label="Active" value={activeReviewers.length} />
+              <Stat label="Tracks" value={allowedSubjects.length} />
               <Stat label="Public" value={publicReviewers.length} />
               <Stat label="Completed" value={completedCount} />
             </div>
           </div>
-        </section>
-
-        <section className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 md:p-6 shadow-sm">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-5">
-            <div>
-              <h2 className="text-xl font-extrabold font-headline text-on-surface">My Active Reviewers</h2>
-              <p className="text-sm text-on-surface-variant mt-1">Only started public reviewers and real class-assigned modules appear here.</p>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => navigate('/join-class')} className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-surface-container text-on-surface font-bold text-sm border border-outline-variant hover:border-primary/40 transition-colors">
-                <Plus size={16} />
-                Join class
-              </button>
-              {user?.activeClassId && (
-                <button onClick={archiveClass} className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-surface-container text-on-surface font-bold text-sm border border-outline-variant hover:border-error/40 transition-colors">
-                  Archive class
-                </button>
-              )}
-            </div>
-          </div>
-
-          {activeReviewers.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-outline-variant p-8 text-center">
-              <BookOpen className="mx-auto text-on-surface-variant/30 mb-4" size={40} />
-              <h3 className="font-extrabold text-on-surface">No active reviewers yet.</h3>
-              <p className="text-sm text-on-surface-variant mt-2">Start a public reviewer below or join a professor class to receive assigned materials.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {activeReviewers.map((module) => {
-                const progress = progressByModule[module.id];
-                const missingPrerequisite = module.prerequisiteModuleIds?.some((id) => progressByModule[id]?.status !== 'completed' || (progressByModule[id]?.finalScore ?? 0) < 85);
-                const isLocked = module.status === 'locked' || !!missingPrerequisite;
-                return (
-                  <ReviewerCard
-                    key={module.id}
-                    module={module}
-                    locked={isLocked}
-                    isActive={!!progress}
-                    onOpen={() => openModule(module, isLocked)}
-                    onArchive={() => archiveModule(module.id)}
-                  />
-                );
-              })}
-            </div>
-          )}
         </section>
 
         <section className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-6">
@@ -456,69 +374,5 @@ function Stat({ label, value }: { label: string; value: number }) {
       <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">{label}</p>
       <p className="text-2xl font-black text-on-surface mt-1">{value}</p>
     </div>
-  );
-}
-
-function ReviewerCard({ module, locked, isActive, onOpen, onArchive }: {
-  module: JourneyModule;
-  locked: boolean;
-  isActive: boolean;
-  onOpen: () => void;
-  onArchive: () => void;
-}) {
-  const isCompleted = module.status === 'completed' || module.status === 'mastered';
-  return (
-    <article className="rounded-2xl border border-outline-variant bg-surface-container/20 p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex gap-4 min-w-0">
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${locked ? 'bg-surface-container text-on-surface-variant/40' : 'bg-primary/10 text-primary'}`}>
-            {isCompleted ? <CheckCircle2 size={24} /> : locked ? <Lock size={22} /> : <PlayCircle size={24} />}
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/40">
-              {module.publishScope === 'classes' ? 'Class reviewer' : isActive ? 'Started public reviewer' : 'Class assigned'}
-            </p>
-            <h3 className="text-lg font-extrabold text-on-surface mt-1">{module.title}</h3>
-            <p className="text-sm text-on-surface-variant mt-1 line-clamp-2">{module.description}</p>
-          </div>
-        </div>
-        <button
-          disabled={locked}
-          onClick={onOpen}
-          className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-on-primary px-4 py-3 text-sm font-bold disabled:bg-surface-container disabled:text-on-surface-variant/40 shrink-0"
-        >
-          {locked ? 'Locked' : isActive ? 'Resume' : 'Start'}
-        </button>
-      </div>
-
-      <div className="mt-5">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold text-on-surface-variant">{statusLabel[module.status] || module.status}</span>
-          <span className="text-xs font-black text-on-surface">{module.progress}%</span>
-        </div>
-        <div className="h-2 rounded-full bg-surface-container overflow-hidden">
-          <div className="h-full bg-primary rounded-full" style={{ width: `${module.progress}%` }}></div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-5">
-        {module.resources.slice(0, 3).map((resource) => {
-          const Icon = resource.type === 'textbook' ? Library : resource.type === 'quiz' ? FileQuestion : resource.type === 'exam' ? ClipboardCheck : BookOpen;
-          return (
-            <div key={resource.id} className="rounded-xl border border-outline-variant/30 bg-surface-container/40 p-3 text-left">
-              <Icon size={17} className="text-primary mb-2" />
-              <p className="text-xs font-extrabold text-on-surface leading-tight">{resource.title}</p>
-              <p className="text-[10px] text-on-surface-variant/50 font-bold mt-1">{resource.meta}</p>
-            </div>
-          );
-        })}
-      </div>
-
-      {isCompleted && (
-        <button onClick={onArchive} className="mt-4 rounded-xl bg-surface-container text-on-surface px-4 py-2 text-xs font-black uppercase tracking-widest border border-outline-variant/40">
-          Archive
-        </button>
-      )}
-    </article>
   );
 }
