@@ -375,6 +375,7 @@ export default function InstructorModules() {
   const [builderMode, setBuilderMode] = useState<'edit' | 'preview'>('preview');
   const [moduleRailCollapsed, setModuleRailCollapsed] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [tourStep, setTourStep] = useState<number | null>(null);
   const [toastMsg, setToastMsg] = useState('');
   const [showToast, setShowToast] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<'module' | 'part' | null>(null);
@@ -522,6 +523,106 @@ export default function InstructorModules() {
     if (!options?.silent) {
       setToastMsg('New module draft created. Fill Step 1, then save it.');
       setShowToast(true);
+    }
+  };
+
+  const startStudioTour = () => {
+    const topicId = selectedSubject.topics[0]?.id || journeySubjects[0].topics[0].id;
+    const guidedParts: JourneyModulePart[] = [
+      {
+        ...blankPart(0),
+        id: 'tour-part-1',
+        title: 'Part 1: Set the reading purpose',
+        objective: 'Identify exactly what a LET passage question is asking before reading.',
+        textbookSection: {
+          title: 'Communication Foundations: Reading for Purpose',
+          body: 'A passage item becomes easier when the learner first names the task. Main idea questions ask for the controlling thought. Inference questions ask for a supported conclusion. Evidence questions ask which detail proves a claim.',
+          estimatedReadMinutes: 8,
+        },
+        miniQuiz: [{
+          ...blankQuestion('tour-part-1-q1'),
+          stem: 'What should a learner identify first when answering a passage item?',
+          correctOptionId: 'B',
+          options: [
+            { id: 'A', text: 'The longest answer' },
+            { id: 'B', text: 'The exact task asked by the question' },
+            { id: 'C', text: 'The most technical word' },
+            { id: 'D', text: 'The final sentence only' },
+          ],
+          explanation: 'Knowing the task guides what evidence to look for in the passage.',
+        }],
+      },
+      {
+        ...blankPart(1),
+        id: 'tour-part-2',
+        title: 'Part 2: Check every option against evidence',
+        objective: 'Use textual evidence to remove distractors before choosing an answer.',
+        textbookSection: {
+          title: 'Evidence Beats Familiarity',
+          body: 'A choice may sound familiar but still fail if the passage does not support it. Strong readers return to the line, compare each option, and choose the answer with direct evidence.',
+          estimatedReadMinutes: 7,
+        },
+      },
+    ];
+    const guidedExam = [
+      {
+        ...blankQuestion('tour-final-q1'),
+        stem: 'Why should students compare each answer option with the passage evidence?',
+        correctOptionId: 'C',
+        options: [
+          { id: 'A', text: 'It makes the test shorter' },
+          { id: 'B', text: 'It removes the need to read' },
+          { id: 'C', text: 'It helps reject attractive but unsupported choices' },
+          { id: 'D', text: 'It guarantees every option is correct' },
+        ],
+      },
+    ];
+
+    setIsCreatingNew(true);
+    setSelectedModuleId('');
+    setModuleRailCollapsed(true);
+    setDraft({
+      ...emptyModule,
+      id: '',
+      title: 'Guided Studio Practice Module',
+      description: 'A guided draft used by the interactive tour to teach the Instructor Studio workflow.',
+      subjectId: selectedSubject.id,
+      topicId,
+      parts: guidedParts,
+      finalExam: guidedExam,
+      flowItems: buildDefaultFlow(guidedParts, guidedExam),
+      authorName: user?.fullName || user?.email || 'Instructor',
+      authorEmail: user?.email || '',
+    });
+    setBuilderMode('preview');
+    setActiveStep('parts');
+    setActivePartIndex(0);
+    setTourStep(0);
+    setToastMsg('Interactive guide started with a safe practice draft.');
+    setShowToast(true);
+  };
+
+  const goToTourStep = (nextStep: number | null) => {
+    if (nextStep == null) {
+      setTourStep(null);
+      return;
+    }
+    setTourStep(nextStep);
+    if (nextStep === 1) {
+      setBuilderMode('preview');
+      setModuleRailCollapsed(true);
+    }
+    if (nextStep === 2) {
+      setBuilderMode('edit');
+      setActiveStep('parts');
+    }
+    if (nextStep === 3) {
+      setBuilderMode('preview');
+      setAiOpen(true);
+    }
+    if (nextStep === 4) {
+      setBuilderMode('edit');
+      setActiveStep('publish');
     }
   };
 
@@ -785,7 +886,9 @@ export default function InstructorModules() {
       const data = await response.json();
       if (!data.text) throw new Error(data.error || 'No rewritten text returned');
       updatePart({ textbookSection: { ...activePart.textbookSection, body: data.text } });
-      setToastMsg(mode === 'proofread' ? 'Reading proofread by AI.' : 'Reading paraphrased by AI.');
+      setToastMsg(data.fallback
+        ? (mode === 'proofread' ? 'Reading proofread locally while AI is unavailable.' : 'Reading paraphrased locally while AI is unavailable.')
+        : (mode === 'proofread' ? 'Reading proofread by AI.' : 'Reading paraphrased by AI.'));
     } catch (error) {
       console.warn('AI rewrite failed', error);
       setToastMsg('AI rewrite unavailable. Try again later.');
@@ -1042,6 +1145,10 @@ export default function InstructorModules() {
                   <h2 className="text-xl font-extrabold font-headline text-on-surface">{draft.title || 'Untitled module'}</h2>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  <button onClick={startStudioTour} className="inline-flex items-center justify-center gap-2 rounded-xl bg-surface-container text-on-surface px-4 py-2.5 font-bold text-sm border border-outline-variant/40">
+                    <ClipboardList size={16} />
+                    Guide
+                  </button>
                   <button
                     onClick={() => setBuilderMode('preview')}
                     className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-bold text-sm border transition-colors ${
@@ -1165,6 +1272,18 @@ export default function InstructorModules() {
         isDeleting={isDeleting}
       />
 
+      {tourStep != null && (
+        <StudioTourOverlay
+          step={tourStep}
+          onBack={() => goToTourStep(Math.max(0, tourStep - 1))}
+          onNext={() => {
+            const nextStep = tourStep + 1;
+            goToTourStep(nextStep > studioTourSteps.length - 1 ? null : nextStep);
+          }}
+          onClose={() => goToTourStep(null)}
+        />
+      )}
+
       <FloatingAIHelper
         isOpen={aiOpen}
         setIsOpen={setAiOpen}
@@ -1179,6 +1298,72 @@ export default function InstructorModules() {
         onParaphrase={(instruction) => rewriteActiveReading('paraphrase', instruction)}
       />
     </DashboardLayout>
+  );
+}
+
+const studioTourSteps = [
+  {
+    icon: ClipboardList,
+    title: 'Practice draft created',
+    body: 'The guide starts with a safe unpublished module so you can learn the Studio without touching a real class module.',
+  },
+  {
+    icon: Eye,
+    title: 'Student flow first',
+    body: 'This view shows the order students will actually experience: textbook, lesson, quiz, activity, and final exam.',
+  },
+  {
+    icon: Layers3,
+    title: 'Live edit each part',
+    body: 'Edit objectives, reading chunks, lesson text, mini quizzes, and activities while keeping the learner path visible.',
+  },
+  {
+    icon: Bot,
+    title: 'Ask the AI helper',
+    body: 'Use the chat to proofread, paraphrase, fix grammar, upload old modules, or draft a course. It never publishes without you.',
+  },
+  {
+    icon: Save,
+    title: 'Publish with rules',
+    body: 'Pick public or class release, due dates, attempt rules, certificate settings, and save only when the module is ready.',
+  },
+] as const;
+
+function StudioTourOverlay({
+  step,
+  onBack,
+  onNext,
+  onClose,
+}: {
+  step: number;
+  onBack: () => void;
+  onNext: () => void;
+  onClose: () => void;
+}) {
+  const current = studioTourSteps[step] || studioTourSteps[0];
+  const Icon = current.icon;
+  const isLast = step >= studioTourSteps.length - 1;
+
+  return (
+    <div className="fixed bottom-6 left-6 z-[95] w-[min(380px,calc(100vw-2rem))] rounded-2xl border border-outline-variant bg-surface-container-lowest p-4 shadow-2xl">
+      <div className="flex items-start gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <Icon size={20} />
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] font-black uppercase tracking-widest text-primary">Interactive Studio Guide {step + 1}/{studioTourSteps.length}</p>
+          <h3 className="mt-1 font-headline text-lg font-black text-on-surface">{current.title}</h3>
+          <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">{current.body}</p>
+        </div>
+      </div>
+      <div className="mt-4 flex items-center justify-between gap-2">
+        <button onClick={onClose} className="rounded-xl px-3 py-2 text-xs font-black uppercase tracking-widest text-on-surface-variant hover:bg-surface-container">Close</button>
+        <div className="flex items-center gap-2">
+          <button disabled={step === 0} onClick={onBack} className="rounded-xl border border-outline-variant/40 bg-surface-container px-3 py-2 text-xs font-black uppercase tracking-widest text-on-surface disabled:opacity-40">Back</button>
+          <button onClick={onNext} className="rounded-xl bg-primary px-4 py-2 text-xs font-black uppercase tracking-widest text-on-primary">{isLast ? 'Finish' : 'Next'}</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2030,40 +2215,49 @@ function FocusedSimulatorOverlay({
       </header>
 
       <main className="pb-36">
-        <div className="mx-auto max-w-4xl px-5 py-10 lg:py-14">
-          <div className="mb-10 text-center">
-            <p className="text-sm font-black uppercase tracking-widest text-on-surface-variant/70">
-              {activeItemIndex + 1}. {activeItem.type} live edit
-            </p>
+        <div className="mx-auto grid max-w-7xl gap-6 px-5 py-8 lg:grid-cols-[280px_1fr] lg:py-12">
+          <FocusedFlowRail
+            activeItem={activeItem}
+            activeItemIndex={activeItemIndex}
+            flowItems={flowItems}
+            onSelect={(item) => onSelectFlowItem(item.id)}
+          />
+
+          <div className="min-w-0">
+            <div className="mb-10 text-center">
+              <p className="text-sm font-black uppercase tracking-widest text-on-surface-variant/70">
+                {activeItemIndex + 1}. {activeItem.type} live edit
+              </p>
+              {isExam ? (
+                <h2 className="mt-3 font-headline text-4xl font-black tracking-tight text-on-surface">Final module exam</h2>
+              ) : (
+                <input
+                  value={activePart.title}
+                  onChange={(event) => updatePartAtIndex(activePartIndex, { title: event.target.value })}
+                  className="mx-auto mt-3 w-full max-w-3xl border-0 bg-transparent p-0 text-center font-headline text-4xl font-black tracking-tight text-on-surface outline-none focus:ring-0"
+                />
+              )}
+            </div>
+
             {isExam ? (
-              <h2 className="mt-3 font-headline text-4xl font-black tracking-tight text-on-surface">Final module exam</h2>
+              <FinalExamLiveEditor
+                questions={draft.finalExam}
+                updateFinalQuestion={updateFinalQuestion}
+                updateFinalOption={updateFinalOption}
+                variant="focus"
+              />
             ) : (
-              <input
-                value={activePart.title}
-                onChange={(event) => updatePartAtIndex(activePartIndex, { title: event.target.value })}
-                className="mx-auto mt-3 w-full max-w-3xl border-0 bg-transparent p-0 text-center font-headline text-4xl font-black tracking-tight text-on-surface outline-none focus:ring-0"
+              <PartLiveEditorCards
+                part={activePart}
+                partIndex={activePartIndex}
+                activeItem={activeItem}
+                updatePartAtIndex={updatePartAtIndex}
+                updateMiniQuestionAtPart={updateMiniQuestionAtPart}
+                updateMiniOptionAtPart={updateMiniOptionAtPart}
+                variant="focus"
               />
             )}
           </div>
-
-          {isExam ? (
-            <FinalExamLiveEditor
-              questions={draft.finalExam}
-              updateFinalQuestion={updateFinalQuestion}
-              updateFinalOption={updateFinalOption}
-              variant="focus"
-            />
-          ) : (
-            <PartLiveEditorCards
-              part={activePart}
-              partIndex={activePartIndex}
-              activeItem={activeItem}
-              updatePartAtIndex={updatePartAtIndex}
-              updateMiniQuestionAtPart={updateMiniQuestionAtPart}
-              updateMiniOptionAtPart={updateMiniOptionAtPart}
-              variant="focus"
-            />
-          )}
         </div>
       </main>
 
@@ -2074,7 +2268,7 @@ function FocusedSimulatorOverlay({
       />
 
       <div className="fixed bottom-6 right-6 z-[90] flex flex-col gap-3">
-        <button onClick={onOpenAI} className="flex h-12 w-12 items-center justify-center rounded-full border border-outline-variant/40 bg-white text-on-surface-variant shadow-lg" title="AI edit helper">
+        <button onClick={onOpenAI} className="flex h-12 w-12 items-center justify-center rounded-full border border-outline-variant/40 bg-surface-container-lowest text-on-surface-variant shadow-lg" title="AI edit helper">
           <Bot size={20} />
         </button>
         <button onClick={onSave} className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-on-primary shadow-xl" title="Save changes">
@@ -2082,6 +2276,67 @@ function FocusedSimulatorOverlay({
         </button>
       </div>
     </div>
+  );
+}
+
+function FocusedFlowRail({
+  activeItem,
+  activeItemIndex,
+  flowItems,
+  onSelect,
+}: {
+  activeItem: FlowItem;
+  activeItemIndex: number;
+  flowItems: FlowItem[];
+  onSelect: (item: FlowItem) => void;
+}) {
+  const nextItem = flowItems[activeItemIndex + 1];
+
+  return (
+    <aside className="lg:sticky lg:top-24 lg:self-start">
+      <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-primary">Student flow</p>
+            <h3 className="font-headline text-lg font-black text-on-surface">What comes next</h3>
+          </div>
+          <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-black text-primary">{activeItemIndex + 1}/{flowItems.length}</span>
+        </div>
+
+        <div className="max-h-[56vh] space-y-2 overflow-y-auto pr-1">
+          {flowItems.map((item, index) => {
+            const isActive = item.id === activeItem.id;
+            const isDone = index < activeItemIndex;
+            return (
+              <button
+                key={item.id}
+                onClick={() => onSelect(item)}
+                className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
+                  isActive
+                    ? 'border-primary bg-primary/10 text-on-surface ring-1 ring-primary/30'
+                    : 'border-outline-variant/30 bg-surface-container hover:border-primary/40'
+                }`}
+              >
+                <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-black ${isDone || isActive ? 'bg-primary text-on-primary' : 'bg-surface-container-lowest text-on-surface-variant'}`}>
+                  {isDone ? <Check size={13} /> : index + 1}
+                </span>
+                <span className="min-w-0">
+                  <span className={`block text-[10px] font-black uppercase tracking-widest ${isActive ? 'text-primary' : 'text-on-surface-variant/50'}`}>{item.type}</span>
+                  <span className="line-clamp-2 text-sm font-extrabold text-on-surface">{item.title}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {nextItem && (
+          <button onClick={() => onSelect(nextItem)} className="mt-4 w-full rounded-xl border border-primary/20 bg-primary/10 p-3 text-left">
+            <p className="text-[10px] font-black uppercase tracking-widest text-primary">Next part</p>
+            <p className="mt-1 line-clamp-2 text-sm font-extrabold text-on-surface">{nextItem.type}: {nextItem.title}</p>
+          </button>
+        )}
+      </div>
+    </aside>
   );
 }
 

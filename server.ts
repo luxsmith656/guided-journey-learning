@@ -40,6 +40,49 @@ function tokenSimilarity(a: string, b: string) {
   return overlap / Math.max(aTokens.size, bTokens.size);
 }
 
+function localRewriteText(text = '', mode = 'proofread') {
+  const replacements: Record<string, string> = {
+    '\\bi\\b': 'I',
+    '\\bteh\\b': 'the',
+    '\\brecieve\\b': 'receive',
+    '\\bseperate\\b': 'separate',
+    '\\bdefinately\\b': 'definitely',
+    '\\bwich\\b': 'which',
+    '\\bwritting\\b': 'writing',
+    '\\bgrammer\\b': 'grammar',
+    '\\bassesment\\b': 'assessment',
+    '\\bintructor\\b': 'instructor',
+    '\\bstudnet\\b': 'student',
+    '\\bmodulee\\b': 'module',
+  };
+  let output = String(text)
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/([,.;:!?])([^\s\n])/g, '$1 $2')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  Object.entries(replacements).forEach(([pattern, replacement]) => {
+    output = output.replace(new RegExp(pattern, 'gi'), replacement);
+  });
+
+  output = output.replace(/(^|[.!?]\s+)([a-z])/g, (_match, prefix, letter) => `${prefix}${letter.toUpperCase()}`);
+
+  if (mode === 'paraphrase') {
+    const sentences = output.split(/(?<=[.!?])\s+/).filter(Boolean);
+    if (sentences.length > 1) {
+      output = sentences.map((sentence, index) => {
+        if (index === 0) return sentence;
+        if (/^(this|these|it|they)\b/i.test(sentence)) return sentence;
+        return sentence;
+      }).join(' ');
+    }
+  }
+
+  return output || text;
+}
+
 type SourceChunk = {
   id: string;
   sourcePage?: number;
@@ -689,7 +732,12 @@ Keep the explanation under 4 short sentences. Pedagogical, warm, no markdown.`;
       res.json({ success: true, text: args.text || text });
     } catch (error: any) {
       console.error('rewrite-text error:', error.message);
-      res.status(500).json({ success: false, error: error.message });
+      res.json({
+        success: true,
+        text: localRewriteText(text, mode),
+        fallback: true,
+        warning: 'AI rewrite service unavailable; local cleanup was applied.',
+      });
     }
   });
 

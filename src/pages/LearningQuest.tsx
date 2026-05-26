@@ -51,6 +51,7 @@ interface QuestProgress {
   mustReread?: boolean;
   weakPartIds?: string[];
   proctorWarnings?: number;
+  proctorWarningReasons?: string[];
   examLockedUntil?: number;
   examStartedAt?: number;
   moduleState?: ModuleLearningState;
@@ -81,6 +82,7 @@ const defaultProgress: QuestProgress = {
   phase: 'intro',
   partScores: {},
   weakPartIds: [],
+  proctorWarningReasons: [],
   moduleState: 'available',
   status: 'in_progress',
 };
@@ -260,6 +262,7 @@ export default function LearningQuest() {
           mustReread: !!normalizedProgress.mustReread,
           weakPartIds: normalizedProgress.weakPartIds || [],
           proctorWarnings: normalizedProgress.proctorWarnings || 0,
+          proctorWarningReasons: normalizedProgress.proctorWarningReasons || [],
           examLockedUntil: normalizedProgress.examLockedUntil || null,
           examStartedAt: normalizedProgress.examStartedAt || null,
           progressPercent: computeProgressPercent(normalizedProgress, parts.length),
@@ -332,6 +335,7 @@ export default function LearningQuest() {
               mustReread: !!data.mustReread,
               weakPartIds: data.weakPartIds || [],
               proctorWarnings: data.proctorWarnings || 0,
+              proctorWarningReasons: data.proctorWarningReasons || [],
               examLockedUntil: data.examLockedUntil || undefined,
               examStartedAt: data.examStartedAt || undefined,
               moduleState: data.moduleState || undefined,
@@ -464,6 +468,7 @@ export default function LearningQuest() {
 
   const registerProctorWarning = async (reason: string) => {
     const nextCount = (progress.proctorWarnings || 0) + 1;
+    const nextReasons = [...(progress.proctorWarningReasons || []), reason];
     if (nextCount >= MAX_PROCTOR_WARNINGS) {
       const lockedUntil = Date.now() + EXAM_LOCK_MINUTES * 60 * 1000;
       setProctorMessage(`Exam paused after ${MAX_PROCTOR_WARNINGS} warnings. You can retry in ${EXAM_LOCK_MINUTES} minutes.`);
@@ -476,6 +481,7 @@ export default function LearningQuest() {
         status: 'in_progress',
         mustReread: true,
         proctorWarnings: nextCount,
+        proctorWarningReasons: nextReasons,
         examLockedUntil: lockedUntil,
         examStartedAt: undefined,
       });
@@ -483,7 +489,7 @@ export default function LearningQuest() {
     }
 
     setProctorMessage(`${reason} Warning ${nextCount}/${MAX_PROCTOR_WARNINGS}. Keep the exam full-screen and active.`);
-    await persistProgress({ ...progress, proctorWarnings: nextCount });
+    await persistProgress({ ...progress, proctorWarnings: nextCount, proctorWarningReasons: nextReasons });
   };
 
   const submitGradeAppeal = async (scope: 'mini_quiz' | 'final_exam') => {
@@ -725,6 +731,7 @@ export default function LearningQuest() {
           answeredCount: finalAnsweredCount,
           weakPartIds,
           proctorWarnings: progress.proctorWarnings || 0,
+          proctorWarningReasons: progress.proctorWarningReasons || [],
           timeSpentSeconds: attemptTimeSeconds,
           startedAtMillis: progress.examStartedAt || sessionStartedAt,
           policySnapshot: attemptPolicy,
@@ -750,6 +757,7 @@ export default function LearningQuest() {
       weakPartIds: score < FINAL_PASSING_SCORE ? weakPartIds : [],
       failedAttempts: score >= FINAL_PASSING_SCORE ? progress.failedAttempts || 0 : (progress.failedAttempts || 0) + 1,
       proctorWarnings: 0,
+      proctorWarningReasons: [],
       examLockedUntil: undefined,
       examStartedAt: undefined,
     });
@@ -796,7 +804,7 @@ export default function LearningQuest() {
     setFinalAnswers({});
     setFinalGrades({});
     if (answerDraftKey) localStorage.removeItem(answerDraftKey);
-    persistProgress({ ...progress, finalScore: undefined, phase: 'read', currentPartIndex: 0, status: 'in_progress', mustReread: true, proctorWarnings: 0, examLockedUntil: undefined, examStartedAt: undefined });
+    persistProgress({ ...progress, finalScore: undefined, phase: 'read', currentPartIndex: 0, status: 'in_progress', mustReread: true, proctorWarnings: 0, proctorWarningReasons: [], examLockedUntil: undefined, examStartedAt: undefined });
   };
 
   const jumpToPart = (index: number) => {
