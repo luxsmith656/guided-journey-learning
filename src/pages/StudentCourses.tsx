@@ -5,13 +5,31 @@ import {
   ArrowRight,
   GraduationCap,
   Library,
-  Map,
+  Map as MapIcon,
   Search,
 } from 'lucide-react';
 import StudentLayout from '../components/StudentLayout';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
-import { JourneyModule, journeySubjects } from '../lib/learningJourney';
+import { JourneyModule } from '../lib/learningJourney';
+
+interface ReviewTopic {
+  id: string;
+  title: string;
+  description: string;
+  categoryId: string;
+}
+
+interface ReviewSubject {
+  id: string;
+  title: string;
+  description: string;
+  levelLabel: string;
+  accent: string;
+  topics: ReviewTopic[];
+}
+
+const subjectAccents = ['bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-violet-500', 'bg-cyan-500'];
 
 const statusLabel: Record<string, string> = {
   locked: 'Locked',
@@ -70,20 +88,84 @@ function moduleProgressState(progress: any, isClassAssigned: boolean) {
   return 'in_progress';
 }
 
+function normalizeCategory(id: string, data: any): ReviewSubject & { raw: any } {
+  return {
+    id,
+    title: data.title || data.name || 'Untitled review track',
+    description: data.description || data.body || 'LET reviewer track configured by the platform.',
+    levelLabel: data.levelLabel || data.trackLabel || data.type || 'LET Review',
+    accent: data.accent || subjectAccents[Math.abs(id.length) % subjectAccents.length],
+    topics: [],
+    raw: data,
+  };
+}
+
+function normalizeTopic(id: string, data: any): ReviewTopic {
+  return {
+    id,
+    title: data.title || data.name || 'Untitled topic',
+    description: data.description || data.body || 'Reviewer topic configured by the platform.',
+    categoryId: data.categoryId || data.subjectId || '',
+  };
+}
+
+function categoryAllowedForStudent(category: ReviewSubject & { raw: any }, user: any) {
+  const track = user?.reviewTrack || '';
+  if (!track) return true;
+  const raw = category.raw || {};
+  const allowedTracks = raw.reviewTracks || raw.trackIds || raw.tracks;
+  if (Array.isArray(allowedTracks) && allowedTracks.length > 0) {
+    return allowedTracks.includes(track) || allowedTracks.includes('all');
+  }
+  if (raw.reviewTrack) return raw.reviewTrack === track || raw.reviewTrack === 'all';
+
+  if (track === 'elementary') {
+    const haystack = `${category.id} ${category.title} ${category.levelLabel}`.toLowerCase();
+    return !haystack.includes('major') && !haystack.includes('specialization') && !haystack.includes('secondary');
+  }
+  return true;
+}
+
 export default function StudentCourses() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const allowedSubjects = useMemo(() => {
-    const track = (user as any)?.reviewTrack;
-    if (track === 'elementary') return journeySubjects.filter((subject) => subject.id !== 'major');
-    return journeySubjects;
-  }, [user]);
-  const [selectedSubjectId, setSelectedSubjectId] = useState(allowedSubjects[0]?.id || journeySubjects[0].id);
-  const [selectedTopicId, setSelectedTopicId] = useState(allowedSubjects[0]?.topics[0]?.id || journeySubjects[0].topics[0].id);
+  const [selectedSubjectId, setSelectedSubjectId] = useState('');
+  const [selectedTopicId, setSelectedTopicId] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [publishedModules, setPublishedModules] = useState<JourneyModule[]>([]);
   const [progressByModule, setProgressByModule] = useState<Record<string, any>>({});
   const [classData, setClassData] = useState<any>(null);
+  const [categories, setCategories] = useState<(ReviewSubject & { raw: any })[]>([]);
+  const [topics, setTopics] = useState<ReviewTopic[]>([]);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'categories'), (snapshot) => {
+      const rows = snapshot.docs
+        .map((categoryDoc) => normalizeCategory(categoryDoc.id, categoryDoc.data()))
+        .filter((category) => category.raw.isPublished !== false)
+        .sort((a, b) => a.title.localeCompare(b.title));
+      setCategories(rows);
+    }, (error) => {
+      console.warn('Unable to load review tracks', error);
+      setCategories([]);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'topics'), (snapshot) => {
+      const rows = snapshot.docs
+        .map((topicDoc) => ({ topic: normalizeTopic(topicDoc.id, topicDoc.data()), raw: topicDoc.data() }))
+        .filter((row) => row.raw.isPublished !== false)
+        .map((row) => row.topic)
+        .sort((a, b) => a.title.localeCompare(b.title));
+      setTopics(rows);
+    }, (error) => {
+      console.warn('Unable to load review topics', error);
+      setTopics([]);
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     const modulesQuery = query(collection(db, 'modules'), where('isPublished', '==', true));
@@ -126,16 +208,6 @@ export default function StudentCourses() {
     return () => unsubscribe();
   }, [user?.activeClassId]);
 
-  useEffect(() => {
-    if (!allowedSubjects.some((subject) => subject.id === selectedSubjectId)) {
-      const nextSubject = allowedSubjects[0] || journeySubjects[0];
-      setSelectedSubjectId(nextSubject.id);
-      setSelectedTopicId(nextSubject.topics[0]?.id || '');
-    }
-  }, [allowedSubjects, selectedSubjectId]);
-
-  const selectedSubject = allowedSubjects.find((subject) => subject.id === selectedSubjectId) || allowedSubjects[0] || journeySubjects[0];
-  const selectedTopic = selectedSubject.topics.find((topic) => topic.id === selectedTopicId) || selectedSubject.topics[0];
   const assignedModuleIds = useMemo(() => new Set<string>(classData?.assignedModuleIds || []), [classData]);
 
   const visibleModules = useMemo(() => publishedModules
@@ -160,9 +232,60 @@ export default function StudentCourses() {
   }), [visibleModules, progressByModule, user?.activeClassId, assignedModuleIds]);
 
   const publicReviewers = useMemo(() => visibleModules.filter((module) => !module.publishScope || module.publishScope === 'public'), [visibleModules]);
-  const selectedPublicModules = publicReviewers.filter((module) => module.subjectId === selectedSubject.id && module.topicId === selectedTopic.id);
+
+  const allowedSubjects = useMemo<ReviewSubject[]>(() => {
+    return categories
+      .filter((category) => categoryAllowedForStudent(category, user))
+      .map((category) => {
+        const topicMap = new Map<string, ReviewTopic>();
+        topics
+          .filter((topic) => topic.categoryId === category.id)
+          .forEach((topic) => topicMap.set(topic.id, topic));
+
+        publicReviewers
+          .filter((module) => module.subjectId === category.id)
+          .forEach((module) => {
+            if (!module.topicId || topicMap.has(module.topicId)) return;
+            topicMap.set(module.topicId, {
+              id: module.topicId,
+              title: 'Uncategorized reviewer topic',
+              description: 'Published modules exist for this topic, but the topic record still needs review metadata.',
+              categoryId: category.id,
+            });
+          });
+
+        return {
+          id: category.id,
+          title: category.title,
+          description: category.description,
+          levelLabel: category.levelLabel,
+          accent: category.accent,
+          topics: [...topicMap.values()],
+        };
+      })
+      .filter((subject) => subject.topics.length > 0 || publicReviewers.some((module) => module.subjectId === subject.id));
+  }, [categories, topics, publicReviewers, user]);
+
+  useEffect(() => {
+    if (allowedSubjects.length === 0) {
+      setSelectedSubjectId('');
+      setSelectedTopicId('');
+      return;
+    }
+    const nextSubject = allowedSubjects.find((subject) => subject.id === selectedSubjectId) || allowedSubjects[0];
+    const nextTopic = nextSubject.topics.find((topic) => topic.id === selectedTopicId) || nextSubject.topics[0];
+    if (nextSubject.id !== selectedSubjectId) setSelectedSubjectId(nextSubject.id);
+    if ((nextTopic?.id || '') !== selectedTopicId) setSelectedTopicId(nextTopic?.id || '');
+  }, [allowedSubjects, selectedSubjectId, selectedTopicId]);
+
+  const selectedSubject = allowedSubjects.find((subject) => subject.id === selectedSubjectId) || allowedSubjects[0] || null;
+  const selectedTopic = selectedSubject?.topics.find((topic) => topic.id === selectedTopicId) || selectedSubject?.topics[0] || null;
+  const selectedPublicModules = selectedSubject && selectedTopic
+    ? publicReviewers.filter((module) => module.subjectId === selectedSubject.id && module.topicId === selectedTopic.id)
+    : [];
   const filteredTopics = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
+    if (!selectedSubject) return [];
     if (!term) return selectedSubject.topics;
     return selectedSubject.topics.filter((topic) => {
       const modules = publicReviewers.filter((module) => module.topicId === topic.id);
@@ -205,7 +328,7 @@ export default function StudentCourses() {
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
             <div className="max-w-2xl">
               <div className="flex items-center gap-2 text-primary text-xs font-black uppercase tracking-widest mb-2">
-                <Map size={16} />
+                <MapIcon size={16} />
                 LET review center
               </div>
               <h1 className="text-2xl md:text-3xl font-extrabold font-headline text-on-surface tracking-tight">
@@ -224,6 +347,15 @@ export default function StudentCourses() {
           </div>
         </section>
 
+        {!selectedSubject || !selectedTopic ? (
+          <section className="bg-surface-container-lowest border border-dashed border-outline-variant rounded-2xl p-8 text-center">
+            <GraduationCap className="mx-auto text-on-surface-variant/30 mb-4" size={40} />
+            <h2 className="font-headline text-xl font-extrabold text-on-surface">No review tracks configured yet.</h2>
+            <p className="mt-2 text-sm text-on-surface-variant">
+              Public reviewers now use Firestore review tracks and topics only. Add published categories and topics in the database to make this page appear.
+            </p>
+          </section>
+        ) : (
         <section className="grid grid-cols-1 xl:grid-cols-[320px_1fr] gap-6">
           <aside className="space-y-4">
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-sm">
@@ -241,7 +373,7 @@ export default function StudentCourses() {
                       key={subject.id}
                       onClick={() => {
                         setSelectedSubjectId(subject.id);
-                        setSelectedTopicId(subject.topics[0].id);
+                        setSelectedTopicId(subject.topics[0]?.id || '');
                       }}
                       className={`w-full text-left rounded-xl border p-4 transition-all ${isSelected ? 'border-primary bg-primary/10 text-primary' : 'border-outline-variant/30 bg-surface-container/30 text-on-surface hover:border-primary/40'}`}
                     >
@@ -363,6 +495,7 @@ export default function StudentCourses() {
             </section>
           </main>
         </section>
+        )}
       </div>
     </StudentLayout>
   );
