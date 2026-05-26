@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Bot,
@@ -32,6 +32,7 @@ import {
   Tablet,
   Target,
   Trash2,
+  Trophy,
   Wand2,
   X,
 } from 'lucide-react';
@@ -651,21 +652,17 @@ export default function InstructorModules() {
       return;
     }
     setTourStep(nextStep);
-    if (nextStep === 1) {
+    if (nextStep >= 2 && nextStep <= 8) {
       setBuilderMode('preview');
       setModuleRailCollapsed(true);
     }
-    if (nextStep === 2) {
-      setBuilderMode('edit');
-      setActiveStep('parts');
-    }
-    if (nextStep === 3) {
-      setBuilderMode('preview');
+    if (nextStep === 9) {
       setAiOpen(true);
     }
-    if (nextStep === 4) {
+    if (nextStep >= 10) {
       setBuilderMode('edit');
       setActiveStep('publish');
+      setAiOpen(false);
     }
   };
 
@@ -1058,7 +1055,7 @@ export default function InstructorModules() {
   return (
     <DashboardLayout title="Instructor Studio">
       <div className="p-4 md:p-8 max-w-[1600px] mx-auto w-full text-on-surface space-y-6">
-        <section className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 md:p-6 shadow-sm">
+        <section data-tour="studio-overview" className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 md:p-6 shadow-sm">
           <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-5">
             <div className="max-w-3xl">
               <p className="text-xs font-black uppercase tracking-widest text-primary mb-2">Instructor Studio</p>
@@ -1105,7 +1102,7 @@ export default function InstructorModules() {
                 </div>
               </div>
             ) : (
-              <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-sm">
+              <div data-tour="module-rail" className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="font-headline font-extrabold text-lg">Modules</h2>
                   <div className="flex items-center gap-2">
@@ -1180,7 +1177,7 @@ export default function InstructorModules() {
             )}
           </aside>
 
-          <main className="bg-surface-container-lowest border border-outline-variant rounded-2xl shadow-sm overflow-hidden">
+          <main data-tour="studio-workspace" className="bg-surface-container-lowest border border-outline-variant rounded-2xl shadow-sm overflow-hidden">
             <div className="border-b border-outline-variant p-4 space-y-4">
               <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-4">
                 <div>
@@ -1193,6 +1190,7 @@ export default function InstructorModules() {
                     Guide
                   </button>
                   <button
+                    data-tour="student-view-toggle"
                     onClick={() => setBuilderMode('preview')}
                     className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 font-bold text-sm border transition-colors ${
                       builderMode === 'preview' ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container text-on-surface border-outline-variant/40'
@@ -1205,7 +1203,7 @@ export default function InstructorModules() {
                     <Copy size={16} />
                     Duplicate
                   </button>
-                  <button onClick={saveModule} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-on-primary px-4 py-2.5 font-bold text-sm shadow-sm">
+                  <button data-tour="save-module-button" onClick={saveModule} className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-on-primary px-4 py-2.5 font-bold text-sm shadow-sm">
                     <Save size={16} />
                     Save
                   </button>
@@ -1215,7 +1213,7 @@ export default function InstructorModules() {
                   </button>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div data-tour="builder-tabs" className="flex flex-wrap gap-2">
                 {builderSteps.map((step, index) => (
                   <button
                     key={step.id}
@@ -1244,6 +1242,7 @@ export default function InstructorModules() {
                   resetFlowOrder={resetFlowOrder}
                   onSave={saveModule}
                   onOpenAI={() => setAiOpen(true)}
+                  tourStep={tourStep}
                 />
               )}
 
@@ -1349,26 +1348,73 @@ const studioTourSteps = [
     icon: ClipboardList,
     title: 'Practice draft created',
     body: 'The guide starts with a safe unpublished module so you can learn the Studio without touching a real class module.',
-  },
-  {
-    icon: Eye,
-    title: 'Student flow first',
-    body: 'This view shows the order students will actually experience: textbook, lesson, quiz, activity, and final exam.',
+    target: 'studio-overview',
   },
   {
     icon: Layers3,
-    title: 'Live edit each part',
-    body: 'Edit objectives, reading chunks, lesson text, mini quizzes, and activities while keeping the learner path visible.',
+    title: 'Module library',
+    body: 'This rail is where instructors pick an existing module, filter drafts or published modules, and create a blank module.',
+    target: 'module-rail',
+  },
+  {
+    icon: Eye,
+    title: 'Student view first',
+    body: 'Student view is the default authoring surface. It keeps the lesson flow and live simulator connected while you edit.',
+    target: 'student-preview',
+  },
+  {
+    icon: GripVertical,
+    title: 'Drag the learning flow',
+    body: 'The focused workspace opens now. Drag these real flow cards to reorder what learners see: textbook, lesson, quiz, activity, and final exam.',
+    target: 'focused-flow-rail',
+  },
+  {
+    icon: Settings2,
+    title: 'Change a selected card',
+    body: 'Click a card like Mini Quiz and its own menu appears. Change it to text content, lesson, activity, final exam, or remove it from the flow.',
+    target: 'flow-card-type-menu',
+  },
+  {
+    icon: BookOpen,
+    title: 'Edit textbook content',
+    body: 'This card edits the actual student-facing title, reading text, read time, and video or Canva link for the selected part.',
+    target: 'text-content-card',
+  },
+  {
+    icon: FileQuestion,
+    title: 'Edit the mini quiz',
+    body: 'Mini quizzes live beside the reading part. Edit the stem, answer choices, key terms, and feedback without leaving the focused workspace.',
+    target: 'mini-quiz-card',
+  },
+  {
+    icon: FileQuestion,
+    title: 'Switch question type',
+    body: 'The guide changes this mini quiz to an essay once, then highlights the question type menu. Instructors can choose multiple choice, true/false, enumeration, short answer, or essay.',
+    target: 'question-type-select',
+  },
+  {
+    icon: Trophy,
+    title: 'Final exam editor',
+    body: 'Final exam questions are edited with the same controls, but they gate completion and should cover the whole module.',
+    target: 'final-exam-card',
   },
   {
     icon: Bot,
-    title: 'Ask the AI helper',
-    body: 'Use the chat to proofread, paraphrase, fix grammar, upload old modules, or draft a course. It never publishes without you.',
+    title: 'AI helper chat',
+    body: 'The helper can proofread, paraphrase, fix grammar, upload old modules, and draft course sections. It proposes; the instructor approves.',
+    target: 'ai-helper-panel',
+  },
+  {
+    icon: CheckCircle2,
+    title: 'Publish with rules',
+    body: 'Pick public or class release, due dates, attempt rules, certificate settings, and save only when the module is ready.',
+    target: 'publish-settings',
   },
   {
     icon: Save,
-    title: 'Publish with rules',
-    body: 'Pick public or class release, due dates, attempt rules, certificate settings, and save only when the module is ready.',
+    title: 'Save changes',
+    body: 'Saving stores the editable draft or published update. The module remains instructor-controlled until it is explicitly published.',
+    target: 'save-module-button',
   },
 ] as const;
 
@@ -1386,9 +1432,71 @@ function StudioTourOverlay({
   const current = studioTourSteps[step] || studioTourSteps[0];
   const Icon = current.icon;
   const isLast = step >= studioTourSteps.length - 1;
+  const [rect, setRect] = useState<DOMRect | null>(null);
+
+  useEffect(() => {
+    let frame = 0;
+    let timeout = 0;
+    let retries = 0;
+    const measure = () => {
+      const element = document.querySelector(`[data-tour="${current.target}"]`) as HTMLElement | null;
+      if (!element) {
+        if (retries < 8) {
+          retries += 1;
+          timeout = window.setTimeout(measure, 140);
+          return;
+        }
+        setRect(null);
+        return;
+      }
+      element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+      timeout = window.setTimeout(() => {
+        frame = window.requestAnimationFrame(() => setRect(element.getBoundingClientRect()));
+      }, 260);
+    };
+    measure();
+    const handleUpdate = () => {
+      const element = document.querySelector(`[data-tour="${current.target}"]`) as HTMLElement | null;
+      setRect(element ? element.getBoundingClientRect() : null);
+    };
+    window.addEventListener('resize', handleUpdate);
+    window.addEventListener('scroll', handleUpdate, true);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timeout);
+      window.removeEventListener('resize', handleUpdate);
+      window.removeEventListener('scroll', handleUpdate, true);
+    };
+  }, [current.target]);
+
+  const highlight = rect
+    ? {
+        left: Math.max(8, rect.left - 8),
+        top: Math.max(8, rect.top - 8),
+        width: Math.min(window.innerWidth - 16, rect.width + 16),
+        height: Math.min(window.innerHeight - 16, rect.height + 16),
+      }
+    : null;
+  const cardWidth = 380;
+  const cardTop = rect
+    ? (rect.bottom + 18 + 250 < window.innerHeight ? rect.bottom + 18 : Math.max(20, rect.top - 270))
+    : undefined;
+  const cardLeft = rect
+    ? Math.min(window.innerWidth - cardWidth - 20, Math.max(20, rect.left))
+    : undefined;
 
   return (
-    <div className="fixed bottom-6 left-6 z-[95] w-[min(380px,calc(100vw-2rem))] rounded-2xl border border-outline-variant bg-surface-container-lowest p-4 shadow-2xl">
+    <>
+      {highlight && (
+        <div
+          className="pointer-events-none fixed z-[94] rounded-2xl border-2 border-primary bg-transparent shadow-[0_0_0_9999px_rgba(2,6,23,0.62),0_18px_50px_rgba(15,23,42,0.35)]"
+          style={highlight}
+        />
+      )}
+      <div
+        className="fixed z-[95] w-[min(380px,calc(100vw-2rem))] rounded-2xl border border-outline-variant bg-surface-container-lowest p-4 shadow-2xl"
+        style={rect ? { top: cardTop, left: cardLeft } : { bottom: 24, left: 24 }}
+      >
       <div className="flex items-start gap-3">
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
           <Icon size={20} />
@@ -1406,7 +1514,8 @@ function StudioTourOverlay({
           <button onClick={onNext} className="rounded-xl bg-primary px-4 py-2 text-xs font-black uppercase tracking-widest text-on-primary">{isLast ? 'Finish' : 'Next'}</button>
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -1462,6 +1571,7 @@ function ModuleStudentPreview({
   resetFlowOrder,
   onSave,
   onOpenAI,
+  tourStep,
 }: {
   draft: BuilderModule;
   updateDraft: (field: keyof BuilderModule, value: any) => void;
@@ -1474,12 +1584,14 @@ function ModuleStudentPreview({
   resetFlowOrder: () => void;
   onSave: () => void;
   onOpenAI: () => void;
+  tourStep: number | null;
 }) {
   const [dragFlowIndex, setDragFlowIndex] = useState<number | null>(null);
   const [activeFlowItemId, setActiveFlowItemId] = useState(draft.flowItems[0]?.id || '');
   const [device, setDevice] = useState<SimulatorDevice>('laptop');
   const [showSimulator, setShowSimulator] = useState(true);
   const [isFocusOpen, setIsFocusOpen] = useState(false);
+  const appliedTourSteps = useRef(new Set<number>());
 
   useEffect(() => {
     if (!draft.flowItems.length) return;
@@ -1493,6 +1605,34 @@ function ModuleStudentPreview({
   const resolvedPartIndex = activeItem?.refId === 'finalExam' ? -1 : draft.parts.findIndex((part) => part.id === activeItem?.refId);
   const activePartIndex = resolvedPartIndex >= 0 ? resolvedPartIndex : 0;
   const activePart = draft.parts[activePartIndex] || blankPart(0);
+
+  useEffect(() => {
+    if (tourStep == null) return;
+    if (tourStep >= 3 && tourStep <= 8) setIsFocusOpen(true);
+    if (tourStep >= 9) setIsFocusOpen(false);
+    if (tourStep === 4 || tourStep === 5) {
+      const textbook = draft.flowItems.find((item) => item.type === 'textbook');
+      if (textbook) setActiveFlowItemId(textbook.id);
+    }
+    if (tourStep === 6 || tourStep === 7) {
+      const quiz = draft.flowItems.find((item) => item.type === 'quiz');
+      if (quiz) setActiveFlowItemId(quiz.id);
+    }
+    if (tourStep === 8) {
+      const exam = draft.flowItems.find((item) => item.type === 'exam');
+      if (exam) setActiveFlowItemId(exam.id);
+    }
+    if (tourStep === 7 && !appliedTourSteps.current.has(tourStep)) {
+      appliedTourSteps.current.add(tourStep);
+      const quiz = draft.flowItems.find((item) => item.type === 'quiz');
+      const quizPartIndex = Math.max(0, draft.parts.findIndex((part) => part.id === quiz?.refId));
+      const quizPart = draft.parts[quizPartIndex];
+      const question = quizPart?.miniQuiz?.[0];
+      if (question && question.type !== 'essay') {
+        updateMiniQuestionAtPart(quizPartIndex, patchForQuestionType(question, 'essay'));
+      }
+    }
+  }, [draft.flowItems, draft.parts, tourStep, updateMiniQuestionAtPart]);
 
   const updatePartForFlowType = (partIndex: number, type: FlowItem['type']) => {
     if (type === 'exam') return;
@@ -1511,38 +1651,23 @@ function ModuleStudentPreview({
     if (Object.keys(patch).length) updatePartAtIndex(partIndex, patch);
   };
 
-  const insertFlowItem = (type: Exclude<FlowItem['type'], 'exam'>) => {
-    const targetPartIndex = activeItem?.refId === 'finalExam' ? activePartIndex : Math.max(0, draft.parts.findIndex((part) => part.id === activeItem?.refId));
+  const changeActiveFlowType = (type: FlowItem['type']) => {
+    if (!activeItem) return;
+    const targetPartIndex = activeItem.refId === 'finalExam' ? activePartIndex : Math.max(0, draft.parts.findIndex((part) => part.id === activeItem.refId));
     const targetPart = draft.parts[targetPartIndex] || activePart;
-    if (!targetPart) return;
-    updatePartForFlowType(targetPartIndex, type);
-    const newItem: FlowItem = {
-      id: `${targetPart.id}-${type}-${Date.now()}`,
-      type,
-      refId: targetPart.id,
-      title: getFlowTitle(type, targetPart, targetPartIndex),
-    };
-    const insertAt = activeItem?.type === 'exam'
-      ? activeFlowIndex
-      : activeFlowIndex >= 0
-        ? activeFlowIndex + 1
-        : draft.flowItems.length;
-    const nextFlow = [...draft.flowItems];
-    nextFlow.splice(insertAt, 0, newItem);
+    if (type !== 'exam') updatePartForFlowType(targetPartIndex, type);
+    const nextFlow = draft.flowItems
+      .filter((item) => type !== 'exam' || item.type !== 'exam' || item.id === activeItem.id)
+      .map((item) => item.id === activeItem.id ? {
+        ...item,
+        type,
+        refId: type === 'exam' ? 'finalExam' : targetPart.id,
+        title: getFlowTitle(type, targetPart, targetPartIndex, draft.finalExam.length || 1),
+      } : item);
+    if (!nextFlow.some((item) => item.type === 'exam')) {
+      nextFlow.push({ id: 'final-exam', type: 'exam', refId: 'finalExam', title: getFlowTitle('exam', targetPart, targetPartIndex, draft.finalExam.length || 1) });
+    }
     updateDraft('flowItems', nextFlow);
-    setActiveFlowItemId(newItem.id);
-  };
-
-  const changeActiveFlowType = (type: Exclude<FlowItem['type'], 'exam'>) => {
-    if (!activeItem || activeItem.type === 'exam') return;
-    const targetPartIndex = Math.max(0, draft.parts.findIndex((part) => part.id === activeItem.refId));
-    const targetPart = draft.parts[targetPartIndex] || activePart;
-    updatePartForFlowType(targetPartIndex, type);
-    updateDraft('flowItems', draft.flowItems.map((item) => item.id === activeItem.id ? {
-      ...item,
-      type,
-      title: getFlowTitle(type, targetPart, targetPartIndex),
-    } : item));
   };
 
   const removeFlowItem = (itemId: string) => {
@@ -1552,19 +1677,6 @@ function ModuleStudentPreview({
     const nextFlow = draft.flowItems.filter((flowItem) => flowItem.id !== itemId);
     updateDraft('flowItems', nextFlow);
     setActiveFlowItemId(nextFlow[Math.max(0, itemIndex - 1)]?.id || nextFlow[0]?.id || '');
-  };
-
-  const addFocusedPart = () => {
-    const nextPart = blankPart(draft.parts.length);
-    const nextParts = [...draft.parts, nextPart];
-    const nextFlow = [
-      ...draft.flowItems.filter((item) => item.type !== 'exam'),
-      ...buildDefaultFlow([nextPart], []).filter((item) => item.type !== 'exam'),
-      { id: 'final-exam', type: 'exam' as const, refId: 'finalExam', title: getFlowTitle('exam', nextPart, nextParts.length - 1, draft.finalExam.length || 1) },
-    ];
-    updateDraft('parts', nextParts);
-    updateDraft('flowItems', nextFlow);
-    setActiveFlowItemId(`${nextPart.id}-textbook`);
   };
 
   if (!draft.flowItems.length) {
@@ -1577,7 +1689,7 @@ function ModuleStudentPreview({
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm">
+    <div data-tour="student-preview" className="overflow-hidden rounded-2xl border border-outline-variant/40 bg-surface-container-lowest shadow-sm">
       <div className="flex flex-col gap-3 border-b border-outline-variant/40 bg-surface-container-lowest p-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-[10px] font-black uppercase tracking-widest text-primary">Live editor + student simulator</p>
@@ -1731,10 +1843,8 @@ function ModuleStudentPreview({
           onClose={() => setIsFocusOpen(false)}
           onSelectFlowItem={setActiveFlowItemId}
           onReorderFlowItem={reorderFlowItem}
-          onInsertFlowItem={insertFlowItem}
           onChangeFlowItemType={changeActiveFlowType}
           onRemoveFlowItem={removeFlowItem}
-          onAddPart={addFocusedPart}
           onSave={onSave}
           onOpenAI={onOpenAI}
           updateDraft={updateDraft}
@@ -1866,6 +1976,7 @@ function PartLiveEditorCards({
         icon={<Target size={17} className="text-primary" />}
         title="Learning Objective"
         className={cardTone}
+        tourId="objective-card"
       >
         <textarea
           value={part.objective}
@@ -1880,6 +1991,7 @@ function PartLiveEditorCards({
         title="Text Content"
         meta={activeItem.type === 'textbook' || activeItem.type === 'lesson' ? 'Editing current flow item' : undefined}
         className={cardTone}
+        tourId="text-content-card"
       >
         <input
           value={part.title}
@@ -1938,6 +2050,7 @@ function PartLiveEditorCards({
         title="Mini Quiz"
         meta={question.type?.replace('_', ' ') || 'multiple choice'}
         className={cardTone}
+        tourId="mini-quiz-card"
       >
         <QuestionLiveEditor
           question={question}
@@ -1954,16 +2067,18 @@ function LiveEditorCard({
   title,
   meta,
   className = 'rounded-2xl',
+  tourId,
   children,
 }: {
   icon: React.ReactNode;
   title: string;
   meta?: string;
   className?: string;
+  tourId?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className={`${className} overflow-hidden border border-outline-variant/40 bg-surface-container-lowest shadow-sm`}>
+    <section data-tour={tourId} className={`${className} overflow-hidden border border-outline-variant/40 bg-surface-container-lowest shadow-sm`}>
       <div className="flex items-center justify-between gap-3 border-b border-outline-variant/30 bg-surface-container/40 px-5 py-4">
         <h4 className="flex items-center gap-2 text-sm font-extrabold text-on-surface">
           {icon}
@@ -1995,6 +2110,7 @@ function QuestionLiveEditor({
       <label className="block">
         <span className="text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Question type</span>
         <select
+          data-tour="question-type-select"
           value={questionType}
           onChange={(event) => onQuestion(patchForQuestionType(question, event.target.value as JourneyQuestion['type']))}
           className="mt-2 w-full rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 text-sm font-bold text-on-surface outline-none focus:border-primary/40"
@@ -2102,6 +2218,7 @@ function FinalExamLiveEditor({
           title={`Final exam question ${questionIndex + 1}`}
           meta={question.difficulty || 'medium'}
           className={variant === 'focus' ? 'rounded-xl' : 'rounded-2xl'}
+          tourId={questionIndex === 0 ? 'final-exam-card' : undefined}
         >
           <QuestionLiveEditor
             question={question}
@@ -2317,10 +2434,8 @@ function FocusedSimulatorOverlay({
   onClose,
   onSelectFlowItem,
   onReorderFlowItem,
-  onInsertFlowItem,
   onChangeFlowItemType,
   onRemoveFlowItem,
-  onAddPart,
   onSave,
   onOpenAI,
   updateDraft,
@@ -2339,10 +2454,8 @@ function FocusedSimulatorOverlay({
   onClose: () => void;
   onSelectFlowItem: (id: string) => void;
   onReorderFlowItem: (fromIndex: number, toIndex: number) => void;
-  onInsertFlowItem: (type: Exclude<FlowItem['type'], 'exam'>) => void;
-  onChangeFlowItemType: (type: Exclude<FlowItem['type'], 'exam'>) => void;
+  onChangeFlowItemType: (type: FlowItem['type']) => void;
   onRemoveFlowItem: (id: string) => void;
-  onAddPart: () => void;
   onSave: () => void;
   onOpenAI: () => void;
   updateDraft: (field: keyof BuilderModule, value: any) => void;
@@ -2379,7 +2492,7 @@ function FocusedSimulatorOverlay({
             <Eye size={16} />
             Split view
           </button>
-          <button onClick={onSave} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-on-primary shadow-sm">
+          <button data-tour="save-module-button" onClick={onSave} className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-bold text-on-primary shadow-sm">
             <Save size={16} />
             Save changes
           </button>
@@ -2394,10 +2507,8 @@ function FocusedSimulatorOverlay({
             flowItems={flowItems}
             onSelect={(item) => onSelectFlowItem(item.id)}
             onReorder={onReorderFlowItem}
-            onInsert={onInsertFlowItem}
             onChangeType={onChangeFlowItemType}
             onRemove={onRemoveFlowItem}
-            onAddPart={onAddPart}
           />
 
           <div className="min-w-0">
@@ -2439,7 +2550,7 @@ function FocusedSimulatorOverlay({
       </main>
 
       <div className="fixed bottom-6 right-6 z-[90] flex flex-col gap-3">
-        <button onClick={onOpenAI} className="flex h-12 w-12 items-center justify-center rounded-full border border-outline-variant/40 bg-surface-container-lowest text-on-surface-variant shadow-lg" title="AI edit helper">
+        <button data-tour="ai-helper-button" onClick={onOpenAI} className="flex h-12 w-12 items-center justify-center rounded-full border border-outline-variant/40 bg-surface-container-lowest text-on-surface-variant shadow-lg" title="AI edit helper">
           <Bot size={20} />
         </button>
         <button onClick={onSave} className="flex h-14 w-14 items-center justify-center rounded-full bg-primary text-on-primary shadow-xl" title="Save changes">
@@ -2456,28 +2567,24 @@ function FocusedFlowRail({
   flowItems,
   onSelect,
   onReorder,
-  onInsert,
   onChangeType,
   onRemove,
-  onAddPart,
 }: {
   activeItem: FlowItem;
   activeItemIndex: number;
   flowItems: FlowItem[];
   onSelect: (item: FlowItem) => void;
   onReorder: (fromIndex: number, toIndex: number) => void;
-  onInsert: (type: Exclude<FlowItem['type'], 'exam'>) => void;
-  onChangeType: (type: Exclude<FlowItem['type'], 'exam'>) => void;
+  onChangeType: (type: FlowItem['type']) => void;
   onRemove: (id: string) => void;
-  onAddPart: () => void;
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const nextItem = flowItems[activeItemIndex + 1];
-  const editableTypes: Exclude<FlowItem['type'], 'exam'>[] = ['textbook', 'lesson', 'quiz', 'activity'];
+  const editableTypes: FlowItem['type'][] = ['textbook', 'lesson', 'quiz', 'activity', 'exam'];
 
   return (
     <aside className="lg:sticky lg:top-24 lg:self-start">
-      <div className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
+      <div data-tour="focused-flow-rail" className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-4 shadow-sm">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
             <p className="text-[10px] font-black uppercase tracking-widest text-primary">Student flow</p>
@@ -2486,49 +2593,14 @@ function FocusedFlowRail({
           <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-black text-primary">{activeItemIndex + 1}/{flowItems.length}</span>
         </div>
 
-        <div className="mb-4 rounded-xl border border-outline-variant/30 bg-surface-container p-3">
-          <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Edit selected step</p>
-          <select
-            value={activeItem.type === 'exam' ? 'exam' : activeItem.type}
-            disabled={activeItem.type === 'exam'}
-            onChange={(event) => onChangeType(event.target.value as Exclude<FlowItem['type'], 'exam'>)}
-            className="mt-2 w-full rounded-xl border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-xs font-black uppercase tracking-widest text-on-surface outline-none disabled:opacity-60"
-          >
-            {activeItem.type === 'exam' && <option value="exam">Final exam</option>}
-            {editableTypes.map((type) => <option key={type} value={type}>{type}</option>)}
-          </select>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            {editableTypes.map((type) => (
-              <button
-                key={type}
-                onClick={() => onInsert(type)}
-                className="rounded-lg bg-primary/10 px-2 py-2 text-[10px] font-black uppercase tracking-widest text-primary"
-              >
-                + {type}
-              </button>
-            ))}
-          </div>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <button onClick={onAddPart} className="rounded-lg bg-surface-container-lowest px-2 py-2 text-[10px] font-black uppercase tracking-widest text-on-surface">+ Part</button>
-            <button
-              disabled={activeItem.type === 'exam'}
-              onClick={() => onRemove(activeItem.id)}
-              className="rounded-lg bg-error/10 px-2 py-2 text-[10px] font-black uppercase tracking-widest text-error disabled:opacity-40"
-            >
-              Remove
-            </button>
-          </div>
-        </div>
-
         <div className="space-y-2 pr-1">
           {flowItems.map((item, index) => {
             const isActive = item.id === activeItem.id;
             const isDone = index < activeItemIndex;
             return (
-              <button
+              <div
                 key={item.id}
                 draggable
-                onClick={() => onSelect(item)}
                 onDragStart={() => setDragIndex(index)}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={() => {
@@ -2536,20 +2608,43 @@ function FocusedFlowRail({
                   setDragIndex(null);
                   onSelect(item);
                 }}
-                className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
+                data-tour={isActive ? 'flow-card-active' : undefined}
+                className={`rounded-xl border transition-colors ${
                   isActive
                     ? 'border-primary bg-primary/10 text-on-surface ring-1 ring-primary/30'
                     : 'border-outline-variant/30 bg-surface-container hover:border-primary/40'
                 }`}
               >
-                <GripVertical size={15} className={isActive ? 'mt-1 shrink-0 text-primary' : 'mt-1 shrink-0 text-on-surface-variant/40'} />
-                <span className="min-w-0">
-                  <span className={`block text-[10px] font-black uppercase tracking-widest ${isActive ? 'text-primary' : 'text-on-surface-variant/50'}`}>
-                    {isDone ? 'Done' : index + 1}. {item.type}
+                <button onClick={() => onSelect(item)} className="flex w-full items-start gap-3 p-3 text-left">
+                  <GripVertical size={15} className={isActive ? 'mt-1 shrink-0 text-primary' : 'mt-1 shrink-0 text-on-surface-variant/40'} />
+                  <span className="min-w-0">
+                    <span className={`block text-[10px] font-black uppercase tracking-widest ${isActive ? 'text-primary' : 'text-on-surface-variant/50'}`}>
+                      {isDone ? 'Done' : index + 1}. {item.type}
+                    </span>
+                    <span className="line-clamp-2 text-sm font-extrabold text-on-surface">{item.title}</span>
                   </span>
-                  <span className="line-clamp-2 text-sm font-extrabold text-on-surface">{item.title}</span>
-                </span>
-              </button>
+                </button>
+                {isActive && (
+                  <div className="border-t border-primary/20 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Change this card</p>
+                    <select
+                      data-tour="flow-card-type-menu"
+                      value={item.type}
+                      onChange={(event) => onChangeType(event.target.value as FlowItem['type'])}
+                      className="mt-2 w-full rounded-xl border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-xs font-black uppercase tracking-widest text-on-surface outline-none"
+                    >
+                      {editableTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                    </select>
+                    <button
+                      disabled={item.type === 'exam'}
+                      onClick={() => onRemove(item.id)}
+                      className="mt-2 w-full rounded-lg bg-error/10 px-2 py-2 text-[10px] font-black uppercase tracking-widest text-error disabled:opacity-40"
+                    >
+                      Remove this card
+                    </button>
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
@@ -2705,7 +2800,7 @@ function FloatingAIHelper({
       style={isOpen ? { transform: `translate(${offset.x}px, ${offset.y}px)` } : undefined}
     >
       {isOpen && (
-        <div className="mb-3 flex h-[min(620px,calc(100vh-8rem))] w-[min(390px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-2xl">
+        <div data-tour="ai-helper-panel" className="mb-3 flex h-[min(620px,calc(100vh-8rem))] w-[min(390px,calc(100vw-2.5rem))] flex-col overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-2xl">
           <div
             className="flex cursor-grab items-center justify-between border-b border-outline-variant/40 bg-surface-container px-4 py-3 active:cursor-grabbing"
             onPointerDown={(event) => {
@@ -2788,6 +2883,7 @@ function FloatingAIHelper({
       )}
       {!isOpen && (
         <button
+          data-tour="ai-helper-button"
           onClick={() => setIsOpen(true)}
           className="w-14 h-14 rounded-full bg-primary text-on-primary shadow-xl flex items-center justify-center"
           title="AI edit helper"
@@ -3146,7 +3242,7 @@ function PublishStep({
   const canPublish = readyChecks.every((item) => item.done);
 
   return (
-    <div className="space-y-5">
+    <div data-tour="publish-settings" className="space-y-5">
       <SectionTitle icon={CheckCircle2} title="Step 5: Review and publish" body="Publish only when the path is complete enough for learners to follow without confusion." />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {readyChecks.map((item) => <ChecklistItem key={item.label} done={item.done} label={item.label} />)}
