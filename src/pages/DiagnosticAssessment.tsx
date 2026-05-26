@@ -15,6 +15,10 @@ interface Question {
   topicId: string;
   skillIds: string[];
   difficulty: string;
+  explanation?: string;
+  competencyId?: string;
+  wrongChoiceExplanations?: Record<string, string>;
+  relatedModuleId?: string;
 }
 
 export default function DiagnosticAssessment() {
@@ -71,7 +75,11 @@ export default function DiagnosticAssessment() {
             categoryName: d.categoryName || 'Unknown',
             topicId: d.topicId || 'Unknown',
             skillIds: d.skillIds || [],
-            difficulty: d.difficulty || 'medium'
+            difficulty: d.difficulty || 'medium',
+            explanation: d.explanation || '',
+            competencyId: d.competencyId || '',
+            wrongChoiceExplanations: d.wrongChoiceExplanations || {},
+            relatedModuleId: d.relatedModuleId || d.moduleId || '',
           });
         });
 
@@ -130,6 +138,11 @@ export default function DiagnosticAssessment() {
             timeSpentSeconds: 0,
             stem: question?.stem || '',
             options: question?.options || [],
+            explanation: question?.explanation || '',
+            competencyId: question?.competencyId || '',
+            difficulty: question?.difficulty || 'medium',
+            wrongChoiceExplanations: question?.wrongChoiceExplanations || {},
+            relatedModuleId: question?.relatedModuleId || '',
           };
         });
 
@@ -150,11 +163,17 @@ export default function DiagnosticAssessment() {
           questionId: answer.questionId,
           stem: answer.stem,
           options: answer.options,
+          explanation: answer.explanation,
+          rationalization: answer.explanation,
+          wrongChoiceExplanations: answer.wrongChoiceExplanations,
           selectedOptionId: answer.selectedOptionId,
           correctOptionId: answer.correctOptionId,
           categoryId: answer.categoryId,
           topicId: answer.topicId,
+          competencyId: answer.competencyId,
+          difficulty: answer.difficulty,
           skillIds: answer.skillIds,
+          relatedModuleId: answer.relatedModuleId,
           examType: 'diagnostic',
           sourceAttemptId: attemptId,
           timesMissed: increment(1),

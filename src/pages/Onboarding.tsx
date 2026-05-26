@@ -35,6 +35,7 @@ export default function Onboarding() {
   const [classCode, setClassCode] = useState('');
   const [reviewTrack, setReviewTrack] = useState<ReviewTrack>((user?.reviewTrack as ReviewTrack) || 'elementary');
   const [specialization, setSpecialization] = useState(user?.specialization || '');
+  const [targetExamDate, setTargetExamDate] = useState(user?.targetExamDate || '');
   const [diagnosticChoice, setDiagnosticChoice] = useState<'now' | 'later'>('now');
   const [agreed, setAgreed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -59,6 +60,7 @@ export default function Onboarding() {
         reviewTrack,
         selectedFocus: reviewTrack === 'secondary' || reviewTrack === 'specialization' ? 'major' : 'full_let_review',
         specialization: specialization.trim(),
+        targetExamDate: targetExamDate || null,
         diagnosticCompleted: false,
         diagnosticSkipped: diagnosticChoice === 'later',
         onboardingStep: 4,
@@ -214,6 +216,17 @@ export default function Onboarding() {
                 <h2 className="mt-1 text-2xl font-black font-headline">Start with a diagnostic?</h2>
                 <p className="mt-2 text-sm font-medium text-slate-500">The diagnostic is optional, but it gives the AI mentor real data for recommendations.</p>
               </div>
+
+              <label className="block">
+                <span className="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-400">Target LET exam date, optional</span>
+                <input
+                  type="date"
+                  value={targetExamDate}
+                  onChange={(event) => setTargetExamDate(event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4 text-sm font-bold outline-none focus:border-blue-300 focus:bg-white"
+                />
+                <span className="mt-2 block text-xs font-bold text-slate-400">This helps the planner pace reviewer modules and mock exam practice.</span>
+              </label>
 
               <div className="grid gap-3 md:grid-cols-2">
                 <button

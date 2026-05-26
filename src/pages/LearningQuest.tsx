@@ -20,7 +20,7 @@ import {
   ShieldAlert,
   Trophy,
 } from 'lucide-react';
-import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getDocs, increment, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
@@ -32,7 +32,6 @@ import {
   JourneyModulePart,
   JourneyQuestion,
   ModuleLearningState,
-  journeyModules,
 } from '../lib/learningJourney';
 import { createNotification } from '../lib/notifications';
 
@@ -118,6 +117,10 @@ function normalizeFirestoreModule(id: string, data: any): JourneyModule {
   };
 }
 
+function progressStorageKey(userId: string | undefined, moduleId: string) {
+  return `let-mastery-progress:${userId || 'guest'}:${moduleId}`;
+}
+
 export default function LearningQuest() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -191,7 +194,7 @@ export default function LearningQuest() {
   const weakReviewParts = parts.filter((part) => progress.weakPartIds?.includes(part.id));
 
   const progressDocId = user ? `${user.uid}_${module.id}` : '';
-  const localProgressKey = `let-mastery-progress:${module.id}`;
+  const localProgressKey = progressStorageKey(user?.uid, module.id);
   const answerDraftKey = user ? `let-mastery-answer-drafts:${user.uid}:${module.id}` : '';
 
   useEffect(() => {
@@ -346,7 +349,7 @@ export default function LearningQuest() {
 
         if (!restoredProgress) {
           try {
-            const saved = localStorage.getItem(`let-mastery-progress:${activeModule.id}`);
+            const saved = localStorage.getItem(progressStorageKey(user?.uid, activeModule.id));
             restoredProgress = saved ? JSON.parse(saved) : null;
           } catch {
             restoredProgress = null;
@@ -564,6 +567,41 @@ export default function LearningQuest() {
     setLessonHighlights((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
   };
 
+  const recordMistake = async (question: JourneyQuestion, answer: string, sourceType: string, sourceAttemptId = '') => {
+    if (!user || !question) return;
+    const options = normalizeOptions(question);
+    const selectedOption = options.find((option) => option.id === answer);
+    const correctOption = options.find((option) => option.id === question.correctOptionId);
+    try {
+      await setDoc(doc(db, 'mistakeBank', `${user.uid}_${question.id}`), {
+        userId: user.uid,
+        questionId: question.id,
+        stem: question.stem,
+        options,
+        selectedOptionId: answer,
+        selectedOptionText: selectedOption?.text || answer,
+        correctOptionId: question.correctOptionId || '',
+        correctOptionText: correctOption?.text || question.expectedAnswer || '',
+        explanation: question.explanation || '',
+        rationalization: question.explanation || '',
+        wrongChoiceExplanations: (question as any).wrongChoiceExplanations || {},
+        categoryId: module.subjectId || '',
+        topicId: question.topicId || module.topicId || '',
+        competencyId: question.competencyId || '',
+        difficulty: question.difficulty || 'medium',
+        relatedModuleId: module.id,
+        relatedModuleTitle: module.title,
+        examType: sourceType,
+        sourceAttemptId,
+        timesMissed: increment(1),
+        firstMissedAt: serverTimestamp(),
+        lastMissedAt: serverTimestamp(),
+      }, { merge: true });
+    } catch (error) {
+      console.warn('Unable to record mistake bank item', error);
+    }
+  };
+
   const downloadStudyGuide = async () => {
     if (!user) return;
     const notesSnap = await getDocs(query(collection(db, 'learningNotes'), where('userId', '==', user.uid), where('moduleId', '==', module.id)));
@@ -609,6 +647,10 @@ export default function LearningQuest() {
       [currentPart.id]: grade.score,
     };
 
+    if (currentMiniQuestion && !grade.isCorrect) {
+      await recordMistake(currentMiniQuestion, answer, 'module_mini_quiz');
+    }
+
     if (currentPart.activity) {
       persistProgress({ ...progress, phase: 'activity', partScores: nextScores });
       return;
@@ -632,9 +674,7 @@ export default function LearningQuest() {
     if (!user) return;
     try {
       const modulesSnap = await getDocs(query(collection(db, 'modules'), where('isPublished', '==', true)));
-      const remoteModules = modulesSnap.docs.map((moduleDoc) => normalizeFirestoreModule(moduleDoc.id, moduleDoc.data()));
-      const remoteIds = new Set(remoteModules.map((item) => item.id));
-      const availableModules = [...remoteModules, ...journeyModules.filter((item) => !remoteIds.has(item.id))]
+      const availableModules = modulesSnap.docs.map((moduleDoc) => normalizeFirestoreModule(moduleDoc.id, moduleDoc.data()))
         .filter((item: any) => {
           if (!item.publishScope || item.publishScope === 'public') return true;
           return !!user.activeClassId && (item.classIds || []).includes(user.activeClassId);
@@ -714,9 +754,10 @@ export default function LearningQuest() {
     const attemptNumber = (progress.finalAttemptCount || 0) + 1;
     const attemptTimeSeconds = progress.examStartedAt ? Math.max(0, Math.round((Date.now() - progress.examStartedAt) / 1000)) : Math.round((Date.now() - sessionStartedAt) / 1000);
 
+    let attemptLogId = '';
     if (user && attemptPolicy.attemptLogs !== false) {
       try {
-        await addDoc(collection(db, 'examAttemptLogs'), {
+        const attemptRef = await addDoc(collection(db, 'examAttemptLogs'), {
           userId: user.uid,
           studentEmail: user.email,
           studentName: user.fullName || user.email,
@@ -738,10 +779,18 @@ export default function LearningQuest() {
           questionIds: finalExam.map((question) => question.id),
           createdAt: serverTimestamp(),
         });
+        attemptLogId = attemptRef.id;
       } catch (error) {
         console.warn('Unable to write exam attempt log', error);
       }
     }
+
+    await Promise.all(finalExam.map((question) => {
+      const answer = finalAnswers[question.id] || '';
+      const grade = grades[question.id];
+      if ((grade?.score || 0) >= 70) return Promise.resolve();
+      return recordMistake(question, answer, 'module_final_exam', attemptLogId);
+    }));
 
     await persistProgress({
       ...progress,

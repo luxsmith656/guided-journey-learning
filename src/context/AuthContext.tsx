@@ -19,6 +19,7 @@ interface UserProfile {
   selectedFocus?: string;
   reviewTrack?: 'elementary' | 'secondary' | 'specialization';
   specialization?: string;
+  targetExamDate?: string;
   diagnosticCompleted?: boolean;
   diagnosticSkipped?: boolean;
   streak?: number;

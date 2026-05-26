@@ -84,6 +84,28 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isInstructor();
     }
+
+    match /reviewTracks/{trackId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /studentReviewSettings/{userId} {
+      allow read: if isOwner(userId) || isInstructor();
+      allow create, update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /examBlueprints/{blueprintId} {
+      allow read: if isSignedIn();
+      allow create, update: if isInstructor();
+      allow delete: if isAdmin();
+    }
+
+    match /questionBanks/{bankId} {
+      allow read, create, update: if isInstructor();
+      allow delete: if isAdmin();
+    }
     
     match /mockExamAttempts/{attemptId} {
       allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
@@ -158,9 +180,36 @@ service cloud.firestore {
       allow read, update, delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
     }
 
+    match /highlights/{highlightId} {
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow read, update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /hiddenBlocks/{blockId} {
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow read, update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /bookmarks/{bookmarkId} {
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow read, update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
     match /contentVersions/{versionId} {
       allow read: if isInstructor();
       allow create: if isInstructor();
+      allow update, delete: if isAdmin();
+    }
+
+    match /moduleComments/{commentId} {
+      allow read, create: if isInstructor();
+      allow update: if isInstructor() || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /changeLogs/{logId} {
+      allow read: if isInstructor();
+      allow create: if isSignedIn();
       allow update, delete: if isAdmin();
     }
     

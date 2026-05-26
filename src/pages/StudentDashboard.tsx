@@ -18,7 +18,6 @@ import {
 import StudentLayout from '../components/StudentLayout';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
-import { journeyModules } from '../lib/learningJourney';
 import { buildStudyPlan, getRecallInsights } from '../lib/learningInsights';
 
 type DashboardModule = {
@@ -104,7 +103,6 @@ export default function StudentDashboard() {
         const loadedModules: DashboardModule[] = [];
 
         for (const moduleId of uniqueModuleIds) {
-          const localModule = journeyModules.find((module) => module.id === moduleId);
           let remoteModule: any = null;
           try {
             const moduleSnap = await getDoc(doc(db, 'modules', moduleId));
@@ -116,9 +114,9 @@ export default function StudentDashboard() {
           const progress = progressMap[moduleId];
           loadedModules.push({
             id: moduleId,
-            title: remoteModule?.title || localModule?.title || `Reviewer ${String(moduleId).slice(0, 4)}`,
-            description: remoteModule?.description || localModule?.description || 'LET reviewer module',
-            duration: remoteModule?.duration || localModule?.duration || '',
+            title: remoteModule?.title || `Reviewer ${String(moduleId).slice(0, 4)}`,
+            description: remoteModule?.description || 'LET reviewer module',
+            duration: remoteModule?.duration || '',
             dueAt: remoteModule?.dueAt || '',
             status: moduleStatus(progress),
             progress: progress?.progressPercent ?? 0,
@@ -164,6 +162,7 @@ export default function StudentDashboard() {
     return 'Elementary LET';
   }, [user]);
   const readinessLabel = boardReadiness >= 85 ? 'Board-ready signal' : boardReadiness >= 70 ? 'Near-ready' : hasAnyRecordedActivity ? 'Building readiness' : 'Not started';
+  const targetExamLabel = (user as any)?.targetExamDate ? `Target: ${new Date((user as any).targetExamDate).toLocaleDateString()}` : 'No target date';
 
   return (
     <StudentLayout title="LET Review Command Center">
@@ -215,7 +214,7 @@ export default function StudentDashboard() {
 
             <div className="grid grid-cols-2 gap-3 min-w-full lg:min-w-[360px] lg:max-w-[380px]">
               <StatCard icon={Target} label="Board readiness" value={`${boardReadiness}%`} sublabel={readinessLabel} />
-              <StatCard icon={ClipboardList} label="Review track" value={reviewTrackLabel} sublabel={user?.learningMode === 'class_based' ? 'Class overlay' : 'Self-study'} />
+              <StatCard icon={ClipboardList} label="Review track" value={reviewTrackLabel} sublabel={targetExamLabel} />
               <StatCard icon={AlertTriangle} label="Mistake bank" value={String(mistakeCount)} sublabel="Saved wrong answers" />
               <StatCard icon={BookOpen} label="Active modules" value={String(startedModules)} sublabel={`${completedModules} completed`} />
             </div>

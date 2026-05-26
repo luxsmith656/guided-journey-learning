@@ -11,7 +11,12 @@ interface Question {
   categoryId?: string;
   topicId?: string;
   skillIds?: string[];
+  competencyId?: string;
+  difficulty?: string;
   explanation?: string;
+  wrongChoiceExplanations?: Record<string, string>;
+  relatedModuleId?: string;
+  moduleId?: string;
 }
 
 export default function ExamSimulation() {
@@ -164,6 +169,11 @@ export default function ExamSimulation() {
              stem: q?.stem || '',
              options: q?.options || [],
              explanation: q?.explanation || '',
+             rationalization: q?.explanation || '',
+             wrongChoiceExplanations: q?.wrongChoiceExplanations || {},
+             competencyId: q?.competencyId || '',
+             difficulty: q?.difficulty || 'medium',
+             relatedModuleId: q?.relatedModuleId || q?.moduleId || '',
            };
         });
 
@@ -185,11 +195,16 @@ export default function ExamSimulation() {
           stem: answer.stem,
           options: answer.options,
           explanation: answer.explanation,
+          rationalization: answer.rationalization,
+          wrongChoiceExplanations: answer.wrongChoiceExplanations,
           selectedOptionId: answer.selectedOptionId,
           correctOptionId: answer.correctOptionId,
           categoryId: answer.categoryId,
           topicId: answer.topicId,
+          competencyId: answer.competencyId,
+          difficulty: answer.difficulty,
           skillIds: answer.skillIds,
+          relatedModuleId: answer.relatedModuleId,
           examType: isMock ? 'mock_exam' : 'practice_exam',
           sourceAttemptId: attemptId,
           timesMissed: increment(1),

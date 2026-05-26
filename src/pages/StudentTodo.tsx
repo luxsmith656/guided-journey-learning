@@ -23,6 +23,7 @@ export default function StudentTodo() {
   const [reminders, setReminders] = useState<any[]>([]);
   const [progressByModule, setProgressByModule] = useState<Record<string, any>>({});
   const [profile, setProfile] = useState<any>(null);
+  const [classData, setClassData] = useState<any>(null);
   const [reminderDraft, setReminderDraft] = useState({ title: '', remindAt: todayInputValue() });
   const [toastMsg, setToastMsg] = useState('');
   const [showToast, setShowToast] = useState(false);
@@ -54,22 +55,30 @@ export default function StudentTodo() {
     const unsubReminders = onSnapshot(reminderQuery, (snapshot) => {
       setReminders(snapshot.docs.map((reminderDoc) => ({ id: reminderDoc.id, ...reminderDoc.data() })));
     });
+    let unsubClass = () => {};
+    if (user.activeClassId) {
+      unsubClass = onSnapshot(doc(db, 'classes', user.activeClassId), (snapshot) => setClassData(snapshot.exists() ? { id: snapshot.id, ...snapshot.data() } : null));
+    } else {
+      setClassData(null);
+    }
 
     return () => {
       unsubProfile();
       unsubProgress();
       unsubReminders();
+      unsubClass();
     };
   }, [user]);
 
   const todoItems = useMemo(() => modules
     .filter((module) => {
       const progress = progressByModule[module.id];
-      if (module.publishScope === 'classes') return user?.activeClassId && module.classIds?.includes(user.activeClassId);
+      const assignedModuleIds = new Set(classData?.assignedModuleIds || []);
+      if (module.publishScope === 'classes') return user?.activeClassId && (module.classIds?.includes(user.activeClassId) || assignedModuleIds.has(module.id));
       return !!progress;
     })
     .filter((module) => progressByModule[module.id]?.status !== 'completed')
-    .sort((a, b) => new Date(a.dueAt || '2999-12-31').getTime() - new Date(b.dueAt || '2999-12-31').getTime()), [modules, progressByModule, user]);
+    .sort((a, b) => new Date(a.dueAt || '2999-12-31').getTime() - new Date(b.dueAt || '2999-12-31').getTime()), [modules, progressByModule, user, classData]);
 
   const weakTopicLabel = profile?.weakTopics?.[0]
     || Object.entries(profile?.masteryByTopic || {}).sort((a: any, b: any) => a[1] - b[1])[0]?.[0]
