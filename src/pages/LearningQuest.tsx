@@ -123,10 +123,33 @@ function progressStorageKey(userId: string | undefined, moduleId: string) {
   return `let-mastery-progress:${userId || 'guest'}:${moduleId}`;
 }
 
+function progressFromFirestore(data: any): QuestProgress {
+  return {
+    currentPartIndex: data.currentPartIndex || 0,
+    phase: data.phase || 'intro',
+    partScores: data.partScores || {},
+    finalScore: data.finalScore ?? undefined,
+    firstFinalScore: data.firstFinalScore ?? undefined,
+    latestFinalScore: data.latestFinalScore ?? undefined,
+    finalAttemptCount: data.finalAttemptCount || 0,
+    timeSpentSeconds: data.timeSpentSeconds || 0,
+    failedAttempts: data.failedAttempts || 0,
+    mustReread: !!data.mustReread,
+    weakPartIds: data.weakPartIds || [],
+    proctorWarnings: data.proctorWarnings || 0,
+    proctorWarningReasons: data.proctorWarningReasons || [],
+    examLockedUntil: data.examLockedUntil || undefined,
+    examStartedAt: data.examStartedAt || undefined,
+    moduleState: data.moduleState || undefined,
+    status: data.status === 'completed' ? 'completed' : 'in_progress',
+  };
+}
+
 export default function LearningQuest() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const moduleId = searchParams.get('moduleId');
+  const demoMode = searchParams.get('demo') === '1' || searchParams.get('demo') === 'true';
   const { user } = useAuth();
 
   const [module, setModule] = useState<JourneyModule>(() => findJourneyModule(moduleId));
@@ -154,6 +177,7 @@ export default function LearningQuest() {
   const [lowBandwidth, setLowBandwidth] = useState(() => localStorage.getItem('let-mastery-low-bandwidth') === '1');
   const [answerDraftSavedAt, setAnswerDraftSavedAt] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [accessError, setAccessError] = useState('');
   const [sessionStartedAt] = useState(Date.now());
   const [nowTick, setNowTick] = useState(Date.now());
 
@@ -286,69 +310,90 @@ export default function LearningQuest() {
   useEffect(() => {
     async function loadModuleAndProgress() {
       setLoading(true);
+      setAccessError('');
       try {
-        let activeModule = findJourneyModule(moduleId);
+        if (!user) {
+          throw new Error('Sign in again to open this reviewer.');
+        }
 
-        if (moduleId) {
-          const moduleSnap = await getDoc(doc(db, 'modules', moduleId));
-          if (moduleSnap.exists()) {
-            activeModule = normalizeFirestoreModule(moduleSnap.id, moduleSnap.data());
-            const data = moduleSnap.data() as any;
-            const questionIds = [
-              ...(data.checkQuestionIds || []),
-              ...(data.challengeQuestionIds || []),
-              ...(data.questionIds || []),
-            ].filter(Boolean);
+        if (!moduleId) {
+          throw new Error('No reviewer module was selected.');
+        }
 
-            if (questionIds.length > 0) {
-              const loadedQuestions: JourneyQuestion[] = [];
-              for (const questionId of questionIds.slice(0, 8)) {
-                const questionSnap = await getDoc(doc(db, 'questions', questionId));
-                if (questionSnap.exists()) {
-                  const question = questionSnap.data() as any;
-                  loadedQuestions.push({
-                    id: questionSnap.id,
-                    stem: question.stem,
-                    options: question.options || [],
-                    correctOptionId: question.correctOptionId,
-                    explanation: question.explanation || '',
-                  });
-                }
-              }
-              if (loadedQuestions.length > 0) {
-                activeModule = { ...activeModule, questions: loadedQuestions };
+        let activeModule: JourneyModule | null = null;
+        let restoredProgress: QuestProgress | null = null;
+        const moduleSnap = await getDoc(doc(db, 'modules', moduleId));
+
+        if (!moduleSnap.exists()) {
+          if (!demoMode) {
+            throw new Error('This reviewer does not exist in the database or has not been published.');
+          }
+          activeModule = findJourneyModule(moduleId);
+        } else {
+          const data = moduleSnap.data() as any;
+          const publishScope = data.publishScope || (data.classIds?.length ? 'classes' : 'public');
+          const instructorPreview = user.role === 'admin' || user.role === 'instructor';
+          const progressSnap = await getDoc(doc(db, 'moduleProgress', `${user.uid}_${moduleSnap.id}`));
+          const hasProgress = progressSnap.exists();
+
+          let classAssigned = false;
+          if (user.activeClassId) {
+            const classSnap = await getDoc(doc(db, 'classes', user.activeClassId));
+            const classData = classSnap.exists() ? classSnap.data() as any : null;
+            classAssigned = (
+              (data.classIds || []).includes(user.activeClassId) ||
+              (classData?.assignedModuleIds || []).includes(moduleSnap.id)
+            );
+          }
+
+          if (data.isPublished !== true && !instructorPreview) {
+            throw new Error('This reviewer is still a draft and is not available to students.');
+          }
+
+          if (!instructorPreview) {
+            if (publishScope === 'classes' && !classAssigned) {
+              throw new Error('This reviewer belongs to a class you are not enrolled in.');
+            }
+            if ((publishScope === 'public' || !publishScope) && !hasProgress && !classAssigned) {
+              throw new Error('Start this public reviewer from LET Reviewers first so a real progress record can be created.');
+            }
+          }
+
+          activeModule = normalizeFirestoreModule(moduleSnap.id, data);
+
+          const questionIds = [
+            ...(data.checkQuestionIds || []),
+            ...(data.challengeQuestionIds || []),
+            ...(data.questionIds || []),
+          ].filter(Boolean);
+
+          if (questionIds.length > 0) {
+            const loadedQuestions: JourneyQuestion[] = [];
+            for (const questionId of questionIds.slice(0, 8)) {
+              const questionSnap = await getDoc(doc(db, 'questions', questionId));
+              if (questionSnap.exists()) {
+                const question = questionSnap.data() as any;
+                loadedQuestions.push({
+                  id: questionSnap.id,
+                  stem: question.stem,
+                  options: question.options || [],
+                  correctOptionId: question.correctOptionId,
+                  explanation: question.explanation || '',
+                });
               }
             }
+            if (loadedQuestions.length > 0) {
+              activeModule = { ...activeModule, questions: loadedQuestions };
+            }
+          }
+
+          if (progressSnap.exists()) {
+            restoredProgress = progressFromFirestore(progressSnap.data());
           }
         }
 
-        setModule(activeModule);
-
-        let restoredProgress: QuestProgress | null = null;
-        if (user) {
-          const progressSnap = await getDoc(doc(db, 'moduleProgress', `${user.uid}_${activeModule.id}`));
-          if (progressSnap.exists()) {
-            const data = progressSnap.data() as any;
-            restoredProgress = {
-              currentPartIndex: data.currentPartIndex || 0,
-              phase: data.phase || 'intro',
-              partScores: data.partScores || {},
-              finalScore: data.finalScore ?? undefined,
-              firstFinalScore: data.firstFinalScore ?? undefined,
-              latestFinalScore: data.latestFinalScore ?? undefined,
-              finalAttemptCount: data.finalAttemptCount || 0,
-              timeSpentSeconds: data.timeSpentSeconds || 0,
-              failedAttempts: data.failedAttempts || 0,
-              mustReread: !!data.mustReread,
-              weakPartIds: data.weakPartIds || [],
-              proctorWarnings: data.proctorWarnings || 0,
-              proctorWarningReasons: data.proctorWarningReasons || [],
-              examLockedUntil: data.examLockedUntil || undefined,
-              examStartedAt: data.examStartedAt || undefined,
-              moduleState: data.moduleState || undefined,
-              status: data.status === 'completed' ? 'completed' : 'in_progress',
-            };
-          }
+        if (!activeModule) {
+          throw new Error('This reviewer could not be loaded.');
         }
 
         if (!restoredProgress) {
@@ -363,15 +408,29 @@ export default function LearningQuest() {
         setProgress(restoredProgress || defaultProgress);
         setFinalQuestionSet(getModuleFinalExam(activeModule));
       } catch (error) {
-        console.error('Failed to load module, using journey fallback', error);
-        setModule(findJourneyModule(moduleId));
+        console.error('Failed to load reviewer module', error);
+        if (demoMode) {
+          const fallbackModule = findJourneyModule(moduleId);
+          setModule(fallbackModule);
+          try {
+            const saved = localStorage.getItem(progressStorageKey(user?.uid, fallbackModule.id));
+            setProgress(saved ? JSON.parse(saved) : defaultProgress);
+          } catch {
+            setProgress(defaultProgress);
+          }
+          setFinalQuestionSet(getModuleFinalExam(fallbackModule));
+        } else {
+          setAccessError(error instanceof Error ? error.message : 'This reviewer cannot be opened right now.');
+          setProgress(defaultProgress);
+          setFinalQuestionSet([]);
+        }
       } finally {
         setLoading(false);
       }
     }
 
     loadModuleAndProgress();
-  }, [moduleId, user]);
+  }, [moduleId, user, demoMode]);
 
   useEffect(() => {
     if (!answerDraftKey) return;
@@ -1031,6 +1090,25 @@ export default function LearningQuest() {
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="font-bold">Opening saved module...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (accessError) {
+    return (
+      <div className="min-h-screen bg-surface flex items-center justify-center px-5 text-on-surface">
+        <div className="max-w-md rounded-3xl border border-outline-variant bg-surface-container-lowest p-8 text-center shadow-sm">
+          <ShieldAlert className="mx-auto mb-4 text-error" size={42} />
+          <p className="text-xs font-black uppercase tracking-widest text-error">Reviewer unavailable</p>
+          <h1 className="mt-2 font-headline text-2xl font-black text-on-surface">This module cannot be opened</h1>
+          <p className="mt-3 text-sm leading-relaxed text-on-surface-variant">{accessError}</p>
+          <button
+            onClick={() => navigate('/student/courses')}
+            className="mt-6 rounded-xl bg-primary px-6 py-3 text-sm font-bold text-on-primary"
+          >
+            Back to LET Reviewers
+          </button>
         </div>
       </div>
     );
