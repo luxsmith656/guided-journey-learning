@@ -57,10 +57,8 @@ export function buildStudyPlan(params: {
   modules: any[];
   recallInsights: RecallInsight[];
   weakTopicLabel: string;
-  assignments?: any[];
   progressByModule?: Record<string, any>;
 }): StudyPlanItem[] {
-  const now = Date.now();
   const modules = params.modules.map((module) => {
     const progress = params.progressByModule?.[module.id] || {};
     const minutes = getModuleMinutes(module);
@@ -77,22 +75,6 @@ export function buildStudyPlan(params: {
   const nextModule = modules.find((module) => module.progress < 100);
   const review = params.recallInsights[0];
   const plan: StudyPlanItem[] = [];
-  const urgentAssignment = (params.assignments || [])
-    .filter((assignment) => assignment.dueAt)
-    .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())[0];
-
-  if (urgentAssignment) {
-    const dueTime = new Date(urgentAssignment.dueAt).getTime();
-    plan.push({
-      title: `Prepare ${urgentAssignment.title}`,
-      body: dueTime < now ? 'This is overdue. Submit the required link as soon as possible.' : `Due ${new Date(urgentAssignment.dueAt).toLocaleDateString()}. Reserve time to finish and check link access.`,
-      targetLink: '/student/todo',
-      priority: dueTime - now < 86_400_000 ? 'high' : 'medium',
-      dayLabel: dueTime - now < 86_400_000 ? 'Today' : 'This week',
-      minutes: 25,
-      source: 'deadline',
-    });
-  }
 
   if (nextModule) {
     plan.push({

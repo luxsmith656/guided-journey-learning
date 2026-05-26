@@ -3295,7 +3295,7 @@ function PublishStep({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <label className="flex items-center justify-between gap-4 bg-surface-container rounded-xl px-4 py-4">
           <span>
-            <span className="block text-sm font-extrabold text-on-surface">Anti-cheat for exam/assignment</span>
+            <span className="block text-sm font-extrabold text-on-surface">Anti-cheat for exams</span>
             <span className="block text-xs text-on-surface-variant/60">Fullscreen, tab focus, and copy/paste warnings.</span>
           </span>
           <input type="checkbox" checked={draft.antiCheatEnabled} onChange={(event) => updateDraft('antiCheatEnabled', event.target.checked)} className="w-5 h-5 accent-primary" />

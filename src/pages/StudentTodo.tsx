@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { addDoc, collection, doc, onSnapshot, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
-import { CalendarDays, CalendarPlus, CheckCircle2, ChevronRight, ClipboardList, Image, Link2, MessageSquareText, Send } from 'lucide-react';
+import { addDoc, collection, doc, onSnapshot, query, serverTimestamp, where } from 'firebase/firestore';
+import { CalendarDays, CalendarPlus, CheckCircle2, ChevronRight, ClipboardList } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import StudentLayout from '../components/StudentLayout';
 import Toast from '../components/Toast';
@@ -16,31 +16,14 @@ type CalendarMarker = {
   targetLink?: string;
 };
 
-type SubmissionDraft = {
-  type: 'link' | 'text' | 'image';
-  content: string;
-};
-
-const submissionTypeIcons = {
-  link: Link2,
-  text: MessageSquareText,
-  image: Image,
-};
-
 export default function StudentTodo() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [modules, setModules] = useState<any[]>([]);
-  const [assignments, setAssignments] = useState<any[]>([]);
   const [reminders, setReminders] = useState<any[]>([]);
-  const [submissions, setSubmissions] = useState<Record<string, any>>({});
-  const [submissionDrafts, setSubmissionDrafts] = useState<Record<string, SubmissionDraft>>({});
   const [progressByModule, setProgressByModule] = useState<Record<string, any>>({});
   const [profile, setProfile] = useState<any>(null);
   const [reminderDraft, setReminderDraft] = useState({ title: '', remindAt: todayInputValue() });
-  const [submissionWarning, setSubmissionWarning] = useState('');
-  const [draftsLoaded, setDraftsLoaded] = useState(false);
-  const [draftSavedAt, setDraftSavedAt] = useState(0);
   const [toastMsg, setToastMsg] = useState('');
   const [showToast, setShowToast] = useState(false);
 
@@ -53,22 +36,7 @@ export default function StudentTodo() {
   }, []);
 
   useEffect(() => {
-    const unsubAssignments = onSnapshot(collection(db, 'assignments'), (snapshot) => {
-      setAssignments(snapshot.docs.map((assignmentDoc) => ({ id: assignmentDoc.id, ...assignmentDoc.data() })));
-    });
-    return () => unsubAssignments();
-  }, []);
-
-  useEffect(() => {
     if (!user) return;
-    setDraftsLoaded(false);
-    try {
-      const savedDrafts = localStorage.getItem(submissionDraftStorageKey(user.uid));
-      setSubmissionDrafts(savedDrafts ? JSON.parse(savedDrafts) : {});
-    } catch {
-      setSubmissionDrafts({});
-    }
-    setDraftsLoaded(true);
 
     const unsubProfile = onSnapshot(doc(db, 'learnerProfiles', user.uid), (snapshot) => {
       setProfile(snapshot.exists() ? snapshot.data() : null);
@@ -86,33 +54,13 @@ export default function StudentTodo() {
     const unsubReminders = onSnapshot(reminderQuery, (snapshot) => {
       setReminders(snapshot.docs.map((reminderDoc) => ({ id: reminderDoc.id, ...reminderDoc.data() })));
     });
-    const submissionQuery = query(collection(db, 'assignmentSubmissions'), where('userId', '==', user.uid));
-    const unsubSubmissions = onSnapshot(submissionQuery, (snapshot) => {
-      const rows: Record<string, any> = {};
-      snapshot.docs.forEach((submissionDoc) => {
-        const data = submissionDoc.data();
-        rows[data.assignmentId] = { id: submissionDoc.id, ...data };
-      });
-      setSubmissions(rows);
-    });
+
     return () => {
       unsubProfile();
       unsubProgress();
       unsubReminders();
-      unsubSubmissions();
     };
   }, [user]);
-
-  useEffect(() => {
-    if (!user || !draftsLoaded) return;
-    const hasDrafts = Object.values(submissionDrafts).some((draft) => draft.content.trim());
-    try {
-      localStorage.setItem(submissionDraftStorageKey(user.uid), JSON.stringify(submissionDrafts));
-      if (hasDrafts) setDraftSavedAt(Date.now());
-    } catch (error) {
-      console.warn('Unable to autosave assignment draft', error);
-    }
-  }, [submissionDrafts, user?.uid, draftsLoaded]);
 
   const todoItems = useMemo(() => modules
     .filter((module) => {
@@ -122,39 +70,26 @@ export default function StudentTodo() {
     .filter((module) => progressByModule[module.id]?.status !== 'completed')
     .sort((a, b) => new Date(a.dueAt || '2999-12-31').getTime() - new Date(b.dueAt || '2999-12-31').getTime()), [modules, progressByModule, user]);
 
-  const assignmentItems = useMemo(() => assignments
-    .filter((assignment) => !assignment.classId || assignment.classId === user?.activeClassId)
-    .sort((a, b) => new Date(a.dueAt || '2999-12-31').getTime() - new Date(b.dueAt || '2999-12-31').getTime()), [assignments, user?.activeClassId]);
-
   const weakTopicLabel = profile?.weakTopics?.[0]
     || Object.entries(profile?.masteryByTopic || {}).sort((a: any, b: any) => a[1] - b[1])[0]?.[0]
     || 'your weakest topic';
   const studyPlan = buildStudyPlan({
     modules: todoItems.map((module) => ({ ...module, progress: progressByModule[module.id]?.progressPercent || 0 })),
-    assignments: assignmentItems,
     recallInsights: getRecallInsights(profile),
     weakTopicLabel,
     progressByModule,
   });
-  const dueDateItems = useMemo(() => [
-    ...assignmentItems.map((assignment) => ({
-      id: `assignment-${assignment.id}`,
-      type: 'Assignment',
-      title: assignment.title,
-      dueAt: assignment.dueAt || '',
-      targetLink: '/student/todo',
-    })),
-    ...todoItems.map((module) => ({
+  const dueDateItems = useMemo(() => todoItems
+    .map((module) => ({
       id: `module-${module.id}`,
       type: 'Module',
       title: module.title,
       dueAt: module.dueAt || '',
       targetLink: `/quest?moduleId=${module.id}`,
-    })),
-  ]
+    }))
     .filter((item) => item.dueAt)
     .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())
-    .slice(0, 6), [assignmentItems, todoItems]);
+    .slice(0, 6), [todoItems]);
 
   const calendarDays = useMemo(() => {
     const markers: CalendarMarker[] = [
@@ -166,15 +101,6 @@ export default function StudentTodo() {
           label: module.title,
           type: 'todo' as const,
           targetLink: `/quest?moduleId=${module.id}`,
-        })),
-      ...assignmentItems
-        .filter((assignment) => assignment.dueAt)
-        .map((assignment) => ({
-          id: `assignment-${assignment.id}`,
-          dateKey: toDateKey(assignment.dueAt),
-          label: assignment.title,
-          type: 'todo' as const,
-          targetLink: '/student/todo',
         })),
       ...reminders.map((reminder) => ({
         id: `reminder-${reminder.id}`,
@@ -201,7 +127,7 @@ export default function StudentTodo() {
         markers: markers.filter((marker) => marker.dateKey === key),
       };
     });
-  }, [todoItems, assignmentItems, reminders, studyPlan]);
+  }, [todoItems, reminders, studyPlan]);
 
   const addReminder = async () => {
     if (!user || !reminderDraft.title.trim()) {
@@ -227,53 +153,16 @@ export default function StudentTodo() {
     }
   };
 
-  const submitAssignment = async (assignment: any) => {
-    if (!user) return;
-    const draft = submissionDrafts[assignment.id] || { type: assignment.submissionType || 'link', content: '' };
-    if (!draft.content.trim()) {
-      setToastMsg('Add your answer or link before submitting.');
-      setShowToast(true);
-      return;
-    }
-    try {
-      await setDoc(doc(db, 'assignmentSubmissions', `${user.uid}_${assignment.id}`), {
-        assignmentId: assignment.id,
-        assignmentTitle: assignment.title,
-        classId: assignment.classId || '',
-        instructorId: assignment.instructorId || '',
-        userId: user.uid,
-        studentName: user.fullName || user.email,
-        studentEmail: user.email,
-        type: draft.type,
-        content: draft.content.trim(),
-        status: 'submitted',
-        submittedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-      setSubmissionDrafts((drafts) => {
-        const nextDrafts = { ...drafts, [assignment.id]: { ...draft, content: '' } };
-        localStorage.setItem(submissionDraftStorageKey(user.uid), JSON.stringify(nextDrafts));
-        return nextDrafts;
-      });
-      setToastMsg('Assignment submitted. Your instructor can now review it.');
-      setShowToast(true);
-    } catch (error) {
-      console.warn('Unable to submit assignment', error);
-      setToastMsg('Unable to submit assignment.');
-      setShowToast(true);
-    }
-  };
-
   return (
-    <StudentLayout title="To Do">
+    <StudentLayout title="Planner">
       <div className="space-y-6 pb-20 md:pb-0">
         <section className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 md:p-6 shadow-sm">
           <div className="flex items-center gap-3 mb-2 text-primary text-xs font-black uppercase tracking-widest">
             <ClipboardList size={16} />
-            Deadlines and planner
+            Study calendar
           </div>
           <h1 className="text-2xl md:text-3xl font-extrabold font-headline">Your calendar planner</h1>
-          <p className="text-sm text-on-surface-variant mt-2">Class deadlines, generated study tasks, and your own reminders stay together so the week is easier to follow.</p>
+          <p className="text-sm text-on-surface-variant mt-2">Module deadlines, generated study tasks, and your own reminders stay together so the week is easier to follow.</p>
         </section>
 
         <section className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5">
@@ -303,7 +192,7 @@ export default function StudentTodo() {
               ))}
             </div>
             <div className="mt-4 rounded-2xl bg-surface-container/40 border border-outline-variant/30 p-3 text-xs text-on-surface-variant">
-              <span className="font-black text-error">To Dos</span> are class deadlines. <span className="font-black text-primary">Study</span> is generated from your pace and weak areas. <span className="font-black text-emerald-700">Reminders</span> are made by you.
+              <span className="font-black text-error">To dos</span> are module deadlines. <span className="font-black text-primary">Study</span> is generated from your pace and weak areas. <span className="font-black text-emerald-700">Reminders</span> are made by you.
             </div>
           </div>
 
@@ -341,85 +230,6 @@ export default function StudentTodo() {
         </section>
 
         <section className="space-y-3">
-          {assignmentItems.map((assignment) => {
-            const dueDate = assignment.dueAt ? new Date(assignment.dueAt) : null;
-            const isOverdue = dueDate ? dueDate.getTime() < Date.now() : false;
-            const submission = submissions[assignment.id];
-            const draft = submissionDrafts[assignment.id] || { type: assignment.submissionType || 'link', content: '' };
-            const TypeIcon = submissionTypeIcons[draft.type];
-            return (
-              <article key={assignment.id} className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-sm">
-                <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-5">
-                  <div className="min-w-0">
-                    <p className={`text-xs font-black uppercase tracking-widest mb-2 ${isOverdue ? 'text-error' : 'text-primary'}`}>
-                      Assignment {dueDate ? `/ ${isOverdue ? 'Overdue' : 'Due'} ${dueDate.toLocaleString()}` : '/ No due date'}
-                    </p>
-                    <h2 className="text-lg font-extrabold text-on-surface">{assignment.title}</h2>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {assignment.className && (
-                        <span className="rounded-full bg-primary/10 px-3 py-1 text-[10px] font-black uppercase tracking-widest text-primary">{assignment.className}</span>
-                      )}
-                      <span className="rounded-full bg-surface-container px-3 py-1 text-[10px] font-black uppercase tracking-widest text-on-surface-variant">{assignment.moduleTitle || 'Class assignment'}</span>
-                    </div>
-                    <p className="text-sm text-on-surface-variant mt-1">{assignment.instructions}</p>
-                    <p className="text-xs text-on-surface-variant/50 mt-2">For file work, submit a Drive or image link with access enabled until grading is complete.</p>
-                    {submission && (
-                      <div className="mt-3 rounded-xl border border-outline-variant/30 bg-surface-container/40 p-3 text-xs">
-                        <p className="font-black uppercase tracking-widest text-primary">Submission {submission.status || 'submitted'}</p>
-                        <p className="mt-1 text-on-surface-variant break-words">{submission.content}</p>
-                        {submission.grade !== undefined && <p className="mt-2 font-extrabold text-on-surface">Grade: {submission.grade}</p>}
-                        {submission.comment && <p className="mt-1 text-on-surface-variant">Instructor comment: {submission.comment}</p>}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="w-full lg:w-96 rounded-2xl bg-surface-container/30 border border-outline-variant/30 p-4">
-                    <div className="grid grid-cols-3 gap-2 mb-3">
-                      {(['link', 'text', 'image'] as const).map((type) => {
-                        const Icon = submissionTypeIcons[type];
-                        return (
-                          <button
-                            key={type}
-                            onClick={() => setSubmissionDrafts((drafts) => ({ ...drafts, [assignment.id]: { ...draft, type } }))}
-                            className={`rounded-xl px-3 py-2 text-xs font-black uppercase border flex items-center justify-center gap-1 ${draft.type === type ? 'bg-primary text-on-primary border-primary' : 'bg-surface-container text-on-surface-variant border-outline-variant/30'}`}
-                          >
-                            <Icon size={13} />
-                            {type}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <textarea
-                      value={draft.content}
-                      onChange={(event) => setSubmissionDrafts((drafts) => ({ ...drafts, [assignment.id]: { ...draft, content: event.target.value } }))}
-                      onPaste={(event) => {
-                        if (assignment.antiCheatEnabled && draft.type === 'text') {
-                          event.preventDefault();
-                          setSubmissionWarning('Paste is disabled for this written assignment.');
-                        }
-                      }}
-                      onBlur={() => assignment.antiCheatEnabled && draft.type === 'text' && setSubmissionWarning('Keep your answer focused in the writing field while submitting.')}
-                      rows={4}
-                      placeholder={draft.type === 'text' ? 'Write your answer here.' : draft.type === 'image' ? 'Paste an image/cloud link here.' : 'Paste Drive or external link here.'}
-                      className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm outline-none focus:border-primary/40 resize-none"
-                    />
-                    {submissionWarning && <p className="text-xs font-bold text-error mt-2">{submissionWarning}</p>}
-                    {draft.content.trim() && (
-                      <p className="text-[11px] font-bold text-on-surface-variant/60 mt-2">
-                        Draft autosaved{draftSavedAt ? ` ${new Date(draftSavedAt).toLocaleTimeString()}` : ''}.
-                      </p>
-                    )}
-                    <button onClick={() => submitAssignment(assignment)} className="mt-3 w-full rounded-xl bg-primary text-on-primary px-4 py-3 text-sm font-bold inline-flex items-center justify-center gap-2">
-                      <TypeIcon size={15} />
-                      {submission ? 'Resubmit' : 'Submit'}
-                      <Send size={15} />
-                    </button>
-                  </div>
-                </div>
-              </article>
-            );
-          })}
-
           {todoItems.map((module) => {
             const dueDate = module.dueAt ? new Date(module.dueAt) : null;
             const isOverdue = dueDate ? dueDate.getTime() < Date.now() : false;
@@ -440,7 +250,7 @@ export default function StudentTodo() {
             );
           })}
 
-          {todoItems.length === 0 && assignmentItems.length === 0 && (
+          {todoItems.length === 0 && (
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-10 text-center shadow-sm">
               <CheckCircle2 className="mx-auto text-emerald-500 mb-3" size={40} />
               <h2 className="font-extrabold text-on-surface">Nothing due right now.</h2>
@@ -467,10 +277,6 @@ function toDateKey(value: any) {
 
 function todayInputValue() {
   return new Date().toISOString().slice(0, 10);
-}
-
-function submissionDraftStorageKey(userId: string) {
-  return `let-mastery-submission-drafts:${userId}`;
 }
 
 function planItemDateKey(item: StudyPlanItem, index: number) {

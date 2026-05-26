@@ -25,7 +25,6 @@ export default function StudentDashboard() {
   const [profile, setProfile] = useState<any>(null);
   const [classData, setClassData] = useState<any>(null);
   const [assignedModules, setAssignedModules] = useState<any[]>([]);
-  const [assignments, setAssignments] = useState<any[]>([]);
   const [progressByModuleState, setProgressByModuleState] = useState<Record<string, any>>({});
   const [gradeSummary, setGradeSummary] = useState({ avgScore: 0, completed: 0, rank: 0 });
   const [analytics, setAnalytics] = useState({
@@ -110,9 +109,6 @@ export default function StudentDashboard() {
              progress: progressByModule.get(module.id)?.progressPercent ?? module.progress
            })));
         }
-        const assignmentSnap = await getDocs(collection(db, 'assignments'));
-        setAssignments(assignmentSnap.docs.map((assignmentDoc) => ({ id: assignmentDoc.id, ...assignmentDoc.data() }))
-          .filter((assignment: any) => !assignment.classId || assignment.classId === user.activeClassId));
       } catch (e) {
         console.error('Failed to fetch dashboard data', e);
       }
@@ -125,7 +121,7 @@ export default function StudentDashboard() {
     || 'your weakest topic';
   const nextModule = assignedModules.find((module) => module.progress < 100) || assignedModules[0];
   const recallInsights = getRecallInsights(profile);
-  const studyPlan = buildStudyPlan({ modules: assignedModules, recallInsights, weakTopicLabel, assignments, progressByModule: progressByModuleState });
+  const studyPlan = buildStudyPlan({ modules: assignedModules, recallInsights, weakTopicLabel, progressByModule: progressByModuleState });
 
   return (
     <StudentLayout title="Dashboard">

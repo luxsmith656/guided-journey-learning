@@ -126,7 +126,7 @@ export default function Users() {
                   <th>Identity</th>
                   <th>Role</th>
                   <th>Class/Group</th>
-                  <th>Assignment</th>
+                  <th>Instructor</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </thead>

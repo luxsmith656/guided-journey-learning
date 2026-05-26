@@ -30,7 +30,6 @@ import LearningQuest from './pages/LearningQuest';
 import AdminClasses from './pages/AdminClasses';
 import InstructorClasses from './pages/InstructorClasses';
 import InstructorGradebook from './pages/InstructorGradebook';
-import InstructorAssignments from './pages/InstructorAssignments';
 import AdminCertificates from './pages/AdminCertificates';
 import InstructorCertificates from './pages/InstructorCertificates';
 import CertificateVerify from './pages/CertificateVerify';
@@ -153,7 +152,6 @@ function AppContent() {
             <Route path="/instructor/question/edit/:id" element={<ProtectedRoute role="instructor"><Navigate to="/instructor/modules" replace /></ProtectedRoute>} />
             <Route path="/instructor/bulk-upload" element={<ProtectedRoute role="instructor"><Navigate to="/instructor/modules" replace /></ProtectedRoute>} />
             <Route path="/instructor/modules" element={<ProtectedRoute role="instructor"><InstructorModules /></ProtectedRoute>} />
-            <Route path="/instructor/assignments" element={<ProtectedRoute role="instructor"><InstructorAssignments /></ProtectedRoute>} />
             <Route path="/instructor/grades" element={<ProtectedRoute role="instructor"><InstructorGradebook /></ProtectedRoute>} />
             <Route path="/instructor/certificates" element={<ProtectedRoute role="instructor"><InstructorCertificates /></ProtectedRoute>} />
             <Route path="/instructor/students" element={<ProtectedRoute role="instructor"><Users /></ProtectedRoute>} />

@@ -7,14 +7,15 @@ import {
   LayoutDashboard, 
   Library, 
   BookOpen, 
-  CheckSquare, 
+  CalendarDays, 
   BarChart, 
   LogOut, 
   Settings, 
   Bell, 
   Search,
   Target,
-  WifiOff
+  WifiOff,
+  UserPlus
 } from 'lucide-react';
 import HelpSupportButton from './HelpSupportButton';
 import { useNotifications } from '../hooks/useNotifications';
@@ -41,7 +42,7 @@ export default function StudentLayout({ children, title }: { children: ReactNode
   const navItems = [
     { name: 'Dashboard', path: '/student/dashboard', icon: LayoutDashboard },
     { name: 'My Courses', path: '/student/courses', icon: Library },
-    { name: 'To Do', path: '/student/todo', icon: CheckSquare },
+    { name: 'Planner', path: '/student/todo', icon: CalendarDays },
     { name: 'Flashcards', path: '/flashcards', icon: BookOpen },
     { name: 'Assessments', path: '/exam?type=mock', icon: Target },
     { name: 'Performance', path: '/quiz-results', icon: BarChart },
@@ -108,10 +109,10 @@ export default function StudentLayout({ children, title }: { children: ReactNode
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Top Header */}
-        <header className="px-6 py-4 flex items-center justify-between bg-surface-container-lowest md:bg-surface/80 md:backdrop-blur-md border-b border-outline-variant sticky top-0 z-30">
+        <header className="px-3 md:px-6 py-4 flex items-center justify-between bg-surface-container-lowest md:bg-surface/80 md:backdrop-blur-md border-b border-outline-variant sticky top-0 z-30">
           <div className="md:hidden flex items-center gap-2">
              {renderLogo()}
-             <h1 className="text-primary text-xl font-extrabold font-headline tracking-tighter truncate max-w-[200px]">{settings.siteName}</h1>
+             <h1 className="text-primary text-xl font-extrabold font-headline tracking-tighter truncate max-w-[112px] sm:max-w-[200px]">{settings.siteName}</h1>
           </div>
           <div className="hidden md:flex items-center flex-1 ml-4 justify-between">
             <div className="flex items-center gap-2">
@@ -122,22 +123,30 @@ export default function StudentLayout({ children, title }: { children: ReactNode
                <input type="text" placeholder="Search courses, modules, lessons..." className="bg-transparent border-none outline-none text-xs w-full text-on-surface font-medium placeholder:text-on-surface-variant/40" />
             </div>
           </div>
-          <div className="flex items-center gap-2 ml-4">
+          <div className="flex items-center gap-1 sm:gap-2 ml-2 md:ml-4">
             <button 
               onClick={toggleTheme}
-              className="p-2 text-on-surface-variant hover:bg-surface-container rounded-full transition-colors w-10 h-10 flex items-center justify-center"
+              className="p-2 text-on-surface-variant hover:bg-surface-container rounded-full transition-colors w-9 h-9 md:w-10 md:h-10 flex items-center justify-center"
               title="Toggle theme"
             >
               <span className="material-symbols-outlined text-[20px]">{theme === 'light' ? 'dark_mode' : 'light_mode'}</span>
             </button>
             <button
+              onClick={() => navigate('/join-class')}
+              className="p-2 bg-primary/10 text-primary hover:bg-primary hover:text-on-primary rounded-full transition-colors w-9 h-9 md:w-10 md:h-10 flex items-center justify-center"
+              title="Join class"
+              aria-label="Join class"
+            >
+              <UserPlus size={20} />
+            </button>
+            <button
               onClick={() => setLowBandwidth((value) => !value)}
-              className={`p-2 rounded-full transition-colors w-10 h-10 flex items-center justify-center ${lowBandwidth ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:bg-surface-container'}`}
+              className={`p-2 rounded-full transition-colors w-9 h-9 md:w-10 md:h-10 flex items-center justify-center ${lowBandwidth ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:bg-surface-container'}`}
               title="Low-bandwidth mode"
             >
               <WifiOff size={20} />
             </button>
-            <button onClick={() => navigate('/notifications')} className="p-2 text-on-surface-variant hover:bg-surface-container rounded-full transition-colors relative">
+            <button onClick={() => navigate('/notifications')} className="p-2 text-on-surface-variant hover:bg-surface-container rounded-full transition-colors relative w-9 h-9 md:w-10 md:h-10 flex items-center justify-center">
                {unreadCount > 0 && (
                  <span className="absolute top-1 right-1 min-w-4 h-4 px-1 bg-error rounded-full text-[9px] leading-4 text-white font-black pointer-events-none text-center">
                    {unreadCount > 9 ? '9+' : unreadCount}
