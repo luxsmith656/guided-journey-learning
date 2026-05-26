@@ -136,7 +136,7 @@ export interface AttemptPolicy {
   randomizeChoices?: boolean;
   questionPoolSize?: number;
   attemptLogs?: boolean;
-  integrityLevel?: 'basic' | 'advanced';
+  integrityLevel?: 'open_practice' | 'light_protection' | 'standard_protection' | 'strict_exam_mode' | 'basic' | 'advanced';
 }
 
 export interface ExamBlueprint {

@@ -91,7 +91,7 @@ interface BuilderModule {
     randomizeChoices: boolean;
     questionPoolSize: number;
     attemptLogs: boolean;
-    integrityLevel: 'basic' | 'advanced';
+    integrityLevel: 'open_practice' | 'light_protection' | 'standard_protection' | 'strict_exam_mode' | 'basic' | 'advanced';
   };
   flowItems: { id: string; type: 'textbook' | 'lesson' | 'quiz' | 'activity' | 'exam'; refId: string; title: string }[];
   parts: JourneyModulePart[];

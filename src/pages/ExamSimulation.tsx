@@ -13,6 +13,14 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
+import {
+  AssessmentEndReason,
+  AssessmentWarningLog,
+  createIntegrityWarning,
+  getAttemptStatus,
+  getIntegrityPolicy,
+  shouldAutoSubmitForWarning,
+} from '../lib/assessmentIntegrity';
 
 interface QuestionOption {
   id: string;
@@ -52,13 +60,6 @@ interface ExamBlueprint {
   isActive?: boolean;
 }
 
-interface WarningLog {
-  type: string;
-  message: string;
-  createdAtMillis: number;
-  count: number;
-}
-
 interface AnswerRecord {
   questionId: string;
   questionNumber: number;
@@ -91,16 +92,11 @@ interface ExamResult {
   timeUsedSeconds: number;
   categoryBreakdown: Record<string, { total: number; correct: number; scorePercent: number }>;
   answers: AnswerRecord[];
-  warningLogs: WarningLog[];
+  warningLogs: AssessmentWarningLog[];
 }
 
 type ExamPhase = 'loading' | 'instructions' | 'in_progress' | 'warning_blocked' | 'auto_submitting' | 'submitted';
-type EndReason = 'submitted' | 'time_expired' | 'warnings' | 'idle' | 'offline';
 
-const WARNING_LIMIT = 3;
-const IDLE_WARNING_MS = 3 * 60 * 1000;
-const IDLE_STOP_MS = 10 * 60 * 1000;
-const OFFLINE_STOP_MS = 10 * 60 * 1000;
 const DEFAULT_PRACTICE_COUNT = 20;
 const DEFAULT_MOCK_COUNT = 100;
 const DEFAULT_PRACTICE_MINUTES = 30;
@@ -121,14 +117,6 @@ const formatTime = (seconds: number) => {
   const m = Math.floor((safeSeconds % 3600) / 60);
   const s = safeSeconds % 60;
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-};
-
-const getAttemptStatus = (reason: EndReason) => {
-  if (reason === 'time_expired') return 'auto_submitted_time_expired';
-  if (reason === 'warnings') return 'auto_submitted_warnings';
-  if (reason === 'idle') return 'auto_submitted_idle';
-  if (reason === 'offline') return 'auto_submitted_offline';
-  return 'submitted';
 };
 
 const normalizeQuestion = (id: string, data: any): Question => ({
@@ -226,8 +214,8 @@ export default function ExamSimulation() {
   const [expiresAtMillis, setExpiresAtMillis] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState((isFullMock ? DEFAULT_MOCK_MINUTES : DEFAULT_PRACTICE_MINUTES) * 60);
   const [warningCount, setWarningCount] = useState(0);
-  const [warningLogs, setWarningLogs] = useState<WarningLog[]>([]);
-  const [warningModal, setWarningModal] = useState<WarningLog | null>(null);
+  const [warningLogs, setWarningLogs] = useState<AssessmentWarningLog[]>([]);
+  const [warningModal, setWarningModal] = useState<AssessmentWarningLog | null>(null);
   const [refreshCount, setRefreshCount] = useState(0);
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   const [offlineSince, setOfflineSince] = useState<number | null>(null);
@@ -252,7 +240,9 @@ export default function ExamSimulation() {
   const currentQuestion = questions[currentIndex];
   const answeredCount = Object.keys(answers).filter((questionId) => questions.some((question) => question.id === questionId)).length;
   const unansweredCount = Math.max(0, questions.length - answeredCount);
-  const integrityLabel = isFullMock ? 'Strict Exam Mode' : 'Standard Protection';
+  const integrityLevel = isFullMock ? 'strict_exam_mode' : 'standard_protection';
+  const integrityPolicy = useMemo(() => getIntegrityPolicy(integrityLevel), [integrityLevel]);
+  const integrityLabel = integrityPolicy.label;
 
   useEffect(() => {
     phaseRef.current = phase;
@@ -290,7 +280,7 @@ export default function ExamSimulation() {
     startedAtRef.current = startedAtMillis;
   }, [startedAtMillis]);
 
-  const compileResult = useCallback((finalAnswers: Record<string, string>, finalLogs: WarningLog[], reason: EndReason): ExamResult => {
+  const compileResult = useCallback((finalAnswers: Record<string, string>, finalLogs: AssessmentWarningLog[], reason: AssessmentEndReason): ExamResult => {
     const finalQuestions = questionsRef.current;
     const answerRecords = finalQuestions.map((question, index) => {
       const selectedOptionId = finalAnswers[question.id] || '';
@@ -349,7 +339,7 @@ export default function ExamSimulation() {
     };
   }, []);
 
-  const submitAttempt = useCallback(async (reason: EndReason, logsOverride?: WarningLog[]) => {
+  const submitAttempt = useCallback(async (reason: AssessmentEndReason, logsOverride?: AssessmentWarningLog[]) => {
     if (submittingRef.current || !user) return;
     submittingRef.current = true;
     setPhase('auto_submitting');
@@ -373,7 +363,7 @@ export default function ExamSimulation() {
         type: isFullMock ? 'mock_exam' : 'practice_exam',
         mode: user.learningMode || 'self_review',
         assessmentMode: mode,
-        integrityLevel: isFullMock ? 'strict_exam_mode' : 'standard_protection',
+        integrityLevel: integrityPolicy.level,
         status: attemptStatus,
         state: attemptStatus,
         blueprintId: blueprint.id || '',
@@ -472,18 +462,18 @@ export default function ExamSimulation() {
       setPhase('submitted');
       submittingRef.current = false;
     }
-  }, [blueprint.id, blueprint.title, compileResult, isFullMock, localAttemptKey, mode, refreshCount, user]);
+  }, [blueprint.id, blueprint.title, compileResult, integrityPolicy.level, isFullMock, localAttemptKey, mode, refreshCount, user]);
 
   const recordWarning = useCallback((type: string, message: string) => {
     if (!['in_progress', 'warning_blocked'].includes(phaseRef.current) || submittingRef.current) return;
     const nextCount = warningCountRef.current + 1;
-    const nextLog = { type, message, createdAtMillis: Date.now(), count: nextCount };
+    const nextLog = createIntegrityWarning(type, message, nextCount);
     const nextLogs = [...warningLogsRef.current, nextLog];
     setWarningCount(nextCount);
     setWarningLogs(nextLogs);
     setWarningModal(nextLog);
 
-    if (nextCount >= WARNING_LIMIT) {
+    if (shouldAutoSubmitForWarning(nextCount, integrityPolicy)) {
       void submitAttempt('warnings', nextLogs);
       return;
     }
@@ -498,7 +488,7 @@ export default function ExamSimulation() {
         updatedAt: serverTimestamp(),
       }).catch((error) => console.warn('warning update failed', error));
     }
-  }, [submitAttempt]);
+  }, [integrityPolicy, submitAttempt]);
 
   useEffect(() => {
     const loadExam = async () => {
@@ -632,9 +622,9 @@ export default function ExamSimulation() {
 
     const idleTimer = window.setInterval(() => {
       const idleFor = Date.now() - lastActivityAt;
-      if (idleFor >= IDLE_STOP_MS) {
+      if (idleFor >= integrityPolicy.idleStopMs) {
         void submitAttempt('idle');
-      } else if (idleFor >= IDLE_WARNING_MS && phaseRef.current === 'in_progress') {
+      } else if (idleFor >= integrityPolicy.idleWarningMs && phaseRef.current === 'in_progress') {
         recordWarning('idle', 'No activity was detected for several minutes. The timer continued while you were idle.');
       }
     }, 30000);
@@ -643,7 +633,7 @@ export default function ExamSimulation() {
       activityEvents.forEach((eventName) => window.removeEventListener(eventName, markActivity));
       window.clearInterval(idleTimer);
     };
-  }, [lastActivityAt, phase, recordWarning, submitAttempt]);
+  }, [integrityPolicy.idleStopMs, integrityPolicy.idleWarningMs, lastActivityAt, phase, recordWarning, submitAttempt]);
 
   useEffect(() => {
     if (!['in_progress', 'warning_blocked'].includes(phase)) return;
@@ -711,12 +701,12 @@ export default function ExamSimulation() {
   useEffect(() => {
     if (!offlineSince || !['in_progress', 'warning_blocked'].includes(phase)) return;
     const timer = window.setInterval(() => {
-      if (Date.now() - offlineSince >= OFFLINE_STOP_MS) {
+      if (Date.now() - offlineSince >= integrityPolicy.offlineStopMs) {
         void submitAttempt('offline');
       }
     }, 15000);
     return () => window.clearInterval(timer);
-  }, [offlineSince, phase, submitAttempt]);
+  }, [integrityPolicy.offlineStopMs, offlineSince, phase, submitAttempt]);
 
   useEffect(() => {
     if (!['in_progress', 'warning_blocked'].includes(phase)) return;
@@ -754,7 +744,7 @@ export default function ExamSimulation() {
       type: isFullMock ? 'mock_exam' : 'practice_exam',
       mode: user.learningMode || 'self_review',
       assessmentMode: mode,
-      integrityLevel: isFullMock ? 'strict_exam_mode' : 'standard_protection',
+      integrityLevel: integrityPolicy.level,
       status: 'in_progress',
       state: 'in_progress',
       startedAt: serverTimestamp(),
@@ -892,7 +882,7 @@ export default function ExamSimulation() {
                 <p>Timer continues during warnings, refreshes, offline periods, and idle periods.</p>
                 <p>You may skip items and return using the navigator. Unanswered items submit as blank.</p>
                 <p>Copy, paste, right-click, leaving the tab, and repeated refreshes are logged.</p>
-                <p>Warning 3 automatically submits the assessment and flags the attempt for review.</p>
+                <p>Warning {integrityPolicy.warningLimit} automatically submits the assessment and flags the attempt for review.</p>
               </div>
             </div>
 
@@ -1100,7 +1090,7 @@ export default function ExamSimulation() {
           <section className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-4">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="font-headline text-sm font-black text-on-surface">Item navigator</h2>
-              <span className="text-xs font-bold text-on-surface-variant">Warnings {warningCount}/{WARNING_LIMIT}</span>
+              <span className="text-xs font-bold text-on-surface-variant">Warnings {warningCount}/{integrityPolicy.warningLimit}</span>
             </div>
             <div className="grid max-h-[380px] grid-cols-5 gap-2 overflow-y-auto pr-1">
               {questions.map((question, index) => {
@@ -1159,16 +1149,16 @@ export default function ExamSimulation() {
       {warningModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim/70 px-5">
           <div className="w-full max-w-md rounded-3xl border border-outline-variant/40 bg-surface-container-lowest p-6 shadow-2xl">
-            <p className="text-xs font-black uppercase tracking-widest text-error">Warning {Math.min(warningModal.count, WARNING_LIMIT)} of {WARNING_LIMIT}</p>
+            <p className="text-xs font-black uppercase tracking-widest text-error">Warning {Math.min(warningModal.count, integrityPolicy.warningLimit)} of {integrityPolicy.warningLimit}</p>
             <h2 className="mt-2 font-headline text-2xl font-black text-on-surface">{warningModal.type.replace(/_/g, ' ')}</h2>
             <p className="mt-3 text-sm leading-relaxed text-on-surface-variant">{warningModal.message}</p>
-            <p className="mt-3 text-sm font-bold text-on-surface">The timer is still running. On warning 3, the attempt submits automatically and is flagged.</p>
+            <p className="mt-3 text-sm font-bold text-on-surface">The timer is still running. On warning {integrityPolicy.warningLimit}, the attempt submits automatically and is flagged.</p>
             <button
-              disabled={warningModal.count >= WARNING_LIMIT || phase === 'auto_submitting'}
+              disabled={warningModal.count >= integrityPolicy.warningLimit || phase === 'auto_submitting'}
               onClick={resumeAfterWarning}
               className="mt-6 w-full rounded-2xl bg-primary px-5 py-4 text-sm font-black uppercase tracking-widest text-on-primary disabled:opacity-50"
             >
-              {warningModal.count >= WARNING_LIMIT ? 'Submitting attempt...' : 'I understand, resume'}
+              {warningModal.count >= integrityPolicy.warningLimit ? 'Submitting attempt...' : 'I understand, resume'}
             </button>
           </div>
         </div>
