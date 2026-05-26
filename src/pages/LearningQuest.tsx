@@ -36,6 +36,7 @@ import {
   ModuleLearningState,
 } from '../lib/learningJourney';
 import { createNotification } from '../lib/notifications';
+import { getIntegrityPolicy } from '../lib/assessmentIntegrity';
 
 type QuestPhase = 'intro' | 'read' | 'lesson' | 'miniQuiz' | 'activity' | 'finalExam' | 'complete';
 
@@ -89,7 +90,6 @@ const defaultProgress: QuestProgress = {
 };
 
 const FINAL_PASSING_SCORE = 85;
-const MAX_PROCTOR_WARNINGS = 5;
 const EXAM_LOCK_MINUTES = 5;
 
 function normalizeFirestoreModule(id: string, data: any): JourneyModule {
@@ -206,6 +206,7 @@ export default function LearningQuest() {
     integrityLevel: 'basic',
     ...((module as any).attemptPolicy || {}),
   };
+  const integrityPolicy = useMemo(() => getIntegrityPolicy(attemptPolicy.integrityLevel), [attemptPolicy.integrityLevel]);
   const attemptsUsed = progress.finalAttemptCount || 0;
   const finalAttemptsLocked = progress.status !== 'completed' && attemptsUsed >= Math.max(1, attemptPolicy.maxAttempts);
   const moduleDueAt = (module as any).dueAt ? new Date((module as any).dueAt) : null;
@@ -472,7 +473,7 @@ export default function LearningQuest() {
         setProctorMessage(`Final exam is locked for ${formatDuration(examLockSecondsLeft)} after repeated warnings.`);
         return;
       }
-      if (antiCheatEnabled) await requestExamFullscreen();
+      if (antiCheatEnabled && integrityPolicy.requiresFullscreen) await requestExamFullscreen();
       await prepareFinalExam(!!progress.mustReread || (progress.failedAttempts || 0) > 0);
     }
     persistProgress({
@@ -535,9 +536,9 @@ export default function LearningQuest() {
   const registerProctorWarning = async (reason: string) => {
     const nextCount = (progress.proctorWarnings || 0) + 1;
     const nextReasons = [...(progress.proctorWarningReasons || []), reason];
-    if (nextCount >= MAX_PROCTOR_WARNINGS) {
+    if (nextCount >= integrityPolicy.warningLimit && integrityPolicy.autoSubmitOnWarningLimit) {
       const lockedUntil = Date.now() + EXAM_LOCK_MINUTES * 60 * 1000;
-      setProctorMessage(`Exam paused after ${MAX_PROCTOR_WARNINGS} warnings. You can retry in ${EXAM_LOCK_MINUTES} minutes.`);
+      setProctorMessage(`Exam paused after ${integrityPolicy.warningLimit} warnings. You can retry in ${EXAM_LOCK_MINUTES} minutes.`);
       setFinalAnswers({});
       setFinalGrades({});
       await persistProgress({
@@ -554,7 +555,7 @@ export default function LearningQuest() {
       return;
     }
 
-    setProctorMessage(`${reason} Warning ${nextCount}/${MAX_PROCTOR_WARNINGS}. Keep the exam full-screen and active.`);
+    setProctorMessage(`${reason} Warning ${nextCount}/${integrityPolicy.warningLimit}. ${integrityPolicy.label} is active for this exam.`);
     await persistProgress({ ...progress, proctorWarnings: nextCount, proctorWarningReasons: nextReasons });
   };
 
@@ -1027,12 +1028,16 @@ export default function LearningQuest() {
       warn('Right-click menu is disabled during the exam.');
     };
 
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleBlur);
-    document.addEventListener('copy', blockClipboard);
-    document.addEventListener('paste', blockClipboard);
-    document.addEventListener('contextmenu', blockContextMenu);
+    if (integrityPolicy.requiresFullscreen) document.addEventListener('fullscreenchange', handleFullscreenChange);
+    if (integrityPolicy.blocksTabSwitch) {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      window.addEventListener('blur', handleBlur);
+    }
+    if (integrityPolicy.blocksClipboard) {
+      document.addEventListener('copy', blockClipboard);
+      document.addEventListener('paste', blockClipboard);
+    }
+    if (integrityPolicy.blocksContextMenu) document.addEventListener('contextmenu', blockContextMenu);
 
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
@@ -1042,7 +1047,7 @@ export default function LearningQuest() {
       document.removeEventListener('paste', blockClipboard);
       document.removeEventListener('contextmenu', blockContextMenu);
     };
-  }, [progress.phase, progress.proctorWarnings, finalAnswers, antiCheatEnabled]);
+  }, [progress.phase, progress.proctorWarnings, finalAnswers, antiCheatEnabled, integrityPolicy]);
 
   useEffect(() => {
     if (!examLocked && !(progress.phase === 'finalExam' && examTimeLimitSeconds > 0)) return;
@@ -1508,10 +1513,11 @@ export default function LearningQuest() {
             <HeaderKicker icon={Trophy} label="Final module exam" />
             <h2 className="text-2xl font-extrabold font-headline text-on-surface">Pass this module exam to unlock completion.</h2>
             <p className="text-sm text-on-surface-variant mt-2">Required score: {FINAL_PASSING_SCORE}%. Choices support A/B/C/D and Enter. Written answers are AI-checked with spelling tolerance.</p>
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-4 gap-3">
               <Metric label="Attempts" value={`${attemptsUsed}/${attemptPolicy.maxAttempts}`} />
               <Metric label="Score kept" value={attemptPolicy.scoreMode} />
               <Metric label="Timer" value={examTimeLimitSeconds ? formatDuration(examTimeSecondsLeft) : 'None'} />
+              <Metric label="Integrity" value={antiCheatEnabled ? integrityPolicy.label : 'Open'} />
             </div>
             {Object.values(finalAnswers).some((answer) => String(answer || '').trim()) && (
               <p className="mt-3 text-[11px] font-bold text-on-surface-variant/60">Answers autosaved{answerDraftSavedAt ? ` ${new Date(answerDraftSavedAt).toLocaleTimeString()}` : ''}.</p>
