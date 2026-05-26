@@ -415,7 +415,7 @@ export default function InstructorModules() {
   const [assistantSource, setAssistantSource] = useState('');
   const [isDrafting, setIsDrafting] = useState(false);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
-  const [moduleFilter, setModuleFilter] = useState<'all' | 'published' | 'draft'>('all');
+  const [moduleFilter, setModuleFilter] = useState<'all' | 'published' | 'published_public' | 'published_class' | 'draft'>('all');
   const [builderMode, setBuilderMode] = useState<'edit' | 'preview'>('preview');
   const [moduleRailCollapsed, setModuleRailCollapsed] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
@@ -470,6 +470,8 @@ export default function InstructorModules() {
     const term = searchTerm.trim().toLowerCase();
     return modules.filter((module) => {
       if (moduleFilter === 'published' && !module.isPublished) return false;
+      if (moduleFilter === 'published_public' && (!module.isPublished || module.publishScope !== 'public')) return false;
+      if (moduleFilter === 'published_class' && (!module.isPublished || module.publishScope !== 'classes')) return false;
       if (moduleFilter === 'draft' && module.isPublished) return false;
       if (!term) return true;
       const subject = journeySubjects.find((item) => item.id === module.subjectId);
@@ -624,7 +626,8 @@ export default function InstructorModules() {
 
     setIsCreatingNew(true);
     setSelectedModuleId('');
-    setModuleRailCollapsed(true);
+    setModuleRailCollapsed(false);
+    setAiOpen(false);
     setDraft({
       ...emptyModule,
       id: '',
@@ -652,6 +655,9 @@ export default function InstructorModules() {
       return;
     }
     setTourStep(nextStep);
+    if (nextStep <= 1) {
+      setModuleRailCollapsed(false);
+    }
     if (nextStep >= 2 && nextStep <= 8) {
       setBuilderMode('preview');
       setModuleRailCollapsed(true);
@@ -1124,10 +1130,12 @@ export default function InstructorModules() {
                     className="w-full bg-surface-container border border-outline-variant/30 rounded-xl py-3 pl-10 pr-3 text-sm font-medium outline-none focus:border-primary/40"
                   />
                 </div>
-                <div className="grid grid-cols-3 gap-2 mb-4">
+                <div className="grid grid-cols-2 gap-2 mb-4 xl:grid-cols-5">
                   {[
                     { id: 'all', label: 'All' },
                     { id: 'published', label: 'Published' },
+                    { id: 'published_public', label: 'Public' },
+                    { id: 'published_class', label: 'Class' },
                     { id: 'draft', label: 'Drafts' },
                   ].map((filter) => (
                     <button
@@ -1167,7 +1175,7 @@ export default function InstructorModules() {
                         <p className="text-[11px] text-on-surface-variant/60 mt-1 line-clamp-2">{subject?.title || 'Subject'} / {topic?.title || 'Topic'}</p>
                         <p className="text-[11px] text-on-surface-variant/50 mt-1 line-clamp-1">Author: {module.authorName || 'Instructor'}</p>
                         <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/40 mt-2">
-                          {module.parts.length} parts / {module.finalExam.length} exam items / {module.isPublished ? 'Published' : 'Draft'}
+                          {module.parts.length} parts / {module.finalExam.length} exam items / {module.isPublished ? `Published ${module.publishScope === 'classes' ? 'to class' : 'public'}` : 'Draft'}
                         </p>
                       </button>
                     );
@@ -1438,8 +1446,20 @@ function StudioTourOverlay({
     let frame = 0;
     let timeout = 0;
     let retries = 0;
+    const findTarget = () => {
+      const elements = Array.from(document.querySelectorAll(`[data-tour="${current.target}"]`)) as HTMLElement[];
+      const visible = elements.filter((element) => {
+        const box = element.getBoundingClientRect();
+        return box.width > 0 && box.height > 0;
+      });
+      return (
+        visible.find((element) => element.closest('[data-tour-scope="focused-studio"]')) ||
+        visible[0] ||
+        null
+      );
+    };
     const measure = () => {
-      const element = document.querySelector(`[data-tour="${current.target}"]`) as HTMLElement | null;
+      const element = findTarget();
       if (!element) {
         if (retries < 8) {
           retries += 1;
@@ -1456,7 +1476,7 @@ function StudioTourOverlay({
     };
     measure();
     const handleUpdate = () => {
-      const element = document.querySelector(`[data-tour="${current.target}"]`) as HTMLElement | null;
+      const element = findTarget();
       setRect(element ? element.getBoundingClientRect() : null);
     };
     window.addEventListener('resize', handleUpdate);
@@ -1479,10 +1499,14 @@ function StudioTourOverlay({
     : null;
   const cardWidth = 380;
   const cardTop = rect
-    ? (rect.bottom + 18 + 250 < window.innerHeight ? rect.bottom + 18 : Math.max(20, rect.top - 270))
+    ? (rect.bottom + 18 + 280 < window.innerHeight ? rect.bottom + 18 : Math.max(20, rect.top - 300))
     : undefined;
   const cardLeft = rect
-    ? Math.min(window.innerWidth - cardWidth - 20, Math.max(20, rect.left))
+    ? (
+        rect.right + 18 + cardWidth < window.innerWidth
+          ? rect.right + 18
+          : Math.min(window.innerWidth - cardWidth - 20, Math.max(20, rect.left))
+      )
     : undefined;
 
   return (
@@ -2468,7 +2492,7 @@ function FocusedSimulatorOverlay({
   const isExam = activeItem.type === 'exam';
 
   return (
-    <div className="fixed inset-0 z-[80] flex flex-col overflow-hidden bg-surface text-on-surface">
+    <div data-tour-scope="focused-studio" className="fixed inset-0 z-[80] flex flex-col overflow-hidden bg-surface text-on-surface">
       <header className="z-20 flex h-16 shrink-0 items-center justify-between border-b border-outline-variant/30 bg-surface-container-lowest/95 px-4 backdrop-blur lg:px-8">
         <div className="flex min-w-0 items-center gap-4">
           <button onClick={onClose} className="rounded-full p-2 text-on-surface-variant hover:bg-surface-container" title="Back to split workspace">

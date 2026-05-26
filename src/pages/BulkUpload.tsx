@@ -3,7 +3,7 @@ import InstructorLayout from '../components/InstructorLayout';
 import AdminLayout from '../components/AdminLayout';
 import { useAuth } from '../context/AuthContext';
 import Papa from 'papaparse';
-import { collection, doc, setDoc, getDocs, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, doc, setDoc, getDocs, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { motion } from 'motion/react';
 import { 
@@ -94,32 +94,66 @@ export default function BulkUpload() {
           const skillMap: Record<string, string> = {};
           skillSnap.forEach(s => skillMap[s.data().title.toLowerCase()] = s.id);
 
-          const existingStems = new Set(existingQs.docs.map(d => d.data().stem.toLowerCase().trim()));
+          const existingStems = new Set(existingQs.docs.map(d => String(d.data().stem || '').toLowerCase().trim()).filter(Boolean));
+          const importedStems = new Set<string>();
           const categoryId = selectedCategoryId;
+          const getCell = (rowValue: Record<string, any>, ...names: string[]) => {
+            for (const name of names) {
+              const value = rowValue[name];
+              if (value != null && String(value).trim()) return String(value).trim();
+            }
+            return '';
+          };
+          const normalizeDifficulty = (value: string) => {
+            const normalized = value.trim().toLowerCase();
+            if (!normalized || normalized === 'average' || normalized === 'normal') return 'medium';
+            if (['easy', 'medium', 'hard'].includes(normalized)) return normalized;
+            return '';
+          };
 
           for (const [index, row] of (data as any[]).entries()) {
             try {
-              const { 
-                Stem, 
-                'Option A': optA, 
-                'Option B': optB, 
-                'Option C': optC, 
-                'Option D': optD, 
-                'Correct Option': correct, 
-                'Explanation': explanation,
-                'Topic': topicName,
-                'Skills': skillsStr,
-                'Difficulty': difficulty,
-                'Type': type 
-              } = row;
-
-              const cleanStem = Stem?.trim();
+              const cleanStem = getCell(row, 'Stem', 'Question Stem', 'Question');
+              const optA = getCell(row, 'Option A', 'A');
+              const optB = getCell(row, 'Option B', 'B');
+              const optC = getCell(row, 'Option C', 'C');
+              const optD = getCell(row, 'Option D', 'D');
+              const correct = getCell(row, 'Correct Option', 'Correct Answer', 'Answer').toUpperCase();
+              const explanation = getCell(row, 'Explanation', 'Rationalization', 'Rationale');
+              const topicName = getCell(row, 'Topic');
+              const skillsStr = getCell(row, 'Skills', 'Skill Tags');
+              const difficulty = normalizeDifficulty(getCell(row, 'Difficulty'));
+              const type = getCell(row, 'Type', 'Exam Type') || 'practice';
+              const competencyId = getCell(row, 'Competency', 'Competency ID');
+              const specialization = getCell(row, 'Specialization', 'Major');
+              const questionFamilyId = getCell(row, 'Question Family', 'Family ID');
+              const sourceNote = getCell(row, 'Source Note', 'Source');
+              const wrongChoiceExplanations = {
+                A: getCell(row, 'Wrong A', 'Option A Explanation'),
+                B: getCell(row, 'Wrong B', 'Option B Explanation'),
+                C: getCell(row, 'Wrong C', 'Option C Explanation'),
+                D: getCell(row, 'Wrong D', 'Option D Explanation'),
+              };
               // Note: Category column is ignored.
-              if (!cleanStem || !optA || !correct || !topicName) {
-                throw new Error(`Row ${index + 2}: Missing required fields (Stem, Options, Correct, Topic).`);
+              if (!cleanStem || !optA || !optB || !optC || !optD || !correct || !topicName || !explanation) {
+                throw new Error(`Row ${index + 2}: Missing required fields (Stem, all options A-D, Correct Option, Explanation, Topic).`);
               }
 
-              if (existingStems.has(cleanStem.toLowerCase())) {
+              if (!['A', 'B', 'C', 'D'].includes(correct)) {
+                throw new Error(`Row ${index + 2}: Correct Option must be A, B, C, or D.`);
+              }
+
+              if (!difficulty) {
+                throw new Error(`Row ${index + 2}: Difficulty must be Easy, Medium, Hard, or Average.`);
+              }
+
+              const optionValues = [optA, optB, optC, optD].map((option) => option.toLowerCase());
+              if (new Set(optionValues).size !== optionValues.length) {
+                throw new Error(`Row ${index + 2}: Options must not be duplicated.`);
+              }
+
+              const stemKey = cleanStem.toLowerCase();
+              if (existingStems.has(stemKey) || importedStems.has(stemKey)) {
                 throw new Error(`Row ${index + 2}: Duplicate question stem.`);
               }
 
@@ -155,23 +189,33 @@ export default function BulkUpload() {
                   { id: 'C', text: optC },
                   { id: 'D', text: optD }
                 ],
-                correctOptionId: correct.toUpperCase().trim(),
-                explanation: explanation || '',
+                correctOptionId: correct,
+                explanation,
+                rationalization: explanation,
+                wrongChoiceExplanations,
                 categoryId,
                 topicId,
                 skillIds,
-                difficulty: difficulty || 'Average',
-                type: type || 'practice',
-                approved: true,
-                isPublished: true,
+                competencyId,
+                specialization,
+                questionFamilyId,
+                familyId: questionFamilyId,
+                sourceNote,
+                difficulty,
+                type,
+                status: 'draft',
+                approvalStatus: 'for_review',
+                approved: false,
+                isPublished: false,
                 aiGenerated: false,
                 createdBy: user?.uid,
+                author: user?.fullName || user?.email || 'Instructor',
                 version: 1,
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp()
               });
               
-              existingStems.add(cleanStem.toLowerCase());
+              importedStems.add(stemKey);
               successCount++;
             } catch (err: any) {
               failCount++;
@@ -195,8 +239,8 @@ export default function BulkUpload() {
   };
 
   const downloadTemplate = () => {
-    const csvContent = "Stem,Option A,Option B,Option C,Option D,Correct Option,Explanation,Topic,Skills,Difficulty,Type\n" +
-      "\"Who is the father of Filipino language?\",\"Manuel L. Quezon\",\"Jose Rizal\",\"Andres Bonifacio\",\"Emilio Aguinaldo\",\"A\",\"Manuel L. Quezon is the Ama ng Wikang Pambansa.\",\"History\",\"General Knowledge,Language\",\"Easy\",\"practice\"";
+    const csvContent = "Stem,Option A,Option B,Option C,Option D,Correct Option,Explanation,Wrong A,Wrong B,Wrong C,Wrong D,Topic,Skills,Competency,Specialization,Question Family,Exam Type,Difficulty,Source Note\n" +
+      "\"Who is known as the father of the Filipino language?\",\"Manuel L. Quezon\",\"Jose Rizal\",\"Andres Bonifacio\",\"Emilio Aguinaldo\",\"A\",\"Manuel L. Quezon is recognized as Ama ng Wikang Pambansa.\",\"Correct choice, not wrong.\",\"Rizal influenced nationalism but was not given this title.\",\"Bonifacio led the Katipunan, not language policy.\",\"Aguinaldo was the first president, not this title.\",\"History\",\"General Knowledge,Language\",\"GENED-HIS-01\",\"General Education\",\"filipino-language-title\",\"practice\",\"Easy\",\"LET reviewer import sample\"";
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     const url = URL.createObjectURL(blob);
@@ -243,7 +287,7 @@ export default function BulkUpload() {
                     </div>
                     <div>
                       <h3 className="font-headline font-bold text-lg text-on-surface">Question Bank CSV</h3>
-                      <p className="text-xs text-on-surface-variant/40 font-medium italic">Category column is no longer needed.</p>
+                      <p className="text-xs text-on-surface-variant/40 font-medium italic">Imported questions enter draft review, not live exams.</p>
                     </div>
                   </div>
                   <button 
@@ -279,7 +323,7 @@ export default function BulkUpload() {
                   {file ? (
                     <div className="text-center">
                       <p className="font-bold text-on-surface text-lg mb-1">{file.name}</p>
-                      <p className="text-xs text-on-surface-variant/40">{(file.size / 1024).toFixed(1)} KB • Click to change</p>
+                      <p className="text-xs text-on-surface-variant/40">{(file.size / 1024).toFixed(1)} KB - Click to change</p>
                     </div>
                   ) : (
                     <>
@@ -298,7 +342,7 @@ export default function BulkUpload() {
               <div className="space-y-1">
                 <h4 className="font-bold text-primary text-sm">Validation Guard</h4>
                 <p className="text-xs text-on-surface-variant/70 leading-relaxed font-medium">
-                  The chosen curriculum will be applied to all imported questions. Topics will be auto-created for this curriculum if they don't exist. Each row must have a unique stem.
+                  The chosen curriculum will be applied to all imported questions. Rows are validated for complete options, valid answers, rationalizations, difficulty, and duplicate stems. Successful imports stay as draft/for-review questions until approved.
                 </p>
               </div>
             </div>
@@ -331,7 +375,7 @@ export default function BulkUpload() {
             </div>
             
             <h2 className="text-3xl font-black font-headline text-on-surface mb-2">Import Finished</h2>
-            <p className="text-on-surface-variant/60 font-medium mb-10">We processed your file and updated the curriculum data banks.</p>
+            <p className="text-on-surface-variant/60 font-medium mb-10">We processed your file and saved valid rows as draft questions for review.</p>
             
             <div className="grid grid-cols-2 gap-4 max-w-sm mx-auto mb-10">
                <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-2xl">
