@@ -11,6 +11,7 @@ import {
   FileQuestion,
   Gamepad2,
   Download,
+  Eye,
   EyeOff,
   Highlighter,
   Library,
@@ -19,6 +20,7 @@ import {
   Save,
   ShieldAlert,
   Trophy,
+  X,
 } from 'lucide-react';
 import { addDoc, collection, doc, getDoc, getDocs, increment, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -146,6 +148,7 @@ export default function LearningQuest() {
   const [lessonNote, setLessonNote] = useState('');
   const [lessonHighlights, setLessonHighlights] = useState<LessonHighlight[]>([]);
   const [activeHighlightId, setActiveHighlightId] = useState('');
+  const [revealedHighlightIds, setRevealedHighlightIds] = useState<string[]>([]);
   const [selectedText, setSelectedText] = useState('');
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [lowBandwidth, setLowBandwidth] = useState(() => localStorage.getItem('let-mastery-low-bandwidth') === '1');
@@ -222,6 +225,7 @@ export default function LearningQuest() {
         setLessonHighlights([]);
       }
       setActiveHighlightId('');
+      setRevealedHighlightIds([]);
       setSelectedText('');
     }
     loadLessonNote();
@@ -565,6 +569,21 @@ export default function LearningQuest() {
 
   const updateHighlight = (id: string, patch: Partial<LessonHighlight>) => {
     setLessonHighlights((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
+    if (patch.hidden === false) {
+      setRevealedHighlightIds((ids) => ids.filter((itemId) => itemId !== id));
+    }
+  };
+
+  const removeHighlight = (id: string) => {
+    setLessonHighlights((items) => items.filter((item) => item.id !== id));
+    setRevealedHighlightIds((ids) => ids.filter((itemId) => itemId !== id));
+    setActiveHighlightId('');
+  };
+
+  const toggleRevealHighlight = (id: string) => {
+    setRevealedHighlightIds((ids) => (
+      ids.includes(id) ? ids.filter((itemId) => itemId !== id) : [...ids, id]
+    ));
   };
 
   const recordMistake = async (question: JourneyQuestion, answer: string, sourceType: string, sourceAttemptId = '') => {
@@ -1188,20 +1207,69 @@ export default function LearningQuest() {
                 </button>
               </div>
               <div onMouseUp={captureSelectedText} className="text-on-surface-variant leading-relaxed whitespace-pre-line select-text">
-                {renderHighlightedText(currentPart.textbookSection.body, lessonHighlights, activeHighlightId, setActiveHighlightId)}
+                {renderHighlightedText(
+                  currentPart.textbookSection.body,
+                  lessonHighlights,
+                  activeHighlightId,
+                  setActiveHighlightId,
+                  revealedHighlightIds,
+                  toggleRevealHighlight,
+                )}
               </div>
               {activeHighlightId && (
                 <div className="mt-3 rounded-2xl border border-primary/20 bg-primary/5 p-4">
-                  <div className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary mb-2">
-                    <MessageCircle size={14} />
-                    Note for this highlight
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary">
+                        <MessageCircle size={14} />
+                        Highlight tools
+                      </div>
+                      <p className="mt-2 text-sm font-semibold text-on-surface">
+                        "{lessonHighlights.find((item) => item.id === activeHighlightId)?.text}"
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {lessonHighlights.find((item) => item.id === activeHighlightId)?.hidden ? (
+                        <>
+                          <button
+                            onClick={() => toggleRevealHighlight(activeHighlightId)}
+                            className="inline-flex items-center gap-2 rounded-full bg-surface-container px-3 py-2 text-xs font-bold text-on-surface"
+                          >
+                            <Eye size={14} />
+                            {revealedHighlightIds.includes(activeHighlightId) ? 'Hide again' : 'Reveal once'}
+                          </button>
+                          <button
+                            onClick={() => updateHighlight(activeHighlightId, { hidden: false })}
+                            className="inline-flex items-center gap-2 rounded-full bg-primary text-on-primary px-3 py-2 text-xs font-bold"
+                          >
+                            <Eye size={14} />
+                            Unhide
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => updateHighlight(activeHighlightId, { hidden: true })}
+                          className="inline-flex items-center gap-2 rounded-full bg-surface-container px-3 py-2 text-xs font-bold text-on-surface"
+                        >
+                          <EyeOff size={14} />
+                          Hide for recall
+                        </button>
+                      )}
+                      <button
+                        onClick={() => removeHighlight(activeHighlightId)}
+                        className="inline-flex items-center gap-2 rounded-full bg-error/10 px-3 py-2 text-xs font-bold text-error"
+                      >
+                        <X size={14} />
+                        Remove
+                      </button>
+                    </div>
                   </div>
                   <textarea
                     value={lessonHighlights.find((item) => item.id === activeHighlightId)?.note || ''}
                     onChange={(event) => updateHighlight(activeHighlightId, { note: event.target.value })}
                     rows={2}
                     placeholder="Add a short note for this exact highlighted idea."
-                    className="w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm outline-none focus:border-primary/40 resize-none"
+                    className="mt-4 w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm outline-none focus:border-primary/40 resize-none"
                   />
                 </div>
               )}
@@ -1605,6 +1673,8 @@ function renderHighlightedText(
   highlights: LessonHighlight[],
   activeHighlightId: string,
   setActiveHighlightId: (id: string) => void,
+  revealedHighlightIds: string[],
+  toggleRevealHighlight: (id: string) => void,
 ) {
   if (!highlights.length) return body;
   const usable = highlights.filter((item) => item.text && body.includes(item.text));
@@ -1623,17 +1693,26 @@ function renderHighlightedText(
       break;
     }
     if (next.index > 0) parts.push(remaining.slice(0, next.index));
+    const isHidden = !!next.highlight.hidden;
+    const isRevealed = revealedHighlightIds.includes(next.highlight.id);
     parts.push(
       <button
         key={`${next.highlight.id}-${key++}`}
         type="button"
-        onClick={() => setActiveHighlightId(activeHighlightId === next.highlight.id ? '' : next.highlight.id)}
+        onClick={() => {
+          setActiveHighlightId(activeHighlightId === next.highlight.id ? '' : next.highlight.id);
+          if (isHidden && !isRevealed) toggleRevealHighlight(next.highlight.id);
+        }}
         className={`inline rounded px-1 font-semibold transition-colors ${
-          next.highlight.hidden ? 'bg-on-surface text-on-surface hover:text-surface' : 'bg-amber-200/70 text-on-surface hover:bg-amber-300/80'
+          isHidden
+            ? isRevealed
+              ? 'bg-primary/15 text-primary ring-1 ring-primary/30'
+              : 'bg-on-surface text-surface hover:bg-on-surface/90'
+            : 'bg-amber-200/70 text-on-surface hover:bg-amber-300/80'
         }`}
-        title={next.highlight.note || 'Click to add or view note'}
+        title={isHidden && !isRevealed ? 'Hidden for recall - tap to reveal' : next.highlight.note || 'Click to add or view note'}
       >
-        {next.highlight.hidden ? '______' : next.highlight.text}
+        {isHidden && !isRevealed ? 'Hidden for recall - tap to reveal' : next.highlight.text}
         {next.highlight.note && <sup className="ml-1 text-primary">note</sup>}
       </button>,
     );
