@@ -52,6 +52,13 @@ service cloud.firestore {
         'flagged_for_review'
       ];
     }
+    function isOwnedOpenAttemptUpdate() {
+      return isSignedIn() &&
+        existing().userId == request.auth.uid &&
+        incoming().userId == existing().userId &&
+        isOpenAttemptStatus(existing().get('status', 'in_progress')) &&
+        isAllowedStudentAttemptStatus(incoming().get('status', 'in_progress'));
+    }
 
     // --- Entity Validations ---
     function isValidUser(data) {
@@ -90,7 +97,7 @@ service cloud.firestore {
     match /quizAttempts/{attemptId} {
       allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
-      allow update: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
+      allow update: if isAdmin() || isOwnedOpenAttemptUpdate();
     }
     
     match /categories/{categoryId} {
@@ -128,13 +135,7 @@ service cloud.firestore {
     match /mockExamAttempts/{attemptId} {
       allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
-      allow update: if isAdmin() || (
-        isSignedIn() &&
-        existing().userId == request.auth.uid &&
-        incoming().userId == existing().userId &&
-        isOpenAttemptStatus(existing().get('status', 'in_progress')) &&
-        isAllowedStudentAttemptStatus(incoming().get('status', 'in_progress'))
-      );
+      allow update: if isAdmin() || isOwnedOpenAttemptUpdate();
       allow delete: if isAdmin();
     }
 
@@ -180,7 +181,8 @@ service cloud.firestore {
     
     match /diagnosticAttempts/{attemptId} {
       allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
-      allow create, update: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow update, delete: if isAdmin();
     }
 
     match /moduleProgress/{progressId} {
