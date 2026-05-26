@@ -161,15 +161,58 @@ const blankPart = (index: number): JourneyModulePart => ({
 function buildDefaultFlow(parts: JourneyModulePart[], finalExam: JourneyQuestion[]): FlowItem[] {
   const flow = parts.flatMap((part, index) => {
     const base: FlowItem[] = [
-      { id: `${part.id}-textbook`, type: 'textbook' as const, refId: part.id, title: `Part ${index + 1} reading: ${part.textbookSection.title}` },
-      { id: `${part.id}-lesson`, type: 'lesson' as const, refId: part.id, title: `Part ${index + 1} lesson: ${part.title}` },
-      { id: `${part.id}-quiz`, type: 'quiz' as const, refId: part.id, title: `Part ${index + 1} mini quiz` },
+      { id: `${part.id}-textbook`, type: 'textbook' as const, refId: part.id, title: getFlowTitle('textbook', part, index) },
+      { id: `${part.id}-lesson`, type: 'lesson' as const, refId: part.id, title: getFlowTitle('lesson', part, index) },
+      { id: `${part.id}-quiz`, type: 'quiz' as const, refId: part.id, title: getFlowTitle('quiz', part, index) },
     ];
-    if (part.activity?.prompt) base.push({ id: `${part.id}-activity`, type: 'activity' as const, refId: part.id, title: `Part ${index + 1} activity` });
+    if (part.activity?.prompt) base.push({ id: `${part.id}-activity`, type: 'activity' as const, refId: part.id, title: getFlowTitle('activity', part, index) });
     return base;
   });
   flow.push({ id: 'final-exam', type: 'exam', refId: 'finalExam', title: `Final exam (${finalExam.length || 1} items)` });
   return flow;
+}
+
+function getFlowTitle(type: FlowItem['type'], part: JourneyModulePart, partIndex: number, finalExamCount = 1) {
+  if (type === 'exam') return `Final exam (${finalExamCount || 1} items)`;
+  if (type === 'textbook') return `Part ${partIndex + 1} reading: ${part.textbookSection.title}`;
+  if (type === 'lesson') return `Part ${partIndex + 1} lesson: ${part.title}`;
+  if (type === 'quiz') return `Part ${partIndex + 1} mini quiz`;
+  return `Part ${partIndex + 1} activity`;
+}
+
+function patchForQuestionType(question: JourneyQuestion, type: JourneyQuestion['type']): Partial<JourneyQuestion> {
+  if (type === 'true_false') {
+    return {
+      type,
+      options: [{ id: 'A', text: 'True' }, { id: 'B', text: 'False' }],
+      correctOptionId: question.correctOptionId === 'B' ? 'B' : 'A',
+      acceptedAnswers: [],
+      expectedAnswer: '',
+    };
+  }
+
+  if (type === 'multiple_choice') {
+    const fallback = blankQuestion(question.id);
+    return {
+      type,
+      options: question.options?.length ? question.options : fallback.options,
+      correctOptionId: question.correctOptionId || fallback.correctOptionId,
+      acceptedAnswers: [],
+      expectedAnswer: '',
+    };
+  }
+
+  return {
+    type,
+    options: [],
+    correctOptionId: '',
+    acceptedAnswers: question.acceptedAnswers?.length ? question.acceptedAnswers : ['Key idea from the reading'],
+    expectedAnswer: question.expectedAnswer || 'Expected answer based on the textbook reading.',
+  };
+}
+
+function isChoiceEditorQuestion(question: JourneyQuestion) {
+  return !question.type || question.type === 'multiple_choice' || question.type === 'true_false';
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -1451,6 +1494,79 @@ function ModuleStudentPreview({
   const activePartIndex = resolvedPartIndex >= 0 ? resolvedPartIndex : 0;
   const activePart = draft.parts[activePartIndex] || blankPart(0);
 
+  const updatePartForFlowType = (partIndex: number, type: FlowItem['type']) => {
+    if (type === 'exam') return;
+    const part = draft.parts[partIndex];
+    if (!part) return;
+    const patch: Partial<JourneyModulePart> = {};
+    if (type === 'quiz' && (!part.miniQuiz || part.miniQuiz.length === 0)) {
+      patch.miniQuiz = [blankQuestion(`${part.id}-q1`)];
+    }
+    if (type === 'activity' && !part.activity?.prompt) {
+      patch.activity = { title: 'Practice activity', prompt: 'Describe what students should submit or reflect on for this part.' };
+    }
+    if (type === 'lesson' && (!part.lessonBlocks || part.lessonBlocks.length === 0)) {
+      patch.lessonBlocks = blankPart(partIndex).lessonBlocks;
+    }
+    if (Object.keys(patch).length) updatePartAtIndex(partIndex, patch);
+  };
+
+  const insertFlowItem = (type: Exclude<FlowItem['type'], 'exam'>) => {
+    const targetPartIndex = activeItem?.refId === 'finalExam' ? activePartIndex : Math.max(0, draft.parts.findIndex((part) => part.id === activeItem?.refId));
+    const targetPart = draft.parts[targetPartIndex] || activePart;
+    if (!targetPart) return;
+    updatePartForFlowType(targetPartIndex, type);
+    const newItem: FlowItem = {
+      id: `${targetPart.id}-${type}-${Date.now()}`,
+      type,
+      refId: targetPart.id,
+      title: getFlowTitle(type, targetPart, targetPartIndex),
+    };
+    const insertAt = activeItem?.type === 'exam'
+      ? activeFlowIndex
+      : activeFlowIndex >= 0
+        ? activeFlowIndex + 1
+        : draft.flowItems.length;
+    const nextFlow = [...draft.flowItems];
+    nextFlow.splice(insertAt, 0, newItem);
+    updateDraft('flowItems', nextFlow);
+    setActiveFlowItemId(newItem.id);
+  };
+
+  const changeActiveFlowType = (type: Exclude<FlowItem['type'], 'exam'>) => {
+    if (!activeItem || activeItem.type === 'exam') return;
+    const targetPartIndex = Math.max(0, draft.parts.findIndex((part) => part.id === activeItem.refId));
+    const targetPart = draft.parts[targetPartIndex] || activePart;
+    updatePartForFlowType(targetPartIndex, type);
+    updateDraft('flowItems', draft.flowItems.map((item) => item.id === activeItem.id ? {
+      ...item,
+      type,
+      title: getFlowTitle(type, targetPart, targetPartIndex),
+    } : item));
+  };
+
+  const removeFlowItem = (itemId: string) => {
+    const item = draft.flowItems.find((flowItem) => flowItem.id === itemId);
+    if (!item || item.type === 'exam') return;
+    const itemIndex = draft.flowItems.findIndex((flowItem) => flowItem.id === itemId);
+    const nextFlow = draft.flowItems.filter((flowItem) => flowItem.id !== itemId);
+    updateDraft('flowItems', nextFlow);
+    setActiveFlowItemId(nextFlow[Math.max(0, itemIndex - 1)]?.id || nextFlow[0]?.id || '');
+  };
+
+  const addFocusedPart = () => {
+    const nextPart = blankPart(draft.parts.length);
+    const nextParts = [...draft.parts, nextPart];
+    const nextFlow = [
+      ...draft.flowItems.filter((item) => item.type !== 'exam'),
+      ...buildDefaultFlow([nextPart], []).filter((item) => item.type !== 'exam'),
+      { id: 'final-exam', type: 'exam' as const, refId: 'finalExam', title: getFlowTitle('exam', nextPart, nextParts.length - 1, draft.finalExam.length || 1) },
+    ];
+    updateDraft('parts', nextParts);
+    updateDraft('flowItems', nextFlow);
+    setActiveFlowItemId(`${nextPart.id}-textbook`);
+  };
+
   if (!draft.flowItems.length) {
     return (
       <div className="rounded-2xl border border-outline-variant/40 bg-surface-container/30 p-6 text-center">
@@ -1614,6 +1730,11 @@ function ModuleStudentPreview({
           flowItems={draft.flowItems}
           onClose={() => setIsFocusOpen(false)}
           onSelectFlowItem={setActiveFlowItemId}
+          onReorderFlowItem={reorderFlowItem}
+          onInsertFlowItem={insertFlowItem}
+          onChangeFlowItemType={changeActiveFlowType}
+          onRemoveFlowItem={removeFlowItem}
+          onAddPart={addFocusedPart}
           onSave={onSave}
           onOpenAI={onOpenAI}
           updateDraft={updateDraft}
@@ -1867,8 +1988,25 @@ function QuestionLiveEditor({
   onQuestion: (patch: Partial<JourneyQuestion>) => void;
   onOption: (optionId: string, text: string) => void;
 }) {
+  const questionType = question.type || 'multiple_choice';
+
   return (
     <div className="space-y-5">
+      <label className="block">
+        <span className="text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Question type</span>
+        <select
+          value={questionType}
+          onChange={(event) => onQuestion(patchForQuestionType(question, event.target.value as JourneyQuestion['type']))}
+          className="mt-2 w-full rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 text-sm font-bold text-on-surface outline-none focus:border-primary/40"
+        >
+          <option value="multiple_choice">Multiple choice</option>
+          <option value="true_false">True / False</option>
+          <option value="enumeration">Enumeration</option>
+          <option value="short_answer">Short answer</option>
+          <option value="essay">Essay</option>
+        </select>
+      </label>
+
       <label className="block">
         <span className="text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Question</span>
         <textarea
@@ -1879,29 +2017,53 @@ function QuestionLiveEditor({
         />
       </label>
 
-      <div>
-        <p className="text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Options</p>
-        <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
-          {(question.options || []).map((option) => {
-            const isCorrect = question.correctOptionId === option.id;
-            return (
-              <label key={option.id} className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${isCorrect ? 'border-primary bg-primary/10 ring-1 ring-primary/30' : 'border-outline-variant/30 bg-surface-container'}`}>
-                <input
-                  type="radio"
-                  checked={isCorrect}
-                  onChange={() => onQuestion({ correctOptionId: option.id })}
-                  className="h-4 w-4 accent-primary"
-                />
-                <input
-                  value={option.text}
-                  onChange={(event) => onOption(option.id, event.target.value)}
-                  className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm font-semibold text-on-surface outline-none focus:ring-0"
-                />
-              </label>
-            );
-          })}
+      {isChoiceEditorQuestion(question) ? (
+        <div>
+          <p className="text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Options</p>
+          <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+            {(question.options || []).map((option) => {
+              const isCorrect = question.correctOptionId === option.id;
+              return (
+                <label key={option.id} className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${isCorrect ? 'border-primary bg-primary/10 ring-1 ring-primary/30' : 'border-outline-variant/30 bg-surface-container'}`}>
+                  <input
+                    type="radio"
+                    checked={isCorrect}
+                    onChange={() => onQuestion({ correctOptionId: option.id })}
+                    className="h-4 w-4 accent-primary"
+                  />
+                  <input
+                    value={option.text}
+                    onChange={(event) => onOption(option.id, event.target.value)}
+                    className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm font-semibold text-on-surface outline-none focus:ring-0"
+                  />
+                </label>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <label className="block">
+            <span className="text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Expected answer / rubric</span>
+            <textarea
+              value={question.expectedAnswer || ''}
+              onChange={(event) => onQuestion({ expectedAnswer: event.target.value })}
+              rows={4}
+              className="mt-2 w-full resize-y rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 text-sm font-medium text-on-surface outline-none focus:border-primary/40"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Accepted answers / key terms</span>
+            <textarea
+              value={(question.acceptedAnswers || []).join('\n')}
+              onChange={(event) => onQuestion({ acceptedAnswers: event.target.value.split('\n').map((item) => item.trim()).filter(Boolean) })}
+              rows={4}
+              placeholder="One accepted answer or key term per line"
+              className="mt-2 w-full resize-y rounded-xl border border-outline-variant/30 bg-surface-container px-4 py-3 text-sm font-medium text-on-surface outline-none focus:border-primary/40"
+            />
+          </label>
+        </div>
+      )}
 
       <label className="block">
         <span className="text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Rationale shown after answer</span>
@@ -2154,6 +2316,11 @@ function FocusedSimulatorOverlay({
   flowItems,
   onClose,
   onSelectFlowItem,
+  onReorderFlowItem,
+  onInsertFlowItem,
+  onChangeFlowItemType,
+  onRemoveFlowItem,
+  onAddPart,
   onSave,
   onOpenAI,
   updateDraft,
@@ -2171,6 +2338,11 @@ function FocusedSimulatorOverlay({
   flowItems: FlowItem[];
   onClose: () => void;
   onSelectFlowItem: (id: string) => void;
+  onReorderFlowItem: (fromIndex: number, toIndex: number) => void;
+  onInsertFlowItem: (type: Exclude<FlowItem['type'], 'exam'>) => void;
+  onChangeFlowItemType: (type: Exclude<FlowItem['type'], 'exam'>) => void;
+  onRemoveFlowItem: (id: string) => void;
+  onAddPart: () => void;
   onSave: () => void;
   onOpenAI: () => void;
   updateDraft: (field: keyof BuilderModule, value: any) => void;
@@ -2183,8 +2355,8 @@ function FocusedSimulatorOverlay({
   const isExam = activeItem.type === 'exam';
 
   return (
-    <div className="fixed inset-0 z-[80] overflow-y-auto bg-surface text-on-surface">
-      <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-outline-variant/30 bg-surface-container-lowest/95 px-4 backdrop-blur lg:px-8">
+    <div className="fixed inset-0 z-[80] flex flex-col overflow-hidden bg-surface text-on-surface">
+      <header className="z-20 flex h-16 shrink-0 items-center justify-between border-b border-outline-variant/30 bg-surface-container-lowest/95 px-4 backdrop-blur lg:px-8">
         <div className="flex min-w-0 items-center gap-4">
           <button onClick={onClose} className="rounded-full p-2 text-on-surface-variant hover:bg-surface-container" title="Back to split workspace">
             <ArrowLeft size={20} />
@@ -2214,13 +2386,18 @@ function FocusedSimulatorOverlay({
         </div>
       </header>
 
-      <main className="pb-36">
+      <main className="min-h-0 flex-1 overflow-y-auto pb-36">
         <div className="mx-auto grid max-w-7xl gap-6 px-5 py-8 lg:grid-cols-[280px_1fr] lg:py-12">
           <FocusedFlowRail
             activeItem={activeItem}
             activeItemIndex={activeItemIndex}
             flowItems={flowItems}
             onSelect={(item) => onSelectFlowItem(item.id)}
+            onReorder={onReorderFlowItem}
+            onInsert={onInsertFlowItem}
+            onChangeType={onChangeFlowItemType}
+            onRemove={onRemoveFlowItem}
+            onAddPart={onAddPart}
           />
 
           <div className="min-w-0">
@@ -2261,12 +2438,6 @@ function FocusedSimulatorOverlay({
         </div>
       </main>
 
-      <FlowNavigatorBubble
-        activeItem={activeItem}
-        flowItems={flowItems}
-        onSelect={(item) => onSelectFlowItem(item.id)}
-      />
-
       <div className="fixed bottom-6 right-6 z-[90] flex flex-col gap-3">
         <button onClick={onOpenAI} className="flex h-12 w-12 items-center justify-center rounded-full border border-outline-variant/40 bg-surface-container-lowest text-on-surface-variant shadow-lg" title="AI edit helper">
           <Bot size={20} />
@@ -2284,13 +2455,25 @@ function FocusedFlowRail({
   activeItemIndex,
   flowItems,
   onSelect,
+  onReorder,
+  onInsert,
+  onChangeType,
+  onRemove,
+  onAddPart,
 }: {
   activeItem: FlowItem;
   activeItemIndex: number;
   flowItems: FlowItem[];
   onSelect: (item: FlowItem) => void;
+  onReorder: (fromIndex: number, toIndex: number) => void;
+  onInsert: (type: Exclude<FlowItem['type'], 'exam'>) => void;
+  onChangeType: (type: Exclude<FlowItem['type'], 'exam'>) => void;
+  onRemove: (id: string) => void;
+  onAddPart: () => void;
 }) {
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
   const nextItem = flowItems[activeItemIndex + 1];
+  const editableTypes: Exclude<FlowItem['type'], 'exam'>[] = ['textbook', 'lesson', 'quiz', 'activity'];
 
   return (
     <aside className="lg:sticky lg:top-24 lg:self-start">
@@ -2303,25 +2486,67 @@ function FocusedFlowRail({
           <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-black text-primary">{activeItemIndex + 1}/{flowItems.length}</span>
         </div>
 
-        <div className="max-h-[56vh] space-y-2 overflow-y-auto pr-1">
+        <div className="mb-4 rounded-xl border border-outline-variant/30 bg-surface-container p-3">
+          <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Edit selected step</p>
+          <select
+            value={activeItem.type === 'exam' ? 'exam' : activeItem.type}
+            disabled={activeItem.type === 'exam'}
+            onChange={(event) => onChangeType(event.target.value as Exclude<FlowItem['type'], 'exam'>)}
+            className="mt-2 w-full rounded-xl border border-outline-variant/30 bg-surface-container-lowest px-3 py-2 text-xs font-black uppercase tracking-widest text-on-surface outline-none disabled:opacity-60"
+          >
+            {activeItem.type === 'exam' && <option value="exam">Final exam</option>}
+            {editableTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+          </select>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            {editableTypes.map((type) => (
+              <button
+                key={type}
+                onClick={() => onInsert(type)}
+                className="rounded-lg bg-primary/10 px-2 py-2 text-[10px] font-black uppercase tracking-widest text-primary"
+              >
+                + {type}
+              </button>
+            ))}
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button onClick={onAddPart} className="rounded-lg bg-surface-container-lowest px-2 py-2 text-[10px] font-black uppercase tracking-widest text-on-surface">+ Part</button>
+            <button
+              disabled={activeItem.type === 'exam'}
+              onClick={() => onRemove(activeItem.id)}
+              className="rounded-lg bg-error/10 px-2 py-2 text-[10px] font-black uppercase tracking-widest text-error disabled:opacity-40"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-2 pr-1">
           {flowItems.map((item, index) => {
             const isActive = item.id === activeItem.id;
             const isDone = index < activeItemIndex;
             return (
               <button
                 key={item.id}
+                draggable
                 onClick={() => onSelect(item)}
+                onDragStart={() => setDragIndex(index)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => {
+                  if (dragIndex != null) onReorder(dragIndex, index);
+                  setDragIndex(null);
+                  onSelect(item);
+                }}
                 className={`flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors ${
                   isActive
                     ? 'border-primary bg-primary/10 text-on-surface ring-1 ring-primary/30'
                     : 'border-outline-variant/30 bg-surface-container hover:border-primary/40'
                 }`}
               >
-                <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-black ${isDone || isActive ? 'bg-primary text-on-primary' : 'bg-surface-container-lowest text-on-surface-variant'}`}>
-                  {isDone ? <Check size={13} /> : index + 1}
-                </span>
+                <GripVertical size={15} className={isActive ? 'mt-1 shrink-0 text-primary' : 'mt-1 shrink-0 text-on-surface-variant/40'} />
                 <span className="min-w-0">
-                  <span className={`block text-[10px] font-black uppercase tracking-widest ${isActive ? 'text-primary' : 'text-on-surface-variant/50'}`}>{item.type}</span>
+                  <span className={`block text-[10px] font-black uppercase tracking-widest ${isActive ? 'text-primary' : 'text-on-surface-variant/50'}`}>
+                    {isDone ? 'Done' : index + 1}. {item.type}
+                  </span>
                   <span className="line-clamp-2 text-sm font-extrabold text-on-surface">{item.title}</span>
                 </span>
               </button>
