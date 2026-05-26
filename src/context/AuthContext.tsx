@@ -17,7 +17,10 @@ interface UserProfile {
   classIds?: string[];
   activeClassId?: string;
   selectedFocus?: string;
+  reviewTrack?: 'elementary' | 'secondary' | 'specialization';
+  specialization?: string;
   diagnosticCompleted?: boolean;
+  diagnosticSkipped?: boolean;
   streak?: number;
   lastLoginDate?: string;
   earnedBadges?: string[];
@@ -61,32 +64,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (userDoc.exists()) {
           const userData = userDoc.data() as UserProfile;
           const currentRole = isAdminEmail ? 'admin' : userData.role;
-          
-          let newStreak = userData.streak || 0;
-          let newLastLogin = userData.lastLoginDate || '';
-
-          const todayStr = new Date().toISOString().split('T')[0];
-          
-          if (newLastLogin !== todayStr) {
-             const yesterday = new Date();
-             yesterday.setDate(yesterday.getDate() - 1);
-             const yesterdayStr = yesterday.toISOString().split('T')[0];
-
-             if (newLastLogin === yesterdayStr) {
-                newStreak += 1;
-             } else {
-                newStreak = 1;
-             }
-             newLastLogin = todayStr;
-             
-             updateDoc(doc(db, 'users', firebaseUser.uid), {
-                streak: newStreak,
-                lastLoginDate: newLastLogin
-             }).catch(err => console.error('Failed to update streak:', err));
-             
-             userData.streak = newStreak;
-             userData.lastLoginDate = newLastLogin;
-          }
 
           setUser({ ...userData, uid: firebaseUser.uid, role: (currentRole as Role) || 'student' });
 
@@ -133,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             onboarded: existingData.onboarded ?? false, 
             fullName: pendingData.fullName || existingData.fullName || '',
             instructorId: existingData.instructorId || null,
-            streak: 1,
+            streak: 0,
             lastLoginDate: new Date().toISOString().split('T')[0]
           };
           

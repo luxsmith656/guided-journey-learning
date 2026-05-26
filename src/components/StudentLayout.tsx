@@ -9,6 +9,7 @@ import {
   BookOpen, 
   CalendarDays, 
   BarChart, 
+  AlertTriangle,
   LogOut, 
   Settings, 
   Bell, 
@@ -41,10 +42,11 @@ export default function StudentLayout({ children, title }: { children: ReactNode
 
   const navItems = [
     { name: 'Dashboard', path: '/student/dashboard', icon: LayoutDashboard },
-    { name: 'My Courses', path: '/student/courses', icon: Library },
+    { name: 'LET Reviewers', path: '/student/courses', icon: Library },
     { name: 'Planner', path: '/student/todo', icon: CalendarDays },
-    { name: 'Flashcards', path: '/flashcards', icon: BookOpen },
-    { name: 'Assessments', path: '/exam?type=mock', icon: Target },
+    { name: 'Mistake Bank', path: '/mistake-bank', icon: AlertTriangle },
+    { name: 'Reviewer Notes', path: '/flashcards', icon: BookOpen },
+    { name: 'Mock Exams', path: '/exam', target: '/exam?type=mock', icon: Target },
     { name: 'Performance', path: '/quiz-results', icon: BarChart },
   ];
 
@@ -76,7 +78,7 @@ export default function StudentLayout({ children, title }: { children: ReactNode
             return (
               <button 
                 key={item.name}
-                onClick={() => navigate(item.path)} 
+                onClick={() => navigate(item.target || item.path)} 
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold transition-all ${isActive ? 'bg-primary/10 text-primary' : 'text-on-surface-variant hover:bg-surface-container'}`}
               >
                 <item.icon size={18} />
@@ -177,7 +179,7 @@ export default function StudentLayout({ children, title }: { children: ReactNode
         {navItems.slice(0, 4).map(item => {
            const isActive = location.pathname.startsWith(item.path);
            return (
-              <button key={item.name} onClick={() => navigate(item.path)} className={`flex flex-col items-center gap-1 ${isActive ? 'text-primary' : 'text-on-surface-variant/40'}`}>
+              <button key={item.name} onClick={() => navigate(item.target || item.path)} className={`flex flex-col items-center gap-1 ${isActive ? 'text-primary' : 'text-on-surface-variant/40'}`}>
                 <item.icon size={20} />
                 <span className="text-[10px] font-bold tracking-tight">{item.name}</span>
               </button>

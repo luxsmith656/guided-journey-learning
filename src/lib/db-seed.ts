@@ -309,15 +309,18 @@ export async function seedDatabase() {
         email: 'student@letmastery.com',
         role: 'student',
         fullName: 'Demo Student',
-        onboarded: true,
-        learningMode: 'class_based',
-        activeClassId: 'class_let_foundations',
-        selectedFocus: 'profed',
-        diagnosticCompleted: true,
-        streak: 5,
-        xp: 1250,
-        level: 2,
-        earnedBadges: ['badge_pioneer']
+        onboarded: false,
+        learningMode: 'self_review',
+        activeClassId: null,
+        selectedFocus: null,
+        reviewTrack: null,
+        specialization: '',
+        diagnosticCompleted: false,
+        diagnosticSkipped: false,
+        streak: 0,
+        xp: 0,
+        level: 1,
+        earnedBadges: []
       },
       {
         uid: 'demo-instructor',
@@ -379,36 +382,21 @@ export async function seedDatabase() {
 
     await setDoc(doc(db, 'learnerProfiles', 'demo-student'), {
       userId: 'demo-student',
-      learningMode: 'class_based',
-      activeClassId: 'class_let_foundations',
-      selectedFocus: 'profed',
-      currentLevel: 2,
-      overallScore: 64,
-      masteryBySkill: {
-        gened_english_inference: 58,
-        profed_assessment_formative: 46,
-        profed_assessment_summative: 39,
-        major_math_ratio: 18
-      },
-      masteryByTopic: {
-        gened_english: 58,
-        profed_assessment: 46,
-        profed_childdev: 51,
-        major_math: 18
-      },
-      masteryByCategory: {
-        gened: 52,
-        profed: 48,
-        major: 18
-      },
-      weakSkills: ['profed_assessment_summative', 'major_math_ratio'],
-      strongSkills: ['gened_english_inference'],
-      weakTopics: ['major_math', 'profed_assessment'],
-      strongTopics: ['gened_english'],
-      recommendedModuleIds: ['profed-assessment-alignment', 'major-math-problem-solving'],
-      nextRecommendedModuleId: 'profed-assessment-alignment',
-      streak: 5,
-      badges: ['badge_pioneer'],
+      learningMode: 'self_review',
+      activeClassId: null,
+      selectedFocus: null,
+      currentLevel: 0,
+      overallScore: 0,
+      masteryBySkill: {},
+      masteryByTopic: {},
+      masteryByCategory: {},
+      weakSkills: [],
+      strongSkills: [],
+      weakTopics: [],
+      strongTopics: [],
+      recommendedModuleIds: [],
+      nextRecommendedModuleId: null,
+      badges: [],
       lastUpdatedAt: serverTimestamp()
     }, { merge: true });
 

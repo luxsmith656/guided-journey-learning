@@ -34,8 +34,13 @@ const statusLabel = {
 export default function StudentCourses() {
   const navigate = useNavigate();
   const { user, refreshUser } = useAuth();
-  const [selectedSubjectId, setSelectedSubjectId] = useState(journeySubjects[0].id);
-  const [selectedTopicId, setSelectedTopicId] = useState(journeySubjects[0].topics[0].id);
+  const allowedSubjects = useMemo(() => {
+    const track = (user as any)?.reviewTrack;
+    if (track === 'elementary') return journeySubjects.filter((subject) => subject.id !== 'major');
+    return journeySubjects;
+  }, [user]);
+  const [selectedSubjectId, setSelectedSubjectId] = useState(allowedSubjects[0]?.id || journeySubjects[0].id);
+  const [selectedTopicId, setSelectedTopicId] = useState(allowedSubjects[0]?.topics[0]?.id || journeySubjects[0].topics[0].id);
   const [searchTerm, setSearchTerm] = useState('');
   const [remoteModules, setRemoteModules] = useState<JourneyModule[]>([]);
   const [completedModuleIds, setCompletedModuleIds] = useState<Set<string>>(new Set());
@@ -101,7 +106,15 @@ export default function StudentCourses() {
     return () => unsubscribe();
   }, [user]);
 
-  const selectedSubject = journeySubjects.find((subject) => subject.id === selectedSubjectId) || journeySubjects[0];
+  useEffect(() => {
+    if (!allowedSubjects.some((subject) => subject.id === selectedSubjectId)) {
+      const nextSubject = allowedSubjects[0] || journeySubjects[0];
+      setSelectedSubjectId(nextSubject.id);
+      setSelectedTopicId(nextSubject.topics[0]?.id || '');
+    }
+  }, [allowedSubjects, selectedSubjectId]);
+
+  const selectedSubject = allowedSubjects.find((subject) => subject.id === selectedSubjectId) || allowedSubjects[0] || journeySubjects[0];
   const selectedTopic = selectedSubject.topics.find((topic) => topic.id === selectedTopicId) || selectedSubject.topics[0];
   const allModules = useMemo(() => {
     const remoteIds = new Set(remoteModules.map((module) => module.id));
@@ -111,15 +124,24 @@ export default function StudentCourses() {
       return !!user?.activeClassId && (module.classIds || []).includes(user.activeClassId);
     }).map((module) => {
       const progress = progressByModule[module.id];
+      const hasPassed = progress?.status === 'completed' && (progress.finalScore ?? 0) >= 85;
       return {
         ...module,
-        status: progress?.moduleState || (progress?.status === 'completed' && (progress.finalScore ?? 0) >= 85 ? 'completed' : progress ? 'in_progress' : module.status),
-        progress: progress?.progressPercent ?? module.progress,
+        status: progress?.moduleState || (hasPassed ? 'completed' : progress ? 'in_progress' : module.prerequisiteModuleIds?.length ? 'locked' : 'available'),
+        progress: progress?.progressPercent ?? 0,
       } as JourneyModule;
     });
-  }, [remoteModules, progressByModule]);
+  }, [remoteModules, progressByModule, user]);
   const subjectModules = getSubjectModules(selectedSubject.id, allModules);
   const topicModules = getTopicModules(selectedTopic.id, allModules);
+  const topicProgressById = useMemo(() => {
+    const rows: Record<string, number> = {};
+    selectedSubject.topics.forEach((topic) => {
+      const modules = getTopicModules(topic.id, allModules);
+      rows[topic.id] = modules.length ? Math.round(modules.reduce((sum, module) => sum + module.progress, 0) / modules.length) : 0;
+    });
+    return rows;
+  }, [allModules, selectedSubject]);
 
   const filteredTopics = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -165,20 +187,20 @@ export default function StudentCourses() {
   };
 
   return (
-    <StudentLayout title="Learning Journey">
+    <StudentLayout title="LET Reviewers">
       <div className="space-y-6">
         <section className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 md:p-6 shadow-sm">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
             <div className="max-w-2xl">
               <div className="flex items-center gap-2 text-primary text-xs font-black uppercase tracking-widest mb-2">
                 <Map size={16} />
-                Guided path
+                LET reviewer path
               </div>
               <h1 className="text-2xl md:text-3xl font-extrabold font-headline text-on-surface tracking-tight">
-                Pick a subject, follow the topic trail, then finish each module with practice.
+                Pick a LET category, follow the topic trail, then prove mastery with drills and mock checks.
               </h1>
               <p className="text-sm text-on-surface-variant mt-3 leading-relaxed">
-                Each topic connects a mini lesson, textbook reading, quiz, and exam practice so studying feels like one journey instead of scattered pages.
+                Public reviewers are available for self-study. Class-only reviewers appear here only after you join a professor-guided review class.
               </p>
             </div>
 
@@ -205,12 +227,12 @@ export default function StudentCourses() {
               <div className="flex items-center justify-between mb-4">
                 <h2 className="font-headline font-extrabold text-lg text-on-surface">Subjects</h2>
                 <span className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/40">
-                  {journeySubjects.length} tracks
+                  {allowedSubjects.length} tracks
                 </span>
               </div>
 
               <div className="space-y-2">
-                {journeySubjects.map((subject) => {
+                {allowedSubjects.map((subject) => {
                   const isSelected = subject.id === selectedSubject.id;
                   const modules = getSubjectModules(subject.id, allModules);
                   return (
@@ -231,7 +253,7 @@ export default function StudentCourses() {
                         <div className="min-w-0 flex-1">
                           <p className="font-extrabold leading-tight">{subject.title}</p>
                           <p className="text-[11px] text-on-surface-variant/60 mt-1 line-clamp-2">
-                            {subject.levelLabel} by {subject.instructor}
+                            {subject.levelLabel}
                           </p>
                           <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/40 mt-3">
                             {subject.topics.length} topics / {modules.length} modules
@@ -286,6 +308,7 @@ export default function StudentCourses() {
                 {filteredTopics.map((topic) => {
                   const isSelected = topic.id === selectedTopic.id;
                   const modules = getTopicModules(topic.id, allModules);
+                  const topicProgress = topicProgressById[topic.id] || 0;
                   return (
                     <button
                       key={topic.id}
@@ -301,7 +324,7 @@ export default function StudentCourses() {
                           Topic
                         </span>
                         <span className="text-[10px] font-black text-primary bg-primary/10 rounded-full px-2 py-1">
-                          {topic.mastery}%
+                          {topicProgress}%
                         </span>
                       </div>
                       <h3 className="font-extrabold text-on-surface leading-tight">{topic.title}</h3>

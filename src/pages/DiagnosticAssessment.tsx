@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getDocs, collection, query, where, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { getDocs, collection, query, where, doc, setDoc, serverTimestamp, increment } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { motion } from 'motion/react';
 
@@ -92,7 +92,7 @@ export default function DiagnosticAssessment() {
   const skipAssessment = async () => {
     if (user) {
       await setDoc(doc(db, 'users', user.uid), {
-        diagnosticCompleted: true,
+        diagnosticCompleted: false,
         diagnosticSkipped: true,
         updatedAt: serverTimestamp(),
       }, { merge: true });
@@ -117,6 +117,22 @@ export default function DiagnosticAssessment() {
         const attemptId = doc(collection(db, 'diagnosticAttempts')).id;
         const attemptRef = doc(db, 'diagnosticAttempts', attemptId);
         
+        const answerRecords = Object.entries(newAnswers).map(([qid, oid]) => {
+          const question = questions.find(q => q.id === qid);
+          return {
+            questionId: qid,
+            selectedOptionId: oid,
+            correctOptionId: question?.correctOptionId || '',
+            isCorrect: oid === question?.correctOptionId,
+            categoryId: question?.categoryId || '',
+            topicId: question?.topicId || '',
+            skillIds: question?.skillIds || [],
+            timeSpentSeconds: 0,
+            stem: question?.stem || '',
+            options: question?.options || [],
+          };
+        });
+
         await setDoc(attemptRef, {
           id: attemptId,
           userId: user!.uid,
@@ -125,18 +141,26 @@ export default function DiagnosticAssessment() {
           scorePercent,
           totalQuestions: questions.length,
           correctCount: Math.round((scorePercent / 100) * questions.length),
-          answers: Object.entries(newAnswers).map(([qid, oid]) => ({
-            questionId: qid,
-            selectedOptionId: oid,
-            correctOptionId: questions.find(q => q.id === qid)?.correctOptionId || '',
-            isCorrect: oid === questions.find(q => q.id === qid)?.correctOptionId,
-            categoryId: questions.find(q => q.id === qid)?.categoryId || '',
-            topicId: questions.find(q => q.id === qid)?.topicId || '',
-            skillIds: questions.find(q => q.id === qid)?.skillIds || [],
-            timeSpentSeconds: 0 // Simplification
-          })),
+          answers: answerRecords,
           completedAt: serverTimestamp()
         });
+
+        await Promise.all(answerRecords.filter((answer) => !answer.isCorrect).map((answer) => setDoc(doc(db, 'mistakeBank', `${user!.uid}_${answer.questionId}`), {
+          userId: user!.uid,
+          questionId: answer.questionId,
+          stem: answer.stem,
+          options: answer.options,
+          selectedOptionId: answer.selectedOptionId,
+          correctOptionId: answer.correctOptionId,
+          categoryId: answer.categoryId,
+          topicId: answer.topicId,
+          skillIds: answer.skillIds,
+          examType: 'diagnostic',
+          sourceAttemptId: attemptId,
+          timesMissed: increment(1),
+          firstMissedAt: serverTimestamp(),
+          lastMissedAt: serverTimestamp(),
+        }, { merge: true })));
 
         // Clean standardized learner profile
         const learnerProfile = {
@@ -155,7 +179,6 @@ export default function DiagnosticAssessment() {
           recommendedModuleIds: scorePercent < 50 ? ['mod_intro_profed'] : [],
           diagnosticAttemptId: attemptId,
           diagnosticAttemptCount: attemptCount + 1,
-          streak: user?.streak || 0,
           badges: user?.earnedBadges || [],
           lastUpdatedAt: serverTimestamp()
         };
@@ -164,6 +187,7 @@ export default function DiagnosticAssessment() {
 
         await setDoc(doc(db, 'users', user!.uid), {
            diagnosticCompleted: true,
+           diagnosticSkipped: false,
            updatedAt: serverTimestamp(),
            onboardingStep: 3
         }, { merge: true });

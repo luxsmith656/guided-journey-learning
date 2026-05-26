@@ -56,7 +56,7 @@ export function getRecallInsights(profile: any): RecallInsight[] {
 export function buildStudyPlan(params: {
   modules: any[];
   recallInsights: RecallInsight[];
-  weakTopicLabel: string;
+  weakTopicLabel?: string;
   progressByModule?: Record<string, any>;
 }): StudyPlanItem[] {
   const modules = params.modules.map((module) => {
@@ -111,15 +111,17 @@ export function buildStudyPlan(params: {
     });
   }
 
-  plan.push({
-    title: `Review ${params.weakTopicLabel}`,
-    body: 'Use flashcards and module notes to repair the weakest topic before the next exam.',
-    targetLink: '/flashcards',
-    priority: 'low',
-    dayLabel: 'This week',
-    minutes: 20,
-    source: 'weakness',
-  });
+  if (params.weakTopicLabel) {
+    plan.push({
+      title: `Review ${params.weakTopicLabel}`,
+      body: 'Use reviewer notes and mistake-bank rationalizations to repair this weak LET topic before the next exam.',
+      targetLink: '/mistake-bank',
+      priority: 'low',
+      dayLabel: 'This week',
+      minutes: 20,
+      source: 'weakness',
+    });
+  }
 
   return plan.slice(0, 5);
 }

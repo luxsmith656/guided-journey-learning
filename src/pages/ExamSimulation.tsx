@@ -144,7 +144,7 @@ export default function ExamSimulation() {
       const isMock = searchParams.get('type') === 'mock';
 
       try {
-        const { collection, doc, setDoc, serverTimestamp, getDoc, updateDoc } = await import('firebase/firestore');
+        const { collection, doc, setDoc, serverTimestamp, getDoc, updateDoc, increment } = await import('firebase/firestore');
         const { db } = await import('../lib/firebase');
 
         const attemptId = doc(collection(db, 'mockExamAttempts')).id;
@@ -160,7 +160,10 @@ export default function ExamSimulation() {
              categoryId: q?.categoryId || '',
              topicId: q?.topicId || '',
              skillIds: q?.skillIds || [],
-             timeSpentSeconds: 0 // Simplification
+             timeSpentSeconds: 0,
+             stem: q?.stem || '',
+             options: q?.options || [],
+             explanation: q?.explanation || '',
            };
         });
 
@@ -175,6 +178,24 @@ export default function ExamSimulation() {
           answers: answerRecords,
           completedAt: serverTimestamp()
         });
+
+        await Promise.all(answerRecords.filter((answer: any) => !answer.isCorrect).map((answer: any) => setDoc(doc(db, 'mistakeBank', `${user!.uid}_${answer.questionId}`), {
+          userId: user!.uid,
+          questionId: answer.questionId,
+          stem: answer.stem,
+          options: answer.options,
+          explanation: answer.explanation,
+          selectedOptionId: answer.selectedOptionId,
+          correctOptionId: answer.correctOptionId,
+          categoryId: answer.categoryId,
+          topicId: answer.topicId,
+          skillIds: answer.skillIds,
+          examType: isMock ? 'mock_exam' : 'practice_exam',
+          sourceAttemptId: attemptId,
+          timesMissed: increment(1),
+          firstMissedAt: serverTimestamp(),
+          lastMissedAt: serverTimestamp(),
+        }, { merge: true })));
 
         // Update Mastery in Learner Profile
         const profileRef = doc(db, 'learnerProfiles', user!.uid);

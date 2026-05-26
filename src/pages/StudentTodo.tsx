@@ -64,15 +64,16 @@ export default function StudentTodo() {
 
   const todoItems = useMemo(() => modules
     .filter((module) => {
+      const progress = progressByModule[module.id];
       if (module.publishScope === 'classes') return user?.activeClassId && module.classIds?.includes(user.activeClassId);
-      return true;
+      return !!progress;
     })
     .filter((module) => progressByModule[module.id]?.status !== 'completed')
     .sort((a, b) => new Date(a.dueAt || '2999-12-31').getTime() - new Date(b.dueAt || '2999-12-31').getTime()), [modules, progressByModule, user]);
 
   const weakTopicLabel = profile?.weakTopics?.[0]
     || Object.entries(profile?.masteryByTopic || {}).sort((a: any, b: any) => a[1] - b[1])[0]?.[0]
-    || 'your weakest topic';
+    || '';
   const studyPlan = buildStudyPlan({
     modules: todoItems.map((module) => ({ ...module, progress: progressByModule[module.id]?.progressPercent || 0 })),
     recallInsights: getRecallInsights(profile),

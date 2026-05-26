@@ -40,6 +40,7 @@ import JoinClass from './pages/JoinClass';
 import Flashcards from './pages/Flashcards';
 import ProfileSettings from './pages/ProfileSettings';
 import StudentTodo from './pages/StudentTodo';
+import MistakeBank from './pages/MistakeBank';
 import { SidebarProvider } from './context/SidebarContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { BrandingProvider, useBranding } from './context/BrandingContext';
@@ -177,6 +178,7 @@ function AppContent() {
             <Route path="/quiz-results" element={<ProtectedRoute role="student"><QuizResults /></ProtectedRoute>} />
             <Route path="/exam" element={<ProtectedRoute role="student"><ExamSimulation /></ProtectedRoute>} />
             <Route path="/flashcards" element={<ProtectedRoute role="student"><Flashcards /></ProtectedRoute>} />
+            <Route path="/mistake-bank" element={<ProtectedRoute role="student"><MistakeBank /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><ProfileSettings /></ProtectedRoute>} />
             
