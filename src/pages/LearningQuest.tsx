@@ -134,6 +134,27 @@ function normalizeFirestoreModule(id: string, data: any): JourneyModule {
   };
 }
 
+function createPendingModule(id?: string | null): JourneyModule {
+  return {
+    id: id || 'pending-module',
+    title: 'Loading reviewer module',
+    description: '',
+    subjectId: '',
+    topicId: '',
+    level: 0,
+    duration: '',
+    status: 'available',
+    progress: 0,
+    lessonBlocks: [],
+    resources: [],
+    questions: [],
+    parts: [],
+    finalExam: [],
+    publishScope: 'public',
+    classIds: [],
+  };
+}
+
 function progressStorageKey(userId: string | undefined, moduleId: string) {
   return `let-mastery-progress:${userId || 'guest'}:${moduleId}`;
 }
@@ -167,7 +188,7 @@ export default function LearningQuest() {
   const demoMode = searchParams.get('demo') === '1' || searchParams.get('demo') === 'true';
   const { user } = useAuth();
 
-  const [module, setModule] = useState<JourneyModule>(() => findJourneyModule(moduleId));
+  const [module, setModule] = useState<JourneyModule>(() => demoMode ? findJourneyModule(moduleId) : createPendingModule(moduleId));
   const [progress, setProgress] = useState<QuestProgress>(defaultProgress);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [writtenAnswer, setWrittenAnswer] = useState('');
