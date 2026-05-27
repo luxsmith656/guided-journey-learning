@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { addDoc, collection, doc, onSnapshot, query, serverTimestamp, where } from 'firebase/firestore';
-import { CalendarDays, CalendarPlus, CheckCircle2, ChevronRight, ClipboardList } from 'lucide-react';
+import { CalendarDays, CalendarPlus, CheckCircle2, ChevronRight, ClipboardList, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import StudentLayout from '../components/StudentLayout';
 import Toast from '../components/Toast';
@@ -12,7 +12,7 @@ type CalendarMarker = {
   id: string;
   dateKey: string;
   label: string;
-  type: 'todo' | 'reminder' | 'study';
+  type: 'todo' | 'reminder' | 'study' | 'cooldown';
   targetLink?: string;
 };
 
@@ -24,6 +24,7 @@ export default function StudentTodo() {
   const [progressByModule, setProgressByModule] = useState<Record<string, any>>({});
   const [profile, setProfile] = useState<any>(null);
   const [classData, setClassData] = useState<any>(null);
+  const [reviewSettings, setReviewSettings] = useState<any>(null);
   const [reminderDraft, setReminderDraft] = useState({ title: '', remindAt: todayInputValue() });
   const [toastMsg, setToastMsg] = useState('');
   const [showToast, setShowToast] = useState(false);
@@ -41,6 +42,9 @@ export default function StudentTodo() {
 
     const unsubProfile = onSnapshot(doc(db, 'learnerProfiles', user.uid), (snapshot) => {
       setProfile(snapshot.exists() ? snapshot.data() : null);
+    });
+    const unsubReviewSettings = onSnapshot(doc(db, 'studentReviewSettings', user.uid), (snapshot) => {
+      setReviewSettings(snapshot.exists() ? snapshot.data() : null);
     });
     const progressQuery = query(collection(db, 'moduleProgress'), where('userId', '==', user.uid));
     const unsubProgress = onSnapshot(progressQuery, (snapshot) => {
@@ -64,6 +68,7 @@ export default function StudentTodo() {
 
     return () => {
       unsubProfile();
+      unsubReviewSettings();
       unsubProgress();
       unsubReminders();
       unsubClass();
@@ -100,6 +105,14 @@ export default function StudentTodo() {
     .filter((item) => item.dueAt)
     .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())
     .slice(0, 6), [todoItems]);
+  const mockCooldown = useMemo(() => {
+    const lockedUntilMillis = Number(reviewSettings?.mockExamCooldownUntilMillis || 0);
+    if (!lockedUntilMillis || lockedUntilMillis <= Date.now()) return null;
+    return {
+      lockedUntilMillis,
+      message: reviewSettings?.mockExamCooldownMessage || 'Full mock access is paused. Review first, then try again.',
+    };
+  }, [reviewSettings]);
 
   const calendarDays = useMemo(() => {
     const markers: CalendarMarker[] = [
@@ -125,6 +138,13 @@ export default function StudentTodo() {
         type: 'study' as const,
         targetLink: item.targetLink,
       })),
+      ...(mockCooldown ? [{
+        id: 'mock-cooldown',
+        dateKey: toDateKey(mockCooldown.lockedUntilMillis),
+        label: 'Full mock unlocks',
+        type: 'cooldown' as const,
+        targetLink: '/mistake-bank',
+      }] : []),
     ];
 
     return Array.from({ length: 14 }).map((_item, offset) => {
@@ -137,7 +157,7 @@ export default function StudentTodo() {
         markers: markers.filter((marker) => marker.dateKey === key),
       };
     });
-  }, [todoItems, reminders, studyPlan]);
+  }, [todoItems, reminders, studyPlan, mockCooldown]);
 
   const addReminder = async () => {
     if (!user || !reminderDraft.title.trim()) {
@@ -207,6 +227,23 @@ export default function StudentTodo() {
           </div>
 
           <aside className="space-y-4">
+            {mockCooldown && (
+              <div className="bg-warning/10 border border-warning/30 rounded-2xl p-5 shadow-sm">
+                <div className="flex items-start gap-3">
+                  <Clock size={20} className="mt-0.5 shrink-0 text-on-surface" />
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/70">Full mock paused</p>
+                    <h3 className="font-headline font-extrabold text-lg">Review first</h3>
+                    <p className="mt-1 text-sm text-on-surface-variant">{mockCooldown.message}</p>
+                    <p className="mt-3 font-mono text-xs font-black text-on-surface">Unlocks {new Date(mockCooldown.lockedUntilMillis).toLocaleString()}</p>
+                  </div>
+                </div>
+                <button onClick={() => navigate('/mistake-bank')} className="mt-4 w-full rounded-xl bg-primary text-on-primary px-4 py-3 text-sm font-bold">
+                  Open mistake bank
+                </button>
+              </div>
+            )}
+
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-sm">
               <div className="flex items-center gap-2 mb-4">
                 <CalendarPlus size={18} className="text-primary" />
@@ -260,7 +297,7 @@ export default function StudentTodo() {
             );
           })}
 
-          {todoItems.length === 0 && (
+          {todoItems.length === 0 && !mockCooldown && (
             <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-10 text-center shadow-sm">
               <CheckCircle2 className="mx-auto text-emerald-500 mb-3" size={40} />
               <h2 className="font-extrabold text-on-surface">Nothing due right now.</h2>
@@ -302,5 +339,6 @@ function planItemDateKey(item: StudyPlanItem, index: number) {
 function markerTone(type: CalendarMarker['type']) {
   if (type === 'todo') return 'bg-error/10 text-error';
   if (type === 'reminder') return 'bg-emerald-500/10 text-emerald-700';
+  if (type === 'cooldown') return 'bg-warning/20 text-on-surface';
   return 'bg-primary/10 text-primary';
 }
