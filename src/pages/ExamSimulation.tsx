@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   increment,
   query,
@@ -22,6 +23,7 @@ import {
   shouldAutoSubmitForWarning,
 } from '../lib/assessmentIntegrity';
 import { pickBalancedQuestionsFromBlueprint, shuffleItems } from '../lib/examBlueprints';
+import { calculateFullMockCooldown, ExamCooldown } from '../lib/examCooldown';
 
 interface QuestionOption {
   id: string;
@@ -190,6 +192,7 @@ export default function ExamSimulation() {
   const [lastActivityAt, setLastActivityAt] = useState(Date.now());
   const [agreementChecked, setAgreementChecked] = useState(false);
   const [result, setResult] = useState<ExamResult | null>(null);
+  const [cooldown, setCooldown] = useState<ExamCooldown | null>(null);
 
   const phaseRef = useRef(phase);
   const questionsRef = useRef(questions);
@@ -422,6 +425,38 @@ export default function ExamSimulation() {
       } catch (error) {
         console.warn('adaptive update failed', error);
       }
+
+      if (isFullMock) {
+        try {
+          const attemptsSnap = await getDocs(query(collection(db, 'mockExamAttempts'), where('userId', '==', user.uid)));
+          const attemptRows = attemptsSnap.docs.map((attemptDoc) => ({ id: attemptDoc.id, ...attemptDoc.data() }));
+          const nextCooldown = calculateFullMockCooldown([
+            ...attemptRows,
+            {
+              id: finalAttemptId,
+              type: 'mock_exam',
+              assessmentMode: mode,
+              scorePercent: finalResult.scorePercent,
+              status: attemptStatus,
+              endedReason: reason,
+              flaggedForReview: reason !== 'submitted' || finalLogs.length > 0,
+              submittedAtMillis: Date.now(),
+            },
+          ]);
+          if (nextCooldown) {
+            setCooldown(nextCooldown);
+            await setDoc(doc(db, 'studentReviewSettings', user.uid), {
+              userId: user.uid,
+              mockExamCooldownUntilMillis: nextCooldown.lockedUntilMillis,
+              mockExamCooldownReason: nextCooldown.reason,
+              mockExamCooldownMessage: nextCooldown.message,
+              updatedAt: serverTimestamp(),
+            }, { merge: true });
+          }
+        } catch (error) {
+          console.warn('mock exam cooldown update failed', error);
+        }
+      }
     } catch (error) {
       console.error('Failed to save exam attempt', error);
     } finally {
@@ -510,6 +545,37 @@ export default function ExamSimulation() {
       }
 
       try {
+        if (isFullMock) {
+          const settingsSnap = await getDoc(doc(db, 'studentReviewSettings', user.uid)).catch(() => null);
+          const settings = settingsSnap?.exists() ? settingsSnap.data() as any : null;
+          if (Number(settings?.mockExamCooldownUntilMillis || 0) > Date.now()) {
+            setCooldown({
+              lockedUntilMillis: Number(settings.mockExamCooldownUntilMillis),
+              reason: settings.mockExamCooldownReason === 'repeated_low_scores' ? 'repeated_low_scores' : 'repeated_integrity_stops',
+              message: settings.mockExamCooldownMessage || 'Full mock access is temporarily paused. Review first, then try again.',
+            });
+            setQuestions([]);
+            setPhase('instructions');
+            return;
+          }
+
+          const attemptSnap = await getDocs(query(collection(db, 'mockExamAttempts'), where('userId', '==', user.uid))).catch(() => null);
+          const nextCooldown = calculateFullMockCooldown(attemptSnap ? attemptSnap.docs.map((attemptDoc) => ({ id: attemptDoc.id, ...attemptDoc.data() })) : []);
+          if (nextCooldown) {
+            setCooldown(nextCooldown);
+            await setDoc(doc(db, 'studentReviewSettings', user.uid), {
+              userId: user.uid,
+              mockExamCooldownUntilMillis: nextCooldown.lockedUntilMillis,
+              mockExamCooldownReason: nextCooldown.reason,
+              mockExamCooldownMessage: nextCooldown.message,
+              updatedAt: serverTimestamp(),
+            }, { merge: true });
+            setQuestions([]);
+            setPhase('instructions');
+            return;
+          }
+        }
+
         const blueprintRows = await getDocs(collection(db, 'examBlueprints')).catch(() => null);
         const availableBlueprints = blueprintRows
           ? blueprintRows.docs.map((blueprintDoc) => ({ id: blueprintDoc.id, ...blueprintDoc.data() } as ExamBlueprint))
@@ -795,6 +861,31 @@ export default function ExamSimulation() {
       <div className="flex min-h-screen flex-col items-center justify-center bg-surface p-12 text-center">
         <div className="mb-4 h-12 w-12 animate-spin rounded-full border-4 border-primary border-t-transparent" />
         <p className="font-bold text-on-surface-variant">Preparing LET simulation content...</p>
+      </div>
+    );
+  }
+
+  if (cooldown && cooldown.lockedUntilMillis > Date.now()) {
+    const secondsLeft = Math.ceil((cooldown.lockedUntilMillis - Date.now()) / 1000);
+    return (
+      <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center p-8 text-center">
+        <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-warning/15 text-on-surface">
+          <span className="material-symbols-outlined text-4xl">timer_pause</span>
+        </div>
+        <p className="text-xs font-black uppercase tracking-widest text-primary">Full mock cooldown</p>
+        <h2 className="mt-2 mb-3 font-headline text-2xl font-black text-on-surface">Review before another simulation</h2>
+        <p className="mb-4 text-on-surface-variant">{cooldown.message}</p>
+        <p className="mb-6 rounded-2xl bg-surface-container px-5 py-3 font-mono text-sm font-black text-on-surface">
+          Available in {formatTime(secondsLeft)}
+        </p>
+        <div className="flex flex-wrap justify-center gap-3">
+          <button onClick={() => navigate('/mistake-bank')} className="rounded-xl bg-surface-container px-5 py-3 text-sm font-bold text-on-surface">
+            Review mistake bank
+          </button>
+          <button onClick={() => navigate('/student/courses')} className="rounded-xl bg-primary px-5 py-3 text-sm font-bold text-on-primary">
+            Open reviewers
+          </button>
+        </div>
       </div>
     );
   }
