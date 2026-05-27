@@ -39,6 +39,29 @@ service cloud.firestore {
           getUserData().get('email', '') in ['student@letmastery.com', 'instructor@letmastery.com', 'admin@letmastery.com']
         );
     }
+    function instructorOwnsClass(classId) {
+      return isInstructor() &&
+        classId is string &&
+        classId.size() > 0 &&
+        exists(/databases/$(database)/documents/classes/$(classId)) &&
+        (
+          get(/databases/$(database)/documents/classes/$(classId)).data.instructorId == request.auth.uid ||
+          get(/databases/$(database)/documents/classes/$(classId)).data.instructorEmail == request.auth.token.email ||
+          isAdmin()
+        );
+    }
+    function instructorCanAccessStudent(studentId) {
+      return isAdmin() ||
+        (
+          isInstructor() &&
+          studentId is string &&
+          exists(/databases/$(database)/documents/users/$(studentId)) &&
+          instructorOwnsClass(get(/databases/$(database)/documents/users/$(studentId)).data.get('activeClassId', ''))
+        );
+    }
+    function canReadStudentRecord(studentId) {
+      return isOwner(studentId) || instructorCanAccessStudent(studentId);
+    }
     
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
@@ -91,7 +114,7 @@ service cloud.firestore {
     }
     
     match /learnerProfiles/{userId} {
-      allow read: if isOwner(userId) || isInstructor();
+      allow read: if canReadStudentRecord(userId);
       allow create: if isOwner(userId) || isAdmin();
       allow update: if isOwner(userId) || isAdmin();
       allow delete: if isAdmin() || (isDemoAccount() && isOwner(userId));
@@ -103,7 +126,7 @@ service cloud.firestore {
     }
     
     match /quizAttempts/{attemptId} {
-      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || instructorCanAccessStudent(resource.data.userId));
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
       allow update: if isAdmin() || isOwnedOpenAttemptUpdate();
       allow delete: if isAdmin() || (isDemoAccount() && existing().userId == request.auth.uid);
@@ -125,7 +148,7 @@ service cloud.firestore {
     }
 
     match /studentReviewSettings/{userId} {
-      allow read: if isOwner(userId) || isInstructor();
+      allow read: if canReadStudentRecord(userId);
       allow create, update: if isOwner(userId) || isAdmin();
       allow delete: if isAdmin();
     }
@@ -142,14 +165,14 @@ service cloud.firestore {
     }
     
     match /mockExamAttempts/{attemptId} {
-      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || instructorCanAccessStudent(resource.data.userId));
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
       allow update: if isAdmin() || isOwnedOpenAttemptUpdate();
       allow delete: if isAdmin() || (isDemoAccount() && existing().userId == request.auth.uid);
     }
 
     match /mistakeBank/{mistakeId} {
-      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || instructorCanAccessStudent(resource.data.userId));
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
       allow update: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
       allow delete: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
@@ -183,26 +206,26 @@ service cloud.firestore {
     }
     
     match /classEnrollments/{enrollmentId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && (incoming().studentId == request.auth.uid || isInstructor());
-      allow update, delete: if isInstructor() || isOwner(existing().studentId);
+      allow read: if isSignedIn() && (resource.data.studentId == request.auth.uid || instructorOwnsClass(resource.data.classId));
+      allow create: if isSignedIn() && (incoming().studentId == request.auth.uid || instructorOwnsClass(incoming().classId));
+      allow update, delete: if isAdmin() || isOwner(existing().studentId) || instructorOwnsClass(existing().classId);
     }
     
     match /diagnosticAttempts/{attemptId} {
-      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || instructorCanAccessStudent(resource.data.userId));
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
       allow update, delete: if isAdmin() || (isDemoAccount() && existing().userId == request.auth.uid);
     }
 
     match /moduleProgress/{progressId} {
-      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || instructorCanAccessStudent(resource.data.userId));
       allow create, update: if isSignedIn() && (incoming().userId == request.auth.uid || (resource != null && existing().userId == request.auth.uid));
       allow delete: if isAdmin() || (isDemoAccount() && existing().userId == request.auth.uid);
     }
 
     match /examAttemptLogs/{attemptId} {
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
-      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || instructorCanAccessStudent(resource.data.userId));
       allow update: if isAdmin();
       allow delete: if isAdmin() || (isDemoAccount() && existing().userId == request.auth.uid);
     }
@@ -214,14 +237,14 @@ service cloud.firestore {
 
     match /learningNotes/{noteId} {
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
-      allow read, update, delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
+      allow read, update, delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
     }
 
     match /learningAnnotations/{annotationId} {
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
-      allow read, delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
+      allow read, delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
       allow update: if isSignedIn() && (
-        isInstructor() ||
+        isAdmin() ||
         (resource.data.userId == request.auth.uid && incoming().userId == resource.data.userId)
       );
     }
