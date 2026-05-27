@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
@@ -178,6 +178,7 @@ export default function LearningQuest() {
   const [answerDraftSavedAt, setAnswerDraftSavedAt] = useState(0);
   const [loading, setLoading] = useState(true);
   const [accessError, setAccessError] = useState('');
+  const noteLoadedRef = useRef(false);
   const [sessionStartedAt] = useState(Date.now());
   const [nowTick, setNowTick] = useState(Date.now());
 
@@ -220,6 +221,7 @@ export default function LearningQuest() {
   );
   const learningState = getLearningState(progress, parts.length);
   const weakReviewParts = parts.filter((part) => progress.weakPartIds?.includes(part.id));
+  const hiddenHighlightCount = lessonHighlights.filter((highlight) => highlight.hidden).length;
 
   const progressDocId = user ? `${user.uid}_${module.id}` : '';
   const localProgressKey = progressStorageKey(user?.uid, module.id);
@@ -237,6 +239,7 @@ export default function LearningQuest() {
 
   useEffect(() => {
     async function loadLessonNote() {
+      noteLoadedRef.current = false;
       if (!user || !currentPart) return;
       const noteSnap = await getDoc(doc(db, 'learningNotes', `${user.uid}_${module.id}_${currentPart.id}`));
       if (noteSnap.exists()) {
@@ -252,6 +255,7 @@ export default function LearningQuest() {
       setActiveHighlightId('');
       setRevealedHighlightIds([]);
       setSelectedText('');
+      noteLoadedRef.current = true;
     }
     loadLessonNote();
   }, [user?.uid, module.id, currentPart?.id]);
@@ -615,14 +619,41 @@ export default function LearningQuest() {
     setShowToast(true);
   };
 
+  useEffect(() => {
+    if (!user || !currentPart || !noteLoadedRef.current) return;
+    const timer = window.setTimeout(() => {
+      void setDoc(doc(db, 'learningNotes', `${user.uid}_${module.id}_${currentPart.id}`), {
+        userId: user.uid,
+        moduleId: module.id,
+        moduleTitle: module.title,
+        partId: currentPart.id,
+        partTitle: currentPart.title,
+        note: lessonNote,
+        bookmarked: isBookmarked,
+        highlights: lessonHighlights,
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch((error) => console.warn('Lesson note autosave failed', error));
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [currentPart?.id, currentPart?.title, isBookmarked, lessonHighlights, lessonNote, module.id, module.title, user]);
+
   const captureSelectedText = () => {
     const text = window.getSelection()?.toString().trim() || '';
     if (text.length >= 2) setSelectedText(text.slice(0, 240));
   };
 
   const addHighlight = (hidden = false) => {
-    if (!selectedText || lessonHighlights.some((item) => item.text === selectedText)) return;
-    setLessonHighlights((items) => [...items, { id: `hl-${Date.now()}`, text: selectedText, hidden }]);
+    if (!selectedText) return;
+    const existing = lessonHighlights.find((item) => item.text === selectedText);
+    if (existing) {
+      setActiveHighlightId(existing.id);
+      setSelectedText('');
+      window.getSelection()?.removeAllRanges();
+      return;
+    }
+    const id = `hl-${Date.now()}`;
+    setLessonHighlights((items) => [...items, { id, text: selectedText, hidden }]);
+    setActiveHighlightId(id);
     setSelectedText('');
     window.getSelection()?.removeAllRanges();
   };
@@ -644,6 +675,21 @@ export default function LearningQuest() {
     setRevealedHighlightIds((ids) => (
       ids.includes(id) ? ids.filter((itemId) => itemId !== id) : [...ids, id]
     ));
+  };
+
+  const revealAllHiddenHighlights = () => {
+    setRevealedHighlightIds(lessonHighlights.filter((item) => item.hidden).map((item) => item.id));
+  };
+
+  const hideRevealedHighlights = () => {
+    setRevealedHighlightIds([]);
+  };
+
+  const clearLessonHighlights = () => {
+    if (!lessonHighlights.length || !window.confirm('Remove all highlights and hidden recall marks in this lesson?')) return;
+    setLessonHighlights([]);
+    setRevealedHighlightIds([]);
+    setActiveHighlightId('');
   };
 
   const recordMistake = async (question: JourneyQuestion, answer: string, sourceType: string, sourceAttemptId = '') => {
@@ -1288,6 +1334,49 @@ export default function LearningQuest() {
                   <Save size={14} />
                   Save notes
                 </button>
+                {lessonHighlights.length > 0 && (
+                  <>
+                    {hiddenHighlightCount > 0 && (
+                      <button onClick={revealedHighlightIds.length ? hideRevealedHighlights : revealAllHiddenHighlights} className="inline-flex items-center gap-2 rounded-full bg-surface-container text-on-surface px-3 py-2 text-xs font-bold">
+                        {revealedHighlightIds.length ? <EyeOff size={14} /> : <Eye size={14} />}
+                        {revealedHighlightIds.length ? 'Hide revealed' : `Reveal hidden (${hiddenHighlightCount})`}
+                      </button>
+                    )}
+                    <button onClick={clearLessonHighlights} className="inline-flex items-center gap-2 rounded-full bg-error/10 text-error px-3 py-2 text-xs font-bold">
+                      <X size={14} />
+                      Clear marks
+                    </button>
+                  </>
+                )}
+              </div>
+              <div className="fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 gap-2 rounded-full border border-outline-variant/40 bg-surface-container-lowest/95 p-2 shadow-lg backdrop-blur md:hidden">
+                <button onClick={() => setIsBookmarked(!isBookmarked)} className={`rounded-full p-2 ${isBookmarked ? 'bg-primary text-on-primary' : 'text-on-surface'}`} aria-label="Bookmark lesson">
+                  <Bookmark size={17} />
+                </button>
+                <button onClick={saveLessonNote} className="rounded-full p-2 text-on-surface" aria-label="Save notes">
+                  <Save size={17} />
+                </button>
+                {hiddenHighlightCount > 0 && (
+                  <button onClick={revealedHighlightIds.length ? hideRevealedHighlights : revealAllHiddenHighlights} className="rounded-full p-2 text-on-surface" aria-label="Reveal or hide recall marks">
+                    {revealedHighlightIds.length ? <EyeOff size={17} /> : <Eye size={17} />}
+                  </button>
+                )}
+              </div>
+              <div className="hidden lg:flex fixed right-5 top-1/3 z-30 flex-col gap-2 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest/95 p-2 shadow-lg backdrop-blur">
+                <button onClick={() => setIsBookmarked(!isBookmarked)} className={`rounded-xl p-3 ${isBookmarked ? 'bg-primary text-on-primary' : 'text-on-surface hover:bg-surface-container'}`} title="Bookmark lesson" aria-label="Bookmark lesson">
+                  <Bookmark size={18} />
+                </button>
+                <button onClick={saveLessonNote} className="rounded-xl p-3 text-on-surface hover:bg-surface-container" title="Save notes" aria-label="Save notes">
+                  <Save size={18} />
+                </button>
+                <button onClick={downloadStudyGuide} className="rounded-xl p-3 text-on-surface hover:bg-surface-container" title="Download study guide" aria-label="Download study guide">
+                  <Download size={18} />
+                </button>
+                {hiddenHighlightCount > 0 && (
+                  <button onClick={revealedHighlightIds.length ? hideRevealedHighlights : revealAllHiddenHighlights} className="rounded-xl p-3 text-on-surface hover:bg-surface-container" title="Reveal or hide recall marks" aria-label="Reveal or hide recall marks">
+                    {revealedHighlightIds.length ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                )}
               </div>
               <div onMouseUp={captureSelectedText} className="text-on-surface-variant leading-relaxed whitespace-pre-line select-text">
                 {renderHighlightedText(
@@ -1300,14 +1389,14 @@ export default function LearningQuest() {
                 )}
               </div>
               {activeHighlightId && (
-                <div className="mt-3 rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                <div className="mt-3 rounded-2xl border border-primary/20 bg-primary/5 p-3">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <div className="flex items-center gap-2 text-xs font-black uppercase tracking-widest text-primary">
                         <MessageCircle size={14} />
-                        Highlight tools
+                        Study mark
                       </div>
-                      <p className="mt-2 text-sm font-semibold text-on-surface">
+                      <p className="mt-2 max-w-2xl text-sm font-semibold text-on-surface">
                         "{lessonHighlights.find((item) => item.id === activeHighlightId)?.text}"
                       </p>
                     </div>
@@ -1347,13 +1436,16 @@ export default function LearningQuest() {
                       </button>
                     </div>
                   </div>
-                  <textarea
-                    value={lessonHighlights.find((item) => item.id === activeHighlightId)?.note || ''}
-                    onChange={(event) => updateHighlight(activeHighlightId, { note: event.target.value })}
-                    rows={2}
-                    placeholder="Add a short note for this exact highlighted idea."
-                    className="mt-4 w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm outline-none focus:border-primary/40 resize-none"
-                  />
+                  <details className="mt-3">
+                    <summary className="cursor-pointer text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Note on this mark</summary>
+                    <textarea
+                      value={lessonHighlights.find((item) => item.id === activeHighlightId)?.note || ''}
+                      onChange={(event) => updateHighlight(activeHighlightId, { note: event.target.value })}
+                      rows={2}
+                      placeholder="Add a short note for this exact highlighted idea."
+                      className="mt-3 w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm outline-none focus:border-primary/40 resize-none"
+                    />
+                  </details>
                 </div>
               )}
               <details className="mt-4 rounded-2xl border border-outline-variant/40 bg-surface-container/30 p-3">
