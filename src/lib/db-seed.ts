@@ -29,6 +29,8 @@ export async function seedDatabase() {
       try {
         await setDoc(doc(db, 'categories', cat.id), { 
           ...cat, 
+          title: cat.name,
+          isPublished: true,
           questionCount: 0,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
@@ -44,6 +46,8 @@ export async function seedDatabase() {
        try {
          await setDoc(doc(db, 'topics', topic.id), { 
            ...topic,
+           title: topic.name,
+           isPublished: topic.isPublished ?? true,
            createdAt: serverTimestamp(),
            updatedAt: serverTimestamp()
          }, { merge: true });
@@ -58,6 +62,8 @@ export async function seedDatabase() {
        try {
          await setDoc(doc(db, 'skills', skill.id), { 
            ...skill,
+           title: skill.name,
+           isPublished: true,
            createdAt: serverTimestamp(),
            updatedAt: serverTimestamp()
          }, { merge: true });
@@ -71,11 +77,22 @@ export async function seedDatabase() {
     for (const quest of SEED_QUESTIONS) {
         try {
           const stableId = generateStableId(quest.stem);
+          const wrongChoiceExplanations = Object.fromEntries((quest.options || [])
+            .filter((option: any) => option.id !== quest.correctOptionId)
+            .map((option: any) => [option.id, `${option.text} is a distractor. Review the rationalization before approving this item for high-stakes exams.`]));
           await setDoc(doc(db, 'questions', stableId), {
             ...quest,
             id: stableId,
             version: 1,
             aiGenerated: false,
+            status: 'approved',
+            approvalStatus: 'approved',
+            approved: true,
+            isPublished: true,
+            examType: quest.type,
+            familyId: `${stableId}_family`,
+            wrongChoiceExplanations,
+            sourceNote: 'Seeded public LET reviewer question',
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
             createdBy: 'system-seed'
@@ -290,11 +307,89 @@ export async function seedDatabase() {
         ];
 
         const finalExam = linkedQuestions.slice(1).length ? linkedQuestions.slice(1) : linkedQuestions;
+        const competencies = mod.skillIds.map((skillId: string) => {
+          const skill = SEED_SKILLS.find((row) => row.id === skillId);
+          return {
+            id: skillId,
+            label: skill?.name || skillId,
+            topicId: skill?.topicId || mod.topicId,
+          };
+        });
+        const flowItems = seededParts.flatMap((part, index) => {
+          const rows = [
+            {
+              id: `${part.id}-textbook`,
+              type: 'textbook',
+              partId: part.id,
+              title: part.textbookSection.title,
+              order: index * 3,
+              required: true,
+            },
+            {
+              id: `${part.id}-lesson`,
+              type: 'lesson',
+              partId: part.id,
+              title: part.title,
+              order: index * 3 + 1,
+              required: true,
+            },
+          ];
+          if (part.miniQuiz?.length) {
+            rows.push({
+              id: `${part.id}-mini-quiz`,
+              type: 'quiz',
+              partId: part.id,
+              title: `${part.title} mini quiz`,
+              order: index * 3 + 2,
+              required: true,
+            });
+          }
+          return rows;
+        });
 
         await setDoc(doc(db, 'modules', mod.id), {
           ...mod,
+          publishScope: 'public',
+          classIds: [],
+          status: 'published',
+          authorId: 'system-seed',
+          authorName: 'Let Mastery Editorial Team',
+          approved: true,
+          approvalStatus: 'approved',
+          competencies,
+          flowItems,
+          unlockRules: {
+            requiresFinalExamPass: true,
+            passingScore: 85,
+            unlocksNextModuleIds: [],
+          },
+          attemptPolicy: {
+            miniQuiz: {
+              maxAttempts: 1,
+              scoreMode: 'first_attempt',
+              showAnswersAfterSubmission: true,
+              randomizeQuestions: false,
+            },
+            finalExam: {
+              maxAttempts: 1,
+              scoreMode: 'first_attempt',
+              showAnswersAfterSubmission: true,
+              randomizeQuestions: true,
+              passingScore: 85,
+            },
+          },
           parts: seededParts,
-          finalExam
+          finalExam: finalExam.map((question: any) => ({
+            ...question,
+            partId: seededParts[0]?.id,
+            competencyId: question.skillIds?.[0] || competencies[0]?.id || mod.topicId,
+          })),
+          examBlueprint: {
+            questionCount: Math.max(1, finalExam.length),
+            passingScore: 85,
+            difficultyMix: { easy: 50, medium: 40, hard: 10 },
+            topicDistribution: { [mod.topicId]: 100 },
+          },
         }, { merge: true });
         console.log(`Seeded module: ${mod.title}`);
       } catch (err) {
@@ -302,7 +397,61 @@ export async function seedDatabase() {
       }
     }
 
-    // 7. Seed Demo Accounts
+    // 7. Seed Public Exam Blueprints
+    const examBlueprints = [
+      {
+        id: 'blueprint-public-gened-practice',
+        title: 'General Education Public Practice Drill',
+        description: 'Short public practice set for General Education review.',
+        examMode: 'practice_drill',
+        categoryId: 'gened',
+        questionCount: 5,
+        timeLimitMinutes: 15,
+        passingScore: 70,
+        difficultyMix: { easy: 60, medium: 40 },
+        categoryDistribution: { gened: 100 },
+        integrityLevel: 'open_practice',
+      },
+      {
+        id: 'blueprint-public-profed-practice',
+        title: 'Professional Education Public Practice Drill',
+        description: 'Short public practice set for Professional Education review.',
+        examMode: 'practice_drill',
+        categoryId: 'profed',
+        questionCount: 5,
+        timeLimitMinutes: 15,
+        passingScore: 70,
+        difficultyMix: { easy: 50, medium: 40, hard: 10 },
+        categoryDistribution: { profed: 100 },
+        integrityLevel: 'open_practice',
+      },
+      {
+        id: 'blueprint-public-full-let-core',
+        title: 'Public Full LET Simulation Blueprint',
+        description: 'Seeded full-review blueprint using only approved public questions. Increase item count as the official bank grows.',
+        examMode: 'full_mock',
+        questionCount: 8,
+        timeLimitMinutes: 80,
+        passingScore: 75,
+        difficultyMix: { easy: 35, medium: 45, hard: 20 },
+        categoryDistribution: { gened: 50, profed: 50 },
+        integrityLevel: 'strict_exam_mode',
+      },
+    ];
+
+    for (const blueprint of examBlueprints) {
+      await setDoc(doc(db, 'examBlueprints', blueprint.id), {
+        ...blueprint,
+        status: 'active',
+        isPublished: true,
+        createdBy: 'system-seed',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      console.log(`Seeded exam blueprint: ${blueprint.title}`);
+    }
+
+    // 8. Seed Demo Accounts
     const demoAccounts = [
       {
         uid: 'demo-student',
@@ -356,7 +505,7 @@ export async function seedDatabase() {
       }
     }
 
-    // 8. Seed Demo Class, Enrollment, and Learner Profile
+    // 9. Seed Demo Class, Enrollment, and Learner Profile
     await setDoc(doc(db, 'classes', 'class_let_foundations'), {
       id: 'class_let_foundations',
       className: 'LET Foundations Journey',
@@ -410,4 +559,78 @@ export async function seedDatabase() {
     console.error('Seeding process failed:', error);
     throw error;
   }
+}
+
+export interface SeedHealthReport {
+  counts: Record<string, number>;
+  warnings: string[];
+  blueprintCoverage: Array<{
+    id: string;
+    title: string;
+    required: number;
+    available: number;
+    status: 'ready' | 'needs_questions';
+  }>;
+}
+
+export async function getSeedHealth(): Promise<SeedHealthReport> {
+  const [
+    categoriesSnap,
+    topicsSnap,
+    skillsSnap,
+    textbooksSnap,
+    modulesSnap,
+    questionsSnap,
+    blueprintsSnap,
+  ] = await Promise.all([
+    getDocs(collection(db, 'categories')),
+    getDocs(collection(db, 'topics')),
+    getDocs(collection(db, 'skills')),
+    getDocs(collection(db, 'textbooks')),
+    getDocs(query(collection(db, 'modules'), where('isPublished', '==', true))),
+    getDocs(query(collection(db, 'questions'), where('approved', '==', true), where('isPublished', '==', true))),
+    getDocs(query(collection(db, 'examBlueprints'), where('isPublished', '==', true))),
+  ]);
+
+  const approvedQuestions = questionsSnap.docs.map((questionDoc) => ({ id: questionDoc.id, ...questionDoc.data() } as any));
+  const blueprintCoverage = blueprintsSnap.docs.map((blueprintDoc) => {
+    const blueprint = blueprintDoc.data() as any;
+    const categoryDistribution = blueprint.categoryDistribution || blueprint.sectionDistribution || {};
+    const allowedCategoryIds = Object.keys(categoryDistribution);
+    const available = allowedCategoryIds.length
+      ? approvedQuestions.filter((question) => allowedCategoryIds.includes(question.categoryId)).length
+      : approvedQuestions.length;
+    const required = Number(blueprint.questionCount || 0);
+    return {
+      id: blueprintDoc.id,
+      title: blueprint.title || blueprintDoc.id,
+      required,
+      available,
+      status: available >= required && required > 0 ? 'ready' as const : 'needs_questions' as const,
+    };
+  });
+
+  const counts = {
+    categories: categoriesSnap.size,
+    topics: topicsSnap.size,
+    skills: skillsSnap.size,
+    textbooks: textbooksSnap.size,
+    publishedModules: modulesSnap.size,
+    approvedQuestions: questionsSnap.size,
+    activeBlueprints: blueprintsSnap.size,
+  };
+
+  const warnings = [
+    counts.categories === 0 ? 'No public categories exist yet.' : '',
+    counts.topics === 0 ? 'No public topics exist yet.' : '',
+    counts.textbooks === 0 ? 'No public textbooks exist yet.' : '',
+    counts.publishedModules === 0 ? 'No published public modules exist yet.' : '',
+    counts.approvedQuestions === 0 ? 'No approved public questions exist yet.' : '',
+    counts.activeBlueprints === 0 ? 'No active public exam blueprints exist yet.' : '',
+    ...blueprintCoverage
+      .filter((blueprint) => blueprint.status === 'needs_questions')
+      .map((blueprint) => `${blueprint.title} needs ${blueprint.required} approved questions but only ${blueprint.available} are available.`),
+  ].filter(Boolean);
+
+  return { counts, warnings, blueprintCoverage };
 }

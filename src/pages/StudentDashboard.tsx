@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, where } from 'firebase/firestore';
 import {
   AlertTriangle,
   Award,
@@ -58,6 +58,7 @@ export default function StudentDashboard() {
   const [profile, setProfile] = useState<any>(null);
   const [classData, setClassData] = useState<any>(null);
   const [activeModules, setActiveModules] = useState<DashboardModule[]>([]);
+  const [publicExploreModules, setPublicExploreModules] = useState<DashboardModule[]>([]);
   const [progressRows, setProgressRows] = useState<any[]>([]);
   const [progressByModuleState, setProgressByModuleState] = useState<Record<string, any>>({});
   const [diagnosticAttempts, setDiagnosticAttempts] = useState<any[]>([]);
@@ -77,6 +78,7 @@ export default function StudentDashboard() {
         setProgressRows(rows);
         const progressMap = Object.fromEntries(rows.filter((row: any) => row.moduleId).map((row: any) => [row.moduleId, row]));
         setProgressByModuleState(progressMap);
+        const archivedModuleIds = new Set<string>(((user as any).archivedModuleIds || []).filter(Boolean));
 
         const diagnosticSnap = await getDocs(query(collection(db, 'diagnosticAttempts'), where('userId', '==', user.uid)));
         setDiagnosticAttempts(diagnosticSnap.docs.map((attemptDoc) => ({ id: attemptDoc.id, ...attemptDoc.data() }))
@@ -125,6 +127,29 @@ export default function StudentDashboard() {
           });
         }
         setActiveModules(loadedModules);
+
+        const publishedSnap = await getDocs(query(collection(db, 'modules'), where('isPublished', '==', true))).catch(() => null);
+        const exploreRows: DashboardModule[] = publishedSnap
+          ? publishedSnap.docs
+            .filter((moduleDoc) => {
+              const data = moduleDoc.data() as any;
+              const publishScope = data.publishScope || (data.classIds?.length ? 'classes' : 'public');
+              return publishScope === 'public' && !progressMap[moduleDoc.id] && !archivedModuleIds.has(moduleDoc.id);
+            })
+            .map((moduleDoc) => {
+              const data = moduleDoc.data() as any;
+              return {
+                id: moduleDoc.id,
+                title: data.title || 'Untitled public reviewer',
+                description: data.description || 'Published LET reviewer module',
+                duration: data.duration || '',
+                status: 'Public reviewer',
+                progress: 0,
+              };
+            })
+            .slice(0, 4)
+          : [];
+        setPublicExploreModules(exploreRows);
       } catch (error) {
         console.error('Failed to fetch dashboard data', error);
       } finally {
@@ -163,6 +188,26 @@ export default function StudentDashboard() {
   }, [user]);
   const readinessLabel = boardReadiness >= 85 ? 'Board-ready signal' : boardReadiness >= 70 ? 'Near-ready' : hasAnyRecordedActivity ? 'Building readiness' : 'Not started';
   const targetExamLabel = (user as any)?.targetExamDate ? `Target: ${new Date((user as any).targetExamDate).toLocaleDateString()}` : 'No target date';
+
+  const startPublicReview = async (module: DashboardModule) => {
+    if (!user) return;
+    await setDoc(doc(db, 'moduleProgress', `${user.uid}_${module.id}`), {
+      userId: user.uid,
+      moduleId: module.id,
+      moduleTitle: module.title,
+      status: 'in_progress',
+      moduleState: 'in_progress',
+      currentPartIndex: 0,
+      phase: 'intro',
+      partScores: {},
+      progressPercent: 0,
+      source: 'public_self_review',
+      activeClassId: null,
+      startedAt: serverTimestamp(),
+      lastAccessedAt: serverTimestamp(),
+    }, { merge: true });
+    navigate(`/quest?moduleId=${module.id}`);
+  };
 
   return (
     <StudentLayout title="LET Review Command Center">
@@ -296,6 +341,39 @@ export default function StudentDashboard() {
                   </article>
                 ))}
               </div>
+            </section>
+
+            <section>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-extrabold font-headline text-on-surface flex items-center gap-2">
+                  <BookOpen className="text-primary" size={22} />
+                  Explore Public Modules
+                </h2>
+                <button onClick={() => navigate('/student/courses')} className="text-primary text-xs font-bold uppercase tracking-widest hover:underline">Browse All</button>
+              </div>
+
+              {publicExploreModules.length === 0 ? (
+                <div className="bg-surface-container-lowest border border-dashed border-outline-variant rounded-2xl p-6 text-sm font-bold text-on-surface-variant">
+                  No unstarted public reviewers are available for your current track yet.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {publicExploreModules.map((module) => (
+                    <article key={module.id} className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-sm">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-primary">Explore only</span>
+                      <h3 className="mt-2 font-bold text-on-surface leading-tight">{module.title}</h3>
+                      <p className="mt-2 line-clamp-2 text-xs text-on-surface-variant">{module.description}</p>
+                      <p className="mt-3 rounded-xl bg-surface-container/40 border border-outline-variant/30 p-3 text-[11px] font-bold text-on-surface-variant">
+                        Progress is 0% until you start this reviewer.
+                      </p>
+                      <button onClick={() => void startPublicReview(module)} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-xs font-bold text-on-primary">
+                        Start Module
+                        <ChevronRight size={14} />
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              )}
             </section>
 
             <section className="bg-secondary-container/20 border border-secondary-container/30 rounded-2xl p-6 shadow-sm">

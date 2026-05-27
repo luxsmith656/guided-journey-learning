@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import AdminLayout from '../components/AdminLayout';
 import { useAuth } from '../context/AuthContext';
 import { SyncManager } from '../lib/offline/SyncManager';
-import { seedDatabase } from '../lib/db-seed';
+import { getSeedHealth, seedDatabase, SeedHealthReport } from '../lib/db-seed';
 import Toast from '../components/Toast';
 import { RefreshCw, CloudDownload, CloudAlert, Database, CheckCircle2, History } from 'lucide-react';
 
@@ -13,10 +13,25 @@ export default function SyncCenter() {
   const [showToast, setShowToast] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [lastSync, setLastSync] = useState<number | null>(null);
+  const [seedHealth, setSeedHealth] = useState<SeedHealthReport | null>(null);
 
   useEffect(() => {
     SyncManager.getLastSyncTime().then(setLastSync);
   }, []);
+
+  const refreshSeedHealth = async () => {
+    if (user?.role !== 'admin') return;
+    try {
+      setSeedHealth(await getSeedHealth());
+    } catch (error) {
+      console.warn('Unable to load seed health', error);
+      setSeedHealth(null);
+    }
+  };
+
+  useEffect(() => {
+    void refreshSeedHealth();
+  }, [user?.role]);
 
   const handleSync = async () => {
     setIsSyncing(true);
@@ -38,6 +53,7 @@ export default function SyncCenter() {
     setIsSeeding(true);
     try {
       await seedDatabase();
+      await refreshSeedHealth();
       setToastMsg('System data seeded successfully!');
       setShowToast(true);
     } catch (err: any) {
@@ -121,7 +137,7 @@ export default function SyncCenter() {
             isVisible={showToast}
             message={toastMsg}
             onClose={() => setShowToast(false)}
-            type={toastMsg.includes('failed') ? 'error' : 'success'}
+            type={toastMsg.toLowerCase().includes('failed') ? 'error' : 'success'}
           />
         </div>
      );
@@ -133,7 +149,7 @@ export default function SyncCenter() {
             <div className="flex justify-between items-end mb-8">
                <div>
                   <h1 className="text-3xl font-extrabold font-headline mb-2">Offline Sync</h1>
-                  <p className="text-on-surface-variant">Monitor and manage data synchronization across devices.</p>
+                  <p className="text-on-surface-variant">Seed public LET curriculum and check whether modules, questions, and blueprints are ready.</p>
                </div>
                <div className="flex gap-3">
                   <button 
@@ -146,8 +162,8 @@ export default function SyncCenter() {
                      </span> 
                      {isSeeding ? 'Seeding Data...' : 'Seed System Data'}
                   </button>
-                  <button className="bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors px-4 py-2 rounded-xl font-bold flex items-center gap-2 text-sm">
-                     <span className="material-symbols-outlined text-[18px]">refresh</span> Force Master Sync
+                  <button onClick={() => void refreshSeedHealth()} className="bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors px-4 py-2 rounded-xl font-bold flex items-center gap-2 text-sm">
+                     <span className="material-symbols-outlined text-[18px]">refresh</span> Refresh Health
                   </button>
                </div>
             </div>
@@ -156,51 +172,58 @@ export default function SyncCenter() {
                 <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant">
                    <div className="flex items-center gap-3 mb-2 text-on-surface">
                       <span className="material-symbols-outlined text-primary">cloud_done</span>
-                      <h3 className="font-headline font-bold">Last Sync Status</h3>
+                      <h3 className="font-headline font-bold">Public Modules</h3>
                    </div>
-                   <p className="text-2xl font-black text-on-surface mb-1">Success</p>
-                   <p className="text-xs text-on-surface-variant/40">2 minutes ago</p>
+                   <p className="text-2xl font-black text-on-surface mb-1">{seedHealth?.counts.publishedModules ?? 0}</p>
+                   <p className="text-xs text-on-surface-variant/40">Published Firestore modules</p>
                 </div>
                 <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant">
                    <div className="flex items-center gap-3 mb-2 text-on-surface">
                       <span className="material-symbols-outlined text-indigo-500">data_usage</span>
-                      <h3 className="font-headline font-bold">Pending Payloads</h3>
+                      <h3 className="font-headline font-bold">Approved Questions</h3>
                    </div>
-                   <p className="text-2xl font-black text-on-surface mb-1">14</p>
-                   <p className="text-xs text-on-surface-variant/40">Awaiting device connection</p>
+                   <p className="text-2xl font-black text-on-surface mb-1">{seedHealth?.counts.approvedQuestions ?? 0}</p>
+                   <p className="text-xs text-on-surface-variant/40">Available to exam blueprints</p>
                 </div>
                 <div className="bg-surface-container-lowest p-6 rounded-2xl shadow-sm border border-outline-variant">
                    <div className="flex items-center gap-3 mb-2 text-on-surface">
-                      <span className="material-symbols-outlined text-error">cloud_off</span>
-                      <h3 className="font-headline font-bold">Conflict Errors</h3>
+                      <span className="material-symbols-outlined text-error">rule_settings</span>
+                      <h3 className="font-headline font-bold">Active Blueprints</h3>
                    </div>
-                   <p className="text-2xl font-black text-on-surface mb-1">3</p>
-                   <p className="text-xs text-error font-medium">Requires manual resolution</p>
+                   <p className="text-2xl font-black text-on-surface mb-1">{seedHealth?.counts.activeBlueprints ?? 0}</p>
+                   <p className={`text-xs font-medium ${seedHealth?.warnings.length ? 'text-error' : 'text-on-surface-variant/40'}`}>
+                     {seedHealth?.warnings.length ? `${seedHealth.warnings.length} health warning${seedHealth.warnings.length === 1 ? '' : 's'}` : 'Ready'}
+                   </p>
                 </div>
              </div>
 
              <div className="bg-surface-container-lowest rounded-3xl p-8 border border-outline-variant shadow-sm relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-1.5 h-full bg-error"></div>
+                <div className={`absolute top-0 left-0 w-1.5 h-full ${seedHealth?.warnings.length ? 'bg-error' : 'bg-emerald-500'}`}></div>
                 <h3 className="text-xl font-headline font-bold text-on-surface mb-6 flex items-center gap-3">
-                   <div className="w-10 h-10 bg-error/10 rounded-xl flex items-center justify-center text-error">
-                     <span className="material-symbols-outlined">warning</span>
+                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${seedHealth?.warnings.length ? 'bg-error/10 text-error' : 'bg-emerald-500/10 text-emerald-600'}`}>
+                     <span className="material-symbols-outlined">{seedHealth?.warnings.length ? 'warning' : 'verified'}</span>
                    </div>
-                   Sync Conflicts
+                   Seed Health
                 </h3>
                 
                 <div className="space-y-4">
-                   <div className="p-4 rounded-xl border border-error/10 bg-error/5 flex flex-col md:flex-row md:items-center gap-4">
-                      <div className="flex-1">
-                         <div className="flex items-center gap-2 mb-1">
-                            <span className="text-sm font-bold text-on-surface">Question Edit Conflict</span>
-                            <span className="text-[10px] bg-surface-container px-2 py-0.5 rounded text-on-surface-variant/40 font-mono">QID: 8492A</span>
-                         </div>
-                         <p className="text-xs text-on-surface-variant/60">Modified locally on Device A while updated on Server.</p>
-                      </div>
-                      <div className="flex gap-2 shrink-0 border-t md:border-none pt-3 md:pt-0 border-outline-variant/10">
-                         <button className="px-4 py-1.5 rounded-lg bg-surface-container-lowest border border-outline-variant text-xs font-bold text-on-surface-variant/60 hover:text-on-surface transition-colors">Keep Local</button>
-                         <button className="px-4 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-bold shadow-sm">Use Server Data</button>
-                      </div>
+                   {(seedHealth?.warnings || []).length === 0 ? (
+                     <div className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/10 text-sm font-bold text-emerald-700">
+                       Public curriculum, approved questions, textbooks, and exam blueprints are present.
+                     </div>
+                   ) : seedHealth?.warnings.map((warning) => (
+                     <div key={warning} className="p-4 rounded-xl border border-error/10 bg-error/5 text-sm font-bold text-error">
+                       {warning}
+                     </div>
+                   ))}
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                     {(seedHealth?.blueprintCoverage || []).map((blueprint) => (
+                       <div key={blueprint.id} className="rounded-xl border border-outline-variant/40 bg-surface-container/30 p-4">
+                         <p className="text-xs font-black uppercase tracking-widest text-on-surface-variant/50">{blueprint.status === 'ready' ? 'Ready' : 'Needs questions'}</p>
+                         <h4 className="mt-1 font-bold text-on-surface">{blueprint.title}</h4>
+                         <p className="mt-2 text-xs text-on-surface-variant">{blueprint.available} approved available / {blueprint.required} required</p>
+                       </div>
+                     ))}
                    </div>
                 </div>
              </div>
@@ -210,7 +233,7 @@ export default function SyncCenter() {
         isVisible={showToast}
         message={toastMsg}
         onClose={() => setShowToast(false)}
-        type={toastMsg.includes('failed') ? 'error' : 'success'}
+        type={toastMsg.toLowerCase().includes('failed') ? 'error' : 'success'}
       />
     </AdminLayout>
   );

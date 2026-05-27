@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { collection, query, limit, getDocs, doc, getDoc, updateDoc, arrayUnion, where, serverTimestamp, increment } from 'firebase/firestore';
+import { collection, query, getDocs, doc, getDoc, updateDoc, where, serverTimestamp, increment } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { journeyModules } from '../lib/learningJourney';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   ChevronLeft, 
@@ -43,6 +42,19 @@ export default function Flashcards() {
         let focusCategoryId = '';
         const targetTopicIds = new Set<string>();
         
+        const profileSnap = await getDoc(doc(db, 'learnerProfiles', user.uid));
+        const profile = profileSnap.exists() ? profileSnap.data() : null;
+        const topicMastery = profile?.masteryByTopic || {};
+        Object.entries(topicMastery)
+          .filter(([, mastery]) => Number(mastery) > 0 && Number(mastery) < 70)
+          .forEach(([topicId]) => targetTopicIds.add(topicId));
+
+        const mistakeSnap = await getDocs(query(collection(db, 'mistakeBank'), where('userId', '==', user.uid)));
+        mistakeSnap.docs.forEach((mistakeDoc) => {
+          const topicId = mistakeDoc.data().topicId;
+          if (topicId) targetTopicIds.add(topicId);
+        });
+
         // 1. Get focus from user profile
         if (user.selectedFocus) {
            const cats = await getDocs(collection(db, 'categories'));
@@ -57,15 +69,19 @@ export default function Flashcards() {
           (classSnap.data()?.assignedModuleIds || []).forEach((moduleId: string) => moduleIds.add(moduleId));
         }
         for (const moduleId of moduleIds) {
-          const localModule = journeyModules.find((module) => module.id === moduleId);
-          if (localModule?.topicId) targetTopicIds.add(localModule.topicId);
           try {
             const moduleSnap = await getDoc(doc(db, 'modules', moduleId));
             const topicId = moduleSnap.data()?.topicId;
             if (topicId) targetTopicIds.add(topicId);
           } catch {
-            // Local sample module may not exist in Firestore.
+            // Missing Firestore modules are ignored; no local sample fallback is used for real students.
           }
+        }
+
+        if (targetTopicIds.size === 0 && !focusCategoryId) {
+          setCards([]);
+          setLoading(false);
+          return;
         }
 
         // 2. Fetch questions - prioritize weak topics and assigned/taken modules.
@@ -82,11 +98,6 @@ export default function Flashcards() {
         const snap = await getDocs(q);
         const fetchedCards: Flashcard[] = [];
         
-        // Sort by weak topics if we have profile data
-        const profileSnap = await getDoc(doc(db, 'learnerProfiles', user.uid));
-        const profile = profileSnap.exists() ? profileSnap.data() : null;
-        const topicMastery = profile?.masteryByTopic || {};
-
         for (const d of snap.docs) {
           const data = d.data();
           if (targetTopicIds.size > 0 && data.topicId && !targetTopicIds.has(data.topicId)) continue;
