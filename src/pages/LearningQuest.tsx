@@ -327,6 +327,7 @@ export default function LearningQuest() {
 
         let activeModule: JourneyModule | null = null;
         let restoredProgress: QuestProgress | null = null;
+        let loadedFromFirestore = false;
         const moduleSnap = await getDoc(doc(db, 'modules', moduleId));
 
         if (!moduleSnap.exists()) {
@@ -335,6 +336,7 @@ export default function LearningQuest() {
           }
           activeModule = findJourneyModule(moduleId);
         } else {
+          loadedFromFirestore = true;
           const data = moduleSnap.data() as any;
           const publishScope = data.publishScope || (data.classIds?.length ? 'classes' : 'public');
           const instructorPreview = user.role === 'admin' || user.role === 'instructor';
@@ -401,7 +403,9 @@ export default function LearningQuest() {
           throw new Error('This reviewer could not be loaded.');
         }
 
-        if (!restoredProgress) {
+        setModule(activeModule);
+
+        if (!restoredProgress && !loadedFromFirestore) {
           try {
             const saved = localStorage.getItem(progressStorageKey(user?.uid, activeModule.id));
             restoredProgress = saved ? JSON.parse(saved) : null;
