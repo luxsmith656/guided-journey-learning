@@ -21,6 +21,7 @@ import {
   getIntegrityPolicy,
   shouldAutoSubmitForWarning,
 } from '../lib/assessmentIntegrity';
+import { pickBalancedQuestionsFromBlueprint, shuffleItems } from '../lib/examBlueprints';
 
 interface QuestionOption {
   id: string;
@@ -55,6 +56,7 @@ interface ExamBlueprint {
   timeLimitMinutes?: number;
   passingScore?: number;
   categoryDistribution?: Record<string, number>;
+  sectionDistribution?: Record<string, number>;
   difficultyMix?: Record<string, number>;
   specialization?: string;
   isActive?: boolean;
@@ -101,15 +103,6 @@ const DEFAULT_PRACTICE_COUNT = 20;
 const DEFAULT_MOCK_COUNT = 100;
 const DEFAULT_PRACTICE_MINUTES = 30;
 const DEFAULT_MOCK_MINUTES = 180;
-
-const shuffle = <T,>(items: T[]) => {
-  const next = [...items];
-  for (let index = next.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
-  }
-  return next;
-};
 
 const formatTime = (seconds: number) => {
   const safeSeconds = Math.max(0, seconds);
@@ -158,41 +151,16 @@ const pickQuestionsFromBlueprint = (
   categoryId: string | null,
 ) => {
   const count = blueprint.questionCount || (isFullMock ? DEFAULT_MOCK_COUNT : DEFAULT_PRACTICE_COUNT);
-  const filteredPool = categoryId ? pool.filter((question) => question.categoryId === categoryId) : pool;
-
-  if (isFullMock && filteredPool.length < count) {
-    throw new Error(`Full mock needs ${count} approved questions, but only ${filteredPool.length} are available.`);
-  }
-
-  if (!isFullMock && filteredPool.length === 0) {
-    throw new Error('No approved questions are available for this practice set yet.');
-  }
-
-  const distribution = blueprint.categoryDistribution || {};
-  if (isFullMock && Object.keys(distribution).length > 0) {
-    const selected: Question[] = [];
-    const selectedIds = new Set<string>();
-    Object.entries(distribution).forEach(([category, ratio]) => {
-      const target = Math.max(1, Math.round(count * Number(ratio)));
-      const categoryQuestions = shuffle(filteredPool.filter((question) => question.categoryId === category && !selectedIds.has(question.id)));
-      if (categoryQuestions.length < target) {
-        throw new Error(`Full mock needs ${target} approved questions for ${category}, but only ${categoryQuestions.length} are available.`);
-      }
-      categoryQuestions.slice(0, target).forEach((question) => {
-        selected.push(question);
-        selectedIds.add(question.id);
-      });
-    });
-    const remaining = shuffle(filteredPool.filter((question) => !selectedIds.has(question.id)));
-    return shuffle([...selected, ...remaining.slice(0, Math.max(0, count - selected.length))]).slice(0, count);
-  }
-
-  return shuffle(filteredPool).slice(0, Math.min(count, filteredPool.length));
+  return pickBalancedQuestionsFromBlueprint(pool, blueprint, {
+    count,
+    categoryId,
+    requireFullCount: isFullMock,
+  });
 };
 
 const shuffleQuestionChoices = (question: Question): Question => ({
   ...question,
-  options: shuffle(question.options),
+  options: shuffleItems(question.options),
 });
 
 export default function ExamSimulation() {
