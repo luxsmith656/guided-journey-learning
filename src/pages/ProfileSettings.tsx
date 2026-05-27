@@ -49,6 +49,7 @@ export default function ProfileSettings() {
         deleteByUserId('examAttemptLogs'),
         deleteByUserId('mistakeBank'),
         deleteByUserId('learningNotes'),
+        deleteByUserId('learningAnnotations'),
         deleteByUserId('highlights'),
         deleteByUserId('hiddenBlocks'),
         deleteByUserId('bookmarks'),

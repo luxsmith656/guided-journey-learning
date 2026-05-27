@@ -217,6 +217,15 @@ service cloud.firestore {
       allow read, update, delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
     }
 
+    match /learningAnnotations/{annotationId} {
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow read, delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
+      allow update: if isSignedIn() && (
+        isInstructor() ||
+        (resource.data.userId == request.auth.uid && incoming().userId == resource.data.userId)
+      );
+    }
+
     match /highlights/{highlightId} {
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
       allow read, update, delete: if isSignedIn() && resource.data.userId == request.auth.uid;

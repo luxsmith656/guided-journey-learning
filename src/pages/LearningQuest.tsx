@@ -22,7 +22,7 @@ import {
   Trophy,
   X,
 } from 'lucide-react';
-import { addDoc, collection, doc, getDoc, getDocs, increment, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, increment, query, serverTimestamp, setDoc, updateDoc, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
@@ -66,11 +66,26 @@ interface GradeResult {
   feedback: string;
 }
 
-interface LessonHighlight {
+interface LessonAnnotation {
   id: string;
+  userId?: string;
+  moduleId?: string;
+  partId?: string;
+  sectionId?: string;
+  type?: 'highlight' | 'hidden' | 'note';
   text: string;
+  startOffset?: number;
+  endOffset?: number;
+  color?: string;
   note?: string;
   hidden?: boolean;
+  legacy?: boolean;
+}
+
+interface SelectedTextRange {
+  text: string;
+  startOffset: number;
+  endOffset: number;
 }
 
 const optionTone = {
@@ -169,16 +184,18 @@ export default function LearningQuest() {
   const [toastMsg, setToastMsg] = useState('');
   const [showToast, setShowToast] = useState(false);
   const [lessonNote, setLessonNote] = useState('');
-  const [lessonHighlights, setLessonHighlights] = useState<LessonHighlight[]>([]);
+  const [lessonHighlights, setLessonHighlights] = useState<LessonAnnotation[]>([]);
   const [activeHighlightId, setActiveHighlightId] = useState('');
   const [revealedHighlightIds, setRevealedHighlightIds] = useState<string[]>([]);
   const [selectedText, setSelectedText] = useState('');
+  const [selectedRange, setSelectedRange] = useState<SelectedTextRange | null>(null);
   const [isBookmarked, setIsBookmarked] = useState(false);
   const [lowBandwidth, setLowBandwidth] = useState(() => localStorage.getItem('let-mastery-low-bandwidth') === '1');
   const [answerDraftSavedAt, setAnswerDraftSavedAt] = useState(0);
   const [loading, setLoading] = useState(true);
   const [accessError, setAccessError] = useState('');
   const noteLoadedRef = useRef(false);
+  const sectionTextRef = useRef<HTMLDivElement | null>(null);
   const [sessionStartedAt] = useState(Date.now());
   const [nowTick, setNowTick] = useState(Date.now());
 
@@ -242,19 +259,38 @@ export default function LearningQuest() {
       noteLoadedRef.current = false;
       if (!user || !currentPart) return;
       const noteSnap = await getDoc(doc(db, 'learningNotes', `${user.uid}_${module.id}_${currentPart.id}`));
+      const body = currentPart.textbookSection.body || '';
       if (noteSnap.exists()) {
         const data = noteSnap.data() as any;
         setLessonNote(data.note || '');
         setIsBookmarked(!!data.bookmarked);
-        setLessonHighlights(data.highlights || []);
+        const legacyHighlights = (data.highlights || []).map((highlight: LessonAnnotation, index: number) => {
+          const mapped = mapLegacyAnnotation(highlight, body, index);
+          return mapped;
+        });
+        setLessonHighlights(legacyHighlights);
       } else {
         setLessonNote('');
         setIsBookmarked(false);
         setLessonHighlights([]);
       }
+      try {
+        const annotationSnap = await getDocs(query(
+          collection(db, 'learningAnnotations'),
+          where('userId', '==', user.uid),
+          where('moduleId', '==', module.id),
+          where('partId', '==', currentPart.id),
+          where('sectionId', '==', currentPart.textbookSection.title || 'textbook'),
+        ));
+        const exactAnnotations = annotationSnap.docs.map((annotationDoc) => ({ id: annotationDoc.id, ...annotationDoc.data() } as LessonAnnotation));
+        setLessonHighlights((legacy) => mergeAnnotations(legacy, exactAnnotations));
+      } catch (error) {
+        console.warn('Unable to load learning annotations', error);
+      }
       setActiveHighlightId('');
       setRevealedHighlightIds([]);
       setSelectedText('');
+      setSelectedRange(null);
       noteLoadedRef.current = true;
     }
     loadLessonNote();
@@ -615,7 +651,6 @@ export default function LearningQuest() {
       partTitle: currentPart.title,
       note: lessonNote,
       bookmarked: isBookmarked,
-      highlights: lessonHighlights,
       updatedAt: serverTimestamp(),
     }, { merge: true });
     setProctorMessage('Lesson note saved.');
@@ -634,45 +669,101 @@ export default function LearningQuest() {
         partTitle: currentPart.title,
         note: lessonNote,
         bookmarked: isBookmarked,
-        highlights: lessonHighlights,
         updatedAt: serverTimestamp(),
       }, { merge: true }).catch((error) => console.warn('Lesson note autosave failed', error));
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [currentPart?.id, currentPart?.title, isBookmarked, lessonHighlights, lessonNote, module.id, module.title, user]);
+  }, [currentPart?.id, currentPart?.title, isBookmarked, lessonNote, module.id, module.title, user]);
 
   const captureSelectedText = () => {
-    const text = window.getSelection()?.toString().trim() || '';
-    if (text.length >= 2) setSelectedText(text.slice(0, 240));
+    const range = getSelectionOffsets(sectionTextRef.current, currentPart?.textbookSection.body || '');
+    if (!range || range.text.trim().length < 2) {
+      setSelectedRange(null);
+      setSelectedText('');
+      return;
+    }
+    const normalized = {
+      ...range,
+      text: range.text,
+    };
+    setSelectedRange(normalized);
+    setSelectedText(normalized.text.slice(0, 240));
   };
 
-  const addHighlight = (hidden = false) => {
-    if (!selectedText) return;
-    const existing = lessonHighlights.find((item) => item.text === selectedText);
+  const addHighlight = async (hidden = false, focusNote = false) => {
+    if (!user || !currentPart || !selectedRange) return;
+    const existing = lessonHighlights.find((item) => (
+      item.startOffset === selectedRange.startOffset &&
+      item.endOffset === selectedRange.endOffset &&
+      item.partId === currentPart.id
+    ));
     if (existing) {
       setActiveHighlightId(existing.id);
       setSelectedText('');
+      setSelectedRange(null);
       window.getSelection()?.removeAllRanges();
       return;
     }
-    const id = `hl-${Date.now()}`;
-    setLessonHighlights((items) => [...items, { id, text: selectedText, hidden }]);
-    setActiveHighlightId(id);
+    const annotationRef = doc(collection(db, 'learningAnnotations'));
+    const annotation: LessonAnnotation = {
+      id: annotationRef.id,
+      userId: user.uid,
+      moduleId: module.id,
+      partId: currentPart.id,
+      sectionId: currentPart.textbookSection.title || 'textbook',
+      type: hidden ? 'hidden' : focusNote ? 'note' : 'highlight',
+      text: selectedRange.text,
+      startOffset: selectedRange.startOffset,
+      endOffset: selectedRange.endOffset,
+      color: hidden ? 'recall' : 'yellow',
+      note: '',
+      hidden,
+    };
+    setLessonHighlights((items) => [...items, annotation].sort(annotationSort));
+    setActiveHighlightId(annotation.id);
     setSelectedText('');
+    setSelectedRange(null);
     window.getSelection()?.removeAllRanges();
+    try {
+      await setDoc(annotationRef, {
+        ...annotation,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.warn('Unable to save learning annotation', error);
+    }
   };
 
-  const updateHighlight = (id: string, patch: Partial<LessonHighlight>) => {
+  const updateHighlight = async (id: string, patch: Partial<LessonAnnotation>) => {
     setLessonHighlights((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
     if (patch.hidden === false) {
       setRevealedHighlightIds((ids) => ids.filter((itemId) => itemId !== id));
     }
+    const current = lessonHighlights.find((item) => item.id === id);
+    if (!current || current.legacy) return;
+    try {
+      await updateDoc(doc(db, 'learningAnnotations', id), {
+        ...patch,
+        type: patch.hidden === false ? 'highlight' : patch.hidden === true ? 'hidden' : current.type || 'highlight',
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.warn('Unable to update annotation', error);
+    }
   };
 
-  const removeHighlight = (id: string) => {
+  const removeHighlight = async (id: string) => {
+    const current = lessonHighlights.find((item) => item.id === id);
     setLessonHighlights((items) => items.filter((item) => item.id !== id));
     setRevealedHighlightIds((ids) => ids.filter((itemId) => itemId !== id));
     setActiveHighlightId('');
+    if (!current || current.legacy) return;
+    try {
+      await deleteDoc(doc(db, 'learningAnnotations', id));
+    } catch (error) {
+      console.warn('Unable to remove annotation', error);
+    }
   };
 
   const toggleRevealHighlight = (id: string) => {
@@ -691,6 +782,9 @@ export default function LearningQuest() {
 
   const clearLessonHighlights = () => {
     if (!lessonHighlights.length || !window.confirm('Remove all highlights and hidden recall marks in this lesson?')) return;
+    lessonHighlights.filter((item) => !item.legacy).forEach((item) => {
+      void deleteDoc(doc(db, 'learningAnnotations', item.id)).catch((error) => console.warn('Unable to remove annotation', error));
+    });
     setLessonHighlights([]);
     setRevealedHighlightIds([]);
     setActiveHighlightId('');
@@ -735,6 +829,8 @@ export default function LearningQuest() {
     if (!user) return;
     const notesSnap = await getDocs(query(collection(db, 'learningNotes'), where('userId', '==', user.uid), where('moduleId', '==', module.id)));
     const notes = notesSnap.docs.map((noteDoc) => noteDoc.data() as any);
+    const annotationsSnap = await getDocs(query(collection(db, 'learningAnnotations'), where('userId', '==', user.uid), where('moduleId', '==', module.id))).catch(() => null);
+    const annotations = annotationsSnap ? annotationsSnap.docs.map((annotationDoc) => annotationDoc.data() as LessonAnnotation) : [];
     const guide = [
       `Study Guide: ${module.title}`,
       '',
@@ -749,8 +845,8 @@ export default function LearningQuest() {
       'My Notes',
       ...notes.flatMap((note) => [
         `- ${note.partTitle || 'Lesson'}: ${note.note || ''}`,
-        ...(note.highlights || []).map((highlight: LessonHighlight) => `  Highlight: ${highlight.text}${highlight.note ? ` / Note: ${highlight.note}` : ''}`),
       ]),
+      ...annotations.map((annotation) => `  ${annotation.hidden ? 'Hidden recall' : 'Highlight'}: ${annotation.text}${annotation.note ? ` / Note: ${annotation.note}` : ''}`),
       '',
       'Review Questions',
       ...finalExam.map((question, index) => `${index + 1}. ${question.stem}`),
@@ -1322,18 +1418,18 @@ export default function LearningQuest() {
                   <Bookmark size={14} />
                   {isBookmarked ? 'Bookmarked' : 'Bookmark'}
                 </button>
-                {selectedText && (
-                  <>
-                    <button onClick={() => addHighlight(false)} className="inline-flex items-center gap-2 rounded-full bg-amber-500/10 text-amber-700 px-3 py-2 text-xs font-bold">
-                      <Highlighter size={14} />
-                      Highlight selection
-                    </button>
-                    <button onClick={() => addHighlight(true)} className="inline-flex items-center gap-2 rounded-full bg-surface-container text-on-surface px-3 py-2 text-xs font-bold">
-                      <EyeOff size={14} />
-                      Hide for recall
-                    </button>
-                  </>
-                )}
+                <button disabled={!selectedRange} onClick={() => void addHighlight(false)} className="inline-flex items-center gap-2 rounded-full bg-amber-500/10 text-amber-700 px-3 py-2 text-xs font-bold disabled:opacity-40">
+                  <Highlighter size={14} />
+                  Highlight
+                </button>
+                <button disabled={!selectedRange} onClick={() => void addHighlight(true)} className="inline-flex items-center gap-2 rounded-full bg-surface-container text-on-surface px-3 py-2 text-xs font-bold disabled:opacity-40">
+                  <EyeOff size={14} />
+                  Hide for recall
+                </button>
+                <button disabled={!selectedRange} onClick={() => void addHighlight(false, true)} className="inline-flex items-center gap-2 rounded-full bg-surface-container text-on-surface px-3 py-2 text-xs font-bold disabled:opacity-40">
+                  <MessageCircle size={14} />
+                  Add note
+                </button>
                 <button onClick={saveLessonNote} className="inline-flex items-center gap-2 rounded-full bg-primary text-on-primary px-3 py-2 text-xs font-bold">
                   <Save size={14} />
                   Save notes
@@ -1354,6 +1450,15 @@ export default function LearningQuest() {
                 )}
               </div>
               <div className="fixed bottom-24 left-1/2 z-40 flex -translate-x-1/2 gap-2 rounded-full border border-outline-variant/40 bg-surface-container-lowest/95 p-2 shadow-lg backdrop-blur md:hidden">
+                <button disabled={!selectedRange} onClick={() => void addHighlight(false)} className="rounded-full p-2 text-on-surface disabled:opacity-35" aria-label="Highlight selected text">
+                  <Highlighter size={17} />
+                </button>
+                <button disabled={!selectedRange} onClick={() => void addHighlight(true)} className="rounded-full p-2 text-on-surface disabled:opacity-35" aria-label="Hide selected text for recall">
+                  <EyeOff size={17} />
+                </button>
+                <button disabled={!selectedRange} onClick={() => void addHighlight(false, true)} className="rounded-full p-2 text-on-surface disabled:opacity-35" aria-label="Add note to selected text">
+                  <MessageCircle size={17} />
+                </button>
                 <button onClick={() => setIsBookmarked(!isBookmarked)} className={`rounded-full p-2 ${isBookmarked ? 'bg-primary text-on-primary' : 'text-on-surface'}`} aria-label="Bookmark lesson">
                   <Bookmark size={17} />
                 </button>
@@ -1367,6 +1472,15 @@ export default function LearningQuest() {
                 )}
               </div>
               <div className="hidden lg:flex fixed right-5 top-1/3 z-30 flex-col gap-2 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest/95 p-2 shadow-lg backdrop-blur">
+                <button disabled={!selectedRange} onClick={() => void addHighlight(false)} className="rounded-xl p-3 text-on-surface hover:bg-surface-container disabled:opacity-35" title="Highlight selected text" aria-label="Highlight selected text">
+                  <Highlighter size={18} />
+                </button>
+                <button disabled={!selectedRange} onClick={() => void addHighlight(true)} className="rounded-xl p-3 text-on-surface hover:bg-surface-container disabled:opacity-35" title="Hide selected text for recall" aria-label="Hide selected text for recall">
+                  <EyeOff size={18} />
+                </button>
+                <button disabled={!selectedRange} onClick={() => void addHighlight(false, true)} className="rounded-xl p-3 text-on-surface hover:bg-surface-container disabled:opacity-35" title="Add note to selected text" aria-label="Add note to selected text">
+                  <MessageCircle size={18} />
+                </button>
                 <button onClick={() => setIsBookmarked(!isBookmarked)} className={`rounded-xl p-3 ${isBookmarked ? 'bg-primary text-on-primary' : 'text-on-surface hover:bg-surface-container'}`} title="Bookmark lesson" aria-label="Bookmark lesson">
                   <Bookmark size={18} />
                 </button>
@@ -1382,7 +1496,7 @@ export default function LearningQuest() {
                   </button>
                 )}
               </div>
-              <div onMouseUp={captureSelectedText} className="text-on-surface-variant leading-relaxed whitespace-pre-line select-text">
+              <div ref={sectionTextRef} onMouseUp={captureSelectedText} onKeyUp={captureSelectedText} className="text-on-surface-variant leading-relaxed whitespace-pre-line select-text">
                 {renderHighlightedText(
                   currentPart.textbookSection.body,
                   lessonHighlights,
@@ -1391,6 +1505,50 @@ export default function LearningQuest() {
                   revealedHighlightIds,
                   toggleRevealHighlight,
                 )}
+              </div>
+              <div className="mt-4 rounded-2xl border border-outline-variant/40 bg-surface-container/20 p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-widest text-primary">Study Marks</p>
+                    <p className="mt-1 text-xs text-on-surface-variant/70">
+                      {selectedRange ? `Selected: "${selectedRange.text}"` : 'Select text in the reading, then choose Highlight, Hide, or Add note.'}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button disabled={!selectedRange} onClick={() => void addHighlight(false)} className="rounded-full bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-700 disabled:opacity-40">Highlight</button>
+                    <button disabled={!selectedRange} onClick={() => void addHighlight(true)} className="rounded-full bg-surface-container px-3 py-2 text-xs font-bold text-on-surface disabled:opacity-40">Hide</button>
+                    <button disabled={!selectedRange} onClick={() => void addHighlight(false, true)} className="rounded-full bg-surface-container px-3 py-2 text-xs font-bold text-on-surface disabled:opacity-40">Note</button>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-2">
+                  {lessonHighlights.length === 0 ? (
+                    <p className="rounded-xl bg-surface-container-lowest/60 p-3 text-xs font-bold text-on-surface-variant/60">No study marks in this section yet.</p>
+                  ) : lessonHighlights.map((mark) => (
+                    <div key={mark.id} className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest/70 p-3">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-primary">
+                            {mark.hidden ? 'Hidden recall' : mark.type === 'note' ? 'Note mark' : 'Highlight'} {mark.legacy ? '/ legacy' : ''}
+                          </p>
+                          <p className="mt-1 line-clamp-2 text-sm font-semibold text-on-surface">{mark.text}</p>
+                          {mark.note && <p className="mt-1 text-xs text-on-surface-variant">{mark.note}</p>}
+                        </div>
+                        <div className="flex shrink-0 flex-wrap gap-2">
+                          {mark.hidden && (
+                            <>
+                              <button onClick={() => toggleRevealHighlight(mark.id)} className="rounded-full bg-surface-container px-3 py-1.5 text-[11px] font-bold text-on-surface">
+                                {revealedHighlightIds.includes(mark.id) ? 'Hide again' : 'Reveal once'}
+                              </button>
+                              <button onClick={() => void updateHighlight(mark.id, { hidden: false })} className="rounded-full bg-primary px-3 py-1.5 text-[11px] font-bold text-on-primary">Unhide</button>
+                            </>
+                          )}
+                          <button onClick={() => setActiveHighlightId(mark.id)} className="rounded-full bg-surface-container px-3 py-1.5 text-[11px] font-bold text-on-surface">Note</button>
+                          <button onClick={() => void removeHighlight(mark.id)} className="rounded-full bg-error/10 px-3 py-1.5 text-[11px] font-bold text-error">Remove</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
               {activeHighlightId && (
                 <div className="mt-3 rounded-2xl border border-primary/20 bg-primary/5 p-3">
@@ -1415,7 +1573,7 @@ export default function LearningQuest() {
                             {revealedHighlightIds.includes(activeHighlightId) ? 'Hide again' : 'Reveal once'}
                           </button>
                           <button
-                            onClick={() => updateHighlight(activeHighlightId, { hidden: false })}
+                            onClick={() => void updateHighlight(activeHighlightId, { hidden: false })}
                             className="inline-flex items-center gap-2 rounded-full bg-primary text-on-primary px-3 py-2 text-xs font-bold"
                           >
                             <Eye size={14} />
@@ -1424,7 +1582,7 @@ export default function LearningQuest() {
                         </>
                       ) : (
                         <button
-                          onClick={() => updateHighlight(activeHighlightId, { hidden: true })}
+                          onClick={() => void updateHighlight(activeHighlightId, { hidden: true })}
                           className="inline-flex items-center gap-2 rounded-full bg-surface-container px-3 py-2 text-xs font-bold text-on-surface"
                         >
                           <EyeOff size={14} />
@@ -1432,7 +1590,7 @@ export default function LearningQuest() {
                         </button>
                       )}
                       <button
-                        onClick={() => removeHighlight(activeHighlightId)}
+                        onClick={() => void removeHighlight(activeHighlightId)}
                         className="inline-flex items-center gap-2 rounded-full bg-error/10 px-3 py-2 text-xs font-bold text-error"
                       >
                         <X size={14} />
@@ -1444,7 +1602,7 @@ export default function LearningQuest() {
                     <summary className="cursor-pointer text-xs font-black uppercase tracking-widest text-on-surface-variant/60">Note on this mark</summary>
                     <textarea
                       value={lessonHighlights.find((item) => item.id === activeHighlightId)?.note || ''}
-                      onChange={(event) => updateHighlight(activeHighlightId, { note: event.target.value })}
+                      onChange={(event) => void updateHighlight(activeHighlightId, { note: event.target.value })}
                       rows={2}
                       placeholder="Add a short note for this exact highlighted idea."
                       className="mt-3 w-full bg-surface-container-lowest border border-outline-variant/30 rounded-xl p-3 text-sm outline-none focus:border-primary/40 resize-none"
@@ -1850,38 +2008,38 @@ function getWeakPartIds(finalExam: JourneyQuestion[], grades: Record<string, Gra
 
 function renderHighlightedText(
   body: string,
-  highlights: LessonHighlight[],
+  highlights: LessonAnnotation[],
   activeHighlightId: string,
   setActiveHighlightId: (id: string) => void,
   revealedHighlightIds: string[],
   toggleRevealHighlight: (id: string) => void,
 ) {
   if (!highlights.length) return body;
-  const usable = highlights.filter((item) => item.text && body.includes(item.text));
+  const usable = normalizeAnnotationsForRender(highlights, body);
   if (!usable.length) return body;
   const parts: React.ReactNode[] = [];
-  let remaining = body;
+  let cursor = 0;
   let key = 0;
 
-  while (remaining.length) {
-    const next = usable
-      .map((highlight) => ({ highlight, index: remaining.indexOf(highlight.text) }))
-      .filter((item) => item.index >= 0)
-      .sort((a, b) => a.index - b.index)[0];
-    if (!next) {
-      parts.push(remaining);
-      break;
+  usable.forEach((highlight) => {
+    const start = Number(highlight.startOffset);
+    const end = Number(highlight.endOffset);
+    if (start > cursor) {
+      parts.push(<TextOffsetSpan key={`text-${key++}`} text={body.slice(cursor, start)} startOffset={cursor} />);
     }
-    if (next.index > 0) parts.push(remaining.slice(0, next.index));
-    const isHidden = !!next.highlight.hidden;
-    const isRevealed = revealedHighlightIds.includes(next.highlight.id);
+    const exactText = body.slice(start, end);
+    const isHidden = !!highlight.hidden;
+    const isRevealed = revealedHighlightIds.includes(highlight.id);
     parts.push(
       <button
-        key={`${next.highlight.id}-${key++}`}
+        key={`${highlight.id}-${key++}`}
         type="button"
+        data-annotation-start={start}
+        data-annotation-end={end}
+        data-annotation-hidden={isHidden && !isRevealed ? 'true' : 'false'}
         onClick={() => {
-          setActiveHighlightId(activeHighlightId === next.highlight.id ? '' : next.highlight.id);
-          if (isHidden && !isRevealed) toggleRevealHighlight(next.highlight.id);
+          setActiveHighlightId(activeHighlightId === highlight.id ? '' : highlight.id);
+          if (isHidden && !isRevealed) toggleRevealHighlight(highlight.id);
         }}
         className={`inline rounded px-1 font-semibold transition-colors ${
           isHidden
@@ -1890,15 +2048,120 @@ function renderHighlightedText(
               : 'bg-on-surface text-surface hover:bg-on-surface/90'
             : 'bg-amber-200/70 text-on-surface hover:bg-amber-300/80'
         }`}
-        title={isHidden && !isRevealed ? 'Hidden for recall - tap to reveal' : next.highlight.note || 'Click to add or view note'}
+        title={isHidden && !isRevealed ? 'Hidden for recall - tap to reveal' : highlight.note || 'Click to add or view note'}
       >
-        {isHidden && !isRevealed ? 'Hidden for recall - tap to reveal' : next.highlight.text}
-        {next.highlight.note && <sup className="ml-1 text-primary">note</sup>}
+        {isHidden && !isRevealed ? 'Hidden for recall - tap to reveal' : exactText}
+        {highlight.note && <sup className="ml-1 text-primary">note</sup>}
+        {highlight.legacy && <sup className="ml-1 text-on-surface-variant/50">legacy</sup>}
       </button>,
     );
-    remaining = remaining.slice(next.index + next.highlight.text.length);
+    cursor = end;
+  });
+
+  if (cursor < body.length) {
+    parts.push(<TextOffsetSpan key={`text-${key++}`} text={body.slice(cursor)} startOffset={cursor} />);
   }
   return parts;
+}
+
+function TextOffsetSpan({ text, startOffset }: { text: string; startOffset: number }) {
+  return (
+    <span data-annotation-start={startOffset} data-annotation-end={startOffset + text.length}>
+      {text}
+    </span>
+  );
+}
+
+function annotationSort(a: LessonAnnotation, b: LessonAnnotation) {
+  return Number(a.startOffset ?? Number.MAX_SAFE_INTEGER) - Number(b.startOffset ?? Number.MAX_SAFE_INTEGER);
+}
+
+function normalizeAnnotationsForRender(annotations: LessonAnnotation[], body: string) {
+  const sorted = annotations
+    .map((annotation, index) => {
+      if (Number.isFinite(annotation.startOffset) && Number.isFinite(annotation.endOffset)) return annotation;
+      return mapLegacyAnnotation(annotation, body, index);
+    })
+    .filter((annotation) => (
+      Number.isFinite(annotation.startOffset) &&
+      Number.isFinite(annotation.endOffset) &&
+      Number(annotation.startOffset) >= 0 &&
+      Number(annotation.endOffset) > Number(annotation.startOffset) &&
+      Number(annotation.endOffset) <= body.length
+    ))
+    .sort(annotationSort);
+
+  const nonOverlapping: LessonAnnotation[] = [];
+  let cursor = 0;
+  sorted.forEach((annotation) => {
+    const start = Number(annotation.startOffset);
+    const end = Number(annotation.endOffset);
+    if (start < cursor) return;
+    nonOverlapping.push(annotation);
+    cursor = end;
+  });
+  return nonOverlapping;
+}
+
+function mapLegacyAnnotation(annotation: LessonAnnotation, body: string, index: number): LessonAnnotation {
+  if (Number.isFinite(annotation.startOffset) && Number.isFinite(annotation.endOffset)) return annotation;
+  const matchIndex = annotation.text ? body.indexOf(annotation.text) : -1;
+  return {
+    ...annotation,
+    id: annotation.id || `legacy-${index}`,
+    startOffset: matchIndex >= 0 ? matchIndex : undefined,
+    endOffset: matchIndex >= 0 ? matchIndex + annotation.text.length : undefined,
+    legacy: true,
+  };
+}
+
+function mergeAnnotations(legacyAnnotations: LessonAnnotation[], exactAnnotations: LessonAnnotation[]) {
+  const rows = [...exactAnnotations, ...legacyAnnotations.filter((legacy) => (
+    !exactAnnotations.some((exact) => exact.startOffset === legacy.startOffset && exact.endOffset === legacy.endOffset)
+  ))];
+  return rows.sort(annotationSort);
+}
+
+function getSelectionOffsets(container: HTMLElement | null, body: string): SelectedTextRange | null {
+  if (!container) return null;
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null;
+  const range = selection.getRangeAt(0);
+  if (!container.contains(range.commonAncestorContainer)) return null;
+  const hiddenParent = getElementFromNode(range.commonAncestorContainer)?.closest('[data-annotation-hidden="true"]');
+  if (hiddenParent) return null;
+
+  const startOffset = getNodeTextOffset(range.startContainer, range.startOffset);
+  const endOffset = getNodeTextOffset(range.endContainer, range.endOffset);
+  if (startOffset == null || endOffset == null) return null;
+  const start = Math.max(0, Math.min(startOffset, endOffset));
+  const end = Math.min(body.length, Math.max(startOffset, endOffset));
+  if (end <= start) return null;
+  return {
+    startOffset: start,
+    endOffset: end,
+    text: body.slice(start, end),
+  };
+}
+
+function getNodeTextOffset(node: Node, nodeOffset: number) {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const element = getElementFromNode(node);
+    const marked = element?.closest('[data-annotation-start]') as HTMLElement | null;
+    if (!marked) return null;
+    const base = Number(marked.dataset.annotationStart || 0);
+    return base + nodeOffset;
+  }
+
+  const child = node.childNodes.item(Math.max(0, Math.min(nodeOffset, node.childNodes.length - 1)));
+  const element = getElementFromNode(child || node);
+  const marked = element?.closest('[data-annotation-start]') as HTMLElement | null;
+  if (!marked) return null;
+  return Number(marked.dataset.annotationStart || 0);
+}
+
+function getElementFromNode(node: Node) {
+  return node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement;
 }
 
 function formatDuration(totalSeconds: number) {
