@@ -31,6 +31,14 @@ service cloud.firestore {
     function isInstructor() { 
        return hasRole('instructor') || isAdmin(); 
     }
+    function isDemoAccount() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        (
+          getUserData().get('isDemo', false) == true ||
+          getUserData().get('email', '') in ['student@letmastery.com', 'instructor@letmastery.com', 'admin@letmastery.com']
+        );
+    }
     
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
@@ -86,7 +94,7 @@ service cloud.firestore {
       allow read: if isOwner(userId) || isInstructor();
       allow create: if isOwner(userId) || isAdmin();
       allow update: if isOwner(userId) || isAdmin();
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() || (isDemoAccount() && isOwner(userId));
     }
     
     match /badges/{badgeId} {
@@ -98,6 +106,7 @@ service cloud.firestore {
       allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
       allow update: if isAdmin() || isOwnedOpenAttemptUpdate();
+      allow delete: if isAdmin() || (isDemoAccount() && existing().userId == request.auth.uid);
     }
     
     match /categories/{categoryId} {
@@ -136,7 +145,7 @@ service cloud.firestore {
       allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
       allow update: if isAdmin() || isOwnedOpenAttemptUpdate();
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() || (isDemoAccount() && existing().userId == request.auth.uid);
     }
 
     match /mistakeBank/{mistakeId} {
@@ -182,18 +191,20 @@ service cloud.firestore {
     match /diagnosticAttempts/{attemptId} {
       allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
-      allow update, delete: if isAdmin();
+      allow update, delete: if isAdmin() || (isDemoAccount() && existing().userId == request.auth.uid);
     }
 
     match /moduleProgress/{progressId} {
       allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
       allow create, update: if isSignedIn() && (incoming().userId == request.auth.uid || (resource != null && existing().userId == request.auth.uid));
+      allow delete: if isAdmin() || (isDemoAccount() && existing().userId == request.auth.uid);
     }
 
     match /examAttemptLogs/{attemptId} {
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
       allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isInstructor());
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || (isDemoAccount() && existing().userId == request.auth.uid);
     }
 
     match /studyReminders/{reminderId} {

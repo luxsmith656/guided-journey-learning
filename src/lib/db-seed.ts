@@ -308,6 +308,7 @@ export async function seedDatabase() {
         uid: 'demo-student',
         email: 'student@letmastery.com',
         role: 'student',
+        isDemo: true,
         fullName: 'Demo Student',
         onboarded: false,
         learningMode: 'self_review',
@@ -326,6 +327,7 @@ export async function seedDatabase() {
         uid: 'demo-instructor',
         email: 'instructor@letmastery.com',
         role: 'instructor',
+        isDemo: true,
         fullName: 'Dr. Jane Teacher',
         onboarded: true,
         diagnosticCompleted: false
@@ -334,6 +336,7 @@ export async function seedDatabase() {
         uid: 'demo-admin',
         email: 'admin@letmastery.com',
         role: 'admin',
+        isDemo: true,
         fullName: 'System Administrator',
         onboarded: true,
         diagnosticCompleted: false

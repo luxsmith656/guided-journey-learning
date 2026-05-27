@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { doc, updateDoc } from 'firebase/firestore';
-import { Save, KeyRound } from 'lucide-react';
+import { collection, deleteDoc, doc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import { Save, KeyRound, RotateCcw } from 'lucide-react';
 import DashboardLayout from '../components/DashboardLayout';
 import StudentLayout from '../components/StudentLayout';
 import { useAuth } from '../context/AuthContext';
@@ -10,6 +10,8 @@ export default function ProfileSettings() {
   const { user, refreshUser } = useAuth();
   const [fullName, setFullName] = useState(user?.fullName || '');
   const [message, setMessage] = useState('');
+  const [isResettingDemo, setIsResettingDemo] = useState(false);
+  const isDemoAccount = ['student@letmastery.com', 'instructor@letmastery.com', 'admin@letmastery.com'].includes((user?.email || '').toLowerCase()) || (user as any)?.isDemo;
 
   const saveProfile = async () => {
     if (!user) return;
@@ -25,6 +27,66 @@ export default function ProfileSettings() {
     if (!user?.email) return;
     await resetPassword(user.email);
     setMessage('Password reset email sent.');
+  };
+
+  const resetDemoProgress = async () => {
+    if (!user || !isDemoAccount) return;
+    if (!window.confirm('Reset this demo account to a clean onboarding state? This clears demo progress, attempts, notes, reminders, and local cached learning data.')) return;
+    setIsResettingDemo(true);
+    setMessage('');
+    try {
+      const deleteByUserId = async (collectionName: string, field = 'userId') => {
+        const snap = await getDocs(query(collection(db, collectionName), where(field, '==', user.uid)));
+        await Promise.allSettled(snap.docs.map((row) => deleteDoc(row.ref)));
+      };
+
+      await Promise.allSettled([
+        deleteDoc(doc(db, 'learnerProfiles', user.uid)),
+        deleteByUserId('moduleProgress'),
+        deleteByUserId('diagnosticAttempts'),
+        deleteByUserId('quizAttempts'),
+        deleteByUserId('mockExamAttempts'),
+        deleteByUserId('examAttemptLogs'),
+        deleteByUserId('mistakeBank'),
+        deleteByUserId('learningNotes'),
+        deleteByUserId('highlights'),
+        deleteByUserId('hiddenBlocks'),
+        deleteByUserId('bookmarks'),
+        deleteByUserId('studyReminders'),
+        deleteByUserId('classEnrollments', 'studentId'),
+      ]);
+
+      await updateDoc(doc(db, 'users', user.uid), {
+        onboarded: false,
+        learningMode: null,
+        activeClassId: null,
+        classIds: [],
+        selectedFocus: null,
+        reviewTrack: null,
+        specialization: '',
+        targetExamDate: null,
+        diagnosticCompleted: false,
+        diagnosticSkipped: false,
+        streak: 0,
+        xp: 0,
+        level: 1,
+        earnedBadges: [],
+        archivedModuleIds: [],
+        archivedClassIds: [],
+        onboardingStep: 0,
+        updatedAt: serverTimestamp(),
+      });
+
+      clearDemoLocalCache(user.uid);
+      await clearDemoIndexedDb();
+      await refreshUser();
+      setMessage('Demo progress reset. Use the loader or sign in again to return to onboarding.');
+    } catch (error) {
+      console.warn('Demo reset failed', error);
+      setMessage('Demo reset could not finish completely. Try again after sync completes.');
+    } finally {
+      setIsResettingDemo(false);
+    }
   };
 
   const content = (
@@ -56,6 +118,22 @@ export default function ProfileSettings() {
           </button>
         </div>
       </section>
+
+      {isDemoAccount && (
+        <section className="bg-error/5 border border-error/20 rounded-2xl p-6 shadow-sm space-y-3">
+          <p className="text-xs font-black uppercase tracking-widest text-error">Demo reset</p>
+          <h2 className="font-headline text-xl font-extrabold text-on-surface">Return this demo to a clean start</h2>
+          <p className="text-sm text-on-surface-variant">Clears demo progress, attempts, mistake bank records, notes, highlights, reminders, class enrollment state, and local/offline learning cache.</p>
+          <button
+            onClick={resetDemoProgress}
+            disabled={isResettingDemo}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-error text-on-error px-5 py-3 text-sm font-bold disabled:opacity-50"
+          >
+            <RotateCcw size={16} />
+            {isResettingDemo ? 'Resetting demo...' : 'Reset demo progress'}
+          </button>
+        </section>
+      )}
     </div>
   );
 
@@ -64,4 +142,34 @@ export default function ProfileSettings() {
   }
 
   return <DashboardLayout title="Profile">{content}</DashboardLayout>;
+}
+
+function clearDemoLocalCache(userId: string) {
+  const prefixes = [
+    `let-mastery-progress:${userId}:`,
+    `let-mastery-answer-drafts:${userId}:`,
+    `let-mastery-exam-attempt:${userId}:`,
+  ];
+  Object.keys(localStorage).forEach((key) => {
+    if (prefixes.some((prefix) => key.startsWith(prefix))) {
+      localStorage.removeItem(key);
+    }
+  });
+}
+
+async function clearDemoIndexedDb() {
+  try {
+    const { initDB } = await import('../lib/offline/db');
+    const localDb = await initDB();
+    await Promise.all([
+      localDb.clear('localQuizAttempts'),
+      localDb.clear('localProgress'),
+      localDb.clear('localNotes'),
+      localDb.clear('localRecallChallenges'),
+      localDb.clear('localStudyPlan'),
+      localDb.clear('syncQueue'),
+    ]);
+  } catch (error) {
+    console.warn('Unable to clear local demo IndexedDB cache', error);
+  }
 }
