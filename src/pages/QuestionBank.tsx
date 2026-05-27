@@ -122,6 +122,11 @@ export default function QuestionBank() {
 
   const updateQuestionReview = async (question: Question, action: 'approve' | 'review' | 'archive') => {
     try {
+      if (action === 'approve' && !isBlueprintReady(question)) {
+        setToastMsg('Complete topic, competency, rationalization, and wrong-choice explanations before approval.');
+        setShowToast(true);
+        return;
+      }
       const patch = action === 'approve'
         ? {
             status: 'approved',
