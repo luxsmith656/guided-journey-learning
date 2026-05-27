@@ -13,13 +13,13 @@ interface UserProfile {
   age?: number;
   instructorId?: string;
   onboarded?: boolean;
-  learningMode?: 'class_based' | 'self_review';
+  learningMode?: 'class_based' | 'self_review' | null;
   classIds?: string[];
-  activeClassId?: string;
-  selectedFocus?: string;
-  reviewTrack?: 'elementary' | 'secondary' | 'specialization';
+  activeClassId?: string | null;
+  selectedFocus?: string | null;
+  reviewTrack?: 'elementary' | 'secondary' | 'specialization' | null;
   specialization?: string;
-  targetExamDate?: string;
+  targetExamDate?: string | null;
   diagnosticCompleted?: boolean;
   diagnosticSkipped?: boolean;
   streak?: number;
@@ -111,7 +111,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             onboarded: existingData.onboarded ?? false, 
             fullName: pendingData.fullName || existingData.fullName || '',
             instructorId: existingData.instructorId || null,
+            learningMode: existingData.learningMode || null,
+            classIds: existingData.classIds || [],
+            activeClassId: existingData.activeClassId || null,
+            selectedFocus: existingData.selectedFocus || null,
+            reviewTrack: existingData.reviewTrack || null,
+            specialization: existingData.specialization || '',
+            targetExamDate: existingData.targetExamDate || null,
+            diagnosticCompleted: existingData.diagnosticCompleted ?? false,
+            diagnosticSkipped: existingData.diagnosticSkipped ?? false,
             streak: 0,
+            xp: 0,
+            level: 1,
+            earnedBadges: [],
+            archivedModuleIds: existingData.archivedModuleIds || [],
+            archivedClassIds: existingData.archivedClassIds || [],
             lastLoginDate: new Date().toISOString().split('T')[0]
           };
           
