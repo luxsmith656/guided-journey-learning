@@ -77,6 +77,9 @@ function normalizeFirestoreModule(id: string, data: any): JourneyModule {
     examBlueprint: data.examBlueprint || undefined,
     competencies: data.competencies || undefined,
     authorName: data.authorName || data.instructorName || '',
+    reviewTrack: data.reviewTrack || '',
+    reviewTracks: data.reviewTracks || data.trackIds || data.tracks || [],
+    specialization: data.specialization || '',
   };
 }
 
@@ -123,6 +126,28 @@ function categoryAllowedForStudent(category: ReviewSubject & { raw: any }, user:
     const haystack = `${category.id} ${category.title} ${category.levelLabel}`.toLowerCase();
     return !haystack.includes('major') && !haystack.includes('specialization') && !haystack.includes('secondary');
   }
+  return true;
+}
+
+function moduleAllowedForStudent(module: JourneyModule & { [key: string]: any }, user: any) {
+  const track = user?.reviewTrack || '';
+  if (!track) return true;
+  const allowedTracks = module.reviewTracks || module.trackIds || module.tracks;
+  if (Array.isArray(allowedTracks) && allowedTracks.length > 0) {
+    return allowedTracks.includes(track) || allowedTracks.includes('all');
+  }
+  if (module.reviewTrack) return module.reviewTrack === track || module.reviewTrack === 'all';
+
+  if (track === 'elementary') {
+    const haystack = `${module.subjectId} ${module.topicId} ${module.title} ${module.description}`.toLowerCase();
+    return !haystack.includes('major') && !haystack.includes('specialization') && !haystack.includes('secondary');
+  }
+
+  if ((track === 'secondary' || track === 'specialization') && module.specialization) {
+    const selectedSpecialization = String(user?.specialization || '').toLowerCase();
+    return !selectedSpecialization || String(module.specialization).toLowerCase() === selectedSpecialization;
+  }
+
   return true;
 }
 
@@ -231,7 +256,9 @@ export default function StudentCourses() {
     return !!progressByModule[module.id] || isClassAssigned;
   }), [visibleModules, progressByModule, user?.activeClassId, assignedModuleIds]);
 
-  const publicReviewers = useMemo(() => visibleModules.filter((module) => !module.publishScope || module.publishScope === 'public'), [visibleModules]);
+  const publicReviewers = useMemo(() => visibleModules
+    .filter((module) => !module.publishScope || module.publishScope === 'public')
+    .filter((module) => moduleAllowedForStudent(module as any, user)), [visibleModules, user]);
 
   const allowedSubjects = useMemo<ReviewSubject[]>(() => {
     return categories

@@ -51,6 +51,28 @@ function moduleStatus(progress: any) {
   return 'In progress';
 }
 
+function publicModuleAllowedForStudent(data: any, user: any) {
+  const track = user?.reviewTrack || '';
+  if (!track) return true;
+  const allowedTracks = data.reviewTracks || data.trackIds || data.tracks;
+  if (Array.isArray(allowedTracks) && allowedTracks.length > 0) {
+    return allowedTracks.includes(track) || allowedTracks.includes('all');
+  }
+  if (data.reviewTrack) return data.reviewTrack === track || data.reviewTrack === 'all';
+
+  if (track === 'elementary') {
+    const haystack = `${data.subjectId || data.categoryId || ''} ${data.topicId || ''} ${data.title || ''} ${data.description || ''}`.toLowerCase();
+    return !haystack.includes('major') && !haystack.includes('specialization') && !haystack.includes('secondary');
+  }
+
+  if ((track === 'secondary' || track === 'specialization') && data.specialization) {
+    const selectedSpecialization = String(user?.specialization || '').toLowerCase();
+    return !selectedSpecialization || String(data.specialization).toLowerCase() === selectedSpecialization;
+  }
+
+  return true;
+}
+
 export default function StudentDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -134,7 +156,10 @@ export default function StudentDashboard() {
             .filter((moduleDoc) => {
               const data = moduleDoc.data() as any;
               const publishScope = data.publishScope || (data.classIds?.length ? 'classes' : 'public');
-              return publishScope === 'public' && !progressMap[moduleDoc.id] && !archivedModuleIds.has(moduleDoc.id);
+              return publishScope === 'public' &&
+                !progressMap[moduleDoc.id] &&
+                !archivedModuleIds.has(moduleDoc.id) &&
+                publicModuleAllowedForStudent(data, user);
             })
             .map((moduleDoc) => {
               const data = moduleDoc.data() as any;

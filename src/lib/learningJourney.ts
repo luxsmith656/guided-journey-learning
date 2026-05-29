@@ -83,6 +83,9 @@ export interface JourneyModule {
   prerequisiteModuleIds?: string[];
   publishScope?: 'public' | 'classes';
   classIds?: string[];
+  reviewTrack?: 'elementary' | 'secondary' | 'specialization' | 'all' | string;
+  reviewTracks?: string[];
+  specialization?: string;
   dueAt?: string;
   antiCheatEnabled?: boolean;
   recordFirstAttemptOnly?: boolean;
