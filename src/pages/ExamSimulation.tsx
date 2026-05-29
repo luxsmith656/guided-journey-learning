@@ -22,7 +22,7 @@ import {
   getIntegrityPolicy,
   shouldAutoSubmitForWarning,
 } from '../lib/assessmentIntegrity';
-import { pickBalancedQuestionsFromBlueprint, shuffleItems } from '../lib/examBlueprints';
+import { pickBalancedQuestionsFromBlueprint } from '../lib/examBlueprints';
 import { calculateFullMockCooldown, ExamCooldown } from '../lib/examCooldown';
 
 interface QuestionOption {
@@ -54,6 +54,7 @@ interface ExamBlueprint {
   id?: string;
   title?: string;
   type?: string;
+  examMode?: string;
   questionCount?: number;
   timeLimitMinutes?: number;
   passingScore?: number;
@@ -62,6 +63,8 @@ interface ExamBlueprint {
   difficultyMix?: Record<string, number>;
   specialization?: string;
   isActive?: boolean;
+  isPublished?: boolean;
+  status?: string;
 }
 
 interface AnswerRecord {
@@ -160,11 +163,6 @@ const pickQuestionsFromBlueprint = (
   });
 };
 
-const shuffleQuestionChoices = (question: Question): Question => ({
-  ...question,
-  options: shuffleItems(question.options),
-});
-
 export default function ExamSimulation() {
   const [searchParams] = useSearchParams();
   const categoryId = searchParams.get('category');
@@ -174,6 +172,7 @@ export default function ExamSimulation() {
 
   const [phase, setPhase] = useState<ExamPhase>('loading');
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [questionPool, setQuestionPool] = useState<Question[]>([]);
   const [blueprint, setBlueprint] = useState<ExamBlueprint>(() => buildDefaultBlueprint(isFullMock));
   const [loadError, setLoadError] = useState('');
   const [attemptId, setAttemptId] = useState('');
@@ -211,6 +210,7 @@ export default function ExamSimulation() {
   const currentQuestion = questions[currentIndex];
   const answeredCount = Object.keys(answers).filter((questionId) => questions.some((question) => question.id === questionId)).length;
   const unansweredCount = Math.max(0, questions.length - answeredCount);
+  const plannedQuestionCount = Math.max(1, Number(blueprint.questionCount || (isFullMock ? DEFAULT_MOCK_COUNT : DEFAULT_PRACTICE_COUNT)));
   const integrityLevel = isFullMock ? 'strict_exam_mode' : 'standard_protection';
   const integrityPolicy = useMemo(() => getIntegrityPolicy(integrityLevel), [integrityLevel]);
   const integrityLabel = integrityPolicy.label;
@@ -322,8 +322,29 @@ export default function ExamSimulation() {
 
     const finalAnswers = answersRef.current;
     const finalLogs = logsOverride || warningLogsRef.current;
-    const finalResult = compileResult(finalAnswers, finalLogs, reason);
+    let finalResult = compileResult(finalAnswers, finalLogs, reason);
     finalResult.attemptId = finalAttemptId;
+    try {
+      const response = await fetch('/api/exam/finalize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attemptId: finalAttemptId,
+          startedAtMillis: startedAtRef.current,
+          expiresAtMillis: expiresAtRef.current,
+          answers: finalAnswers,
+          questions: questionsRef.current,
+          warningLogs: finalLogs,
+          reason,
+        }),
+      });
+      const data = await response.json();
+      if (response.ok && data.success && data.result) {
+        finalResult = { ...data.result, attemptId: finalAttemptId };
+      }
+    } catch (error) {
+      console.warn('server exam finalization unavailable; using local result', error);
+    }
     const attemptStatus = finalResult.status;
 
     try {
@@ -580,10 +601,15 @@ export default function ExamSimulation() {
         const availableBlueprints = blueprintRows
           ? blueprintRows.docs.map((blueprintDoc) => ({ id: blueprintDoc.id, ...blueprintDoc.data() } as ExamBlueprint))
           : [];
-        const preferredBlueprint = availableBlueprints.find((item) => (
-          item.isActive !== false &&
-          (isFullMock ? ['full_mock', 'mock_exam', 'full_let_simulation'].includes(item.type || '') : ['practice', 'category_practice', 'drill'].includes(item.type || ''))
-        )) || buildDefaultBlueprint(isFullMock);
+        const preferredBlueprint = availableBlueprints.find((item) => {
+          const blueprintMode = item.type || item.examMode || '';
+          return item.isActive !== false &&
+            item.isPublished !== false &&
+            item.status !== 'archived' &&
+            (isFullMock
+              ? ['full_mock', 'mock_exam', 'full_let_simulation'].includes(blueprintMode)
+              : ['practice', 'category_practice', 'drill', 'practice_drill'].includes(blueprintMode || ''));
+        }) || buildDefaultBlueprint(isFullMock);
         setBlueprint(preferredBlueprint);
 
         const questionsQuery = query(
@@ -602,13 +628,14 @@ export default function ExamSimulation() {
           })
           .filter((question) => question.stem && question.options.length >= 2 && question.correctOptionId);
 
-        const selectedQuestions = pickQuestionsFromBlueprint(approvedQuestions, preferredBlueprint, isFullMock, categoryId)
-          .map(shuffleQuestionChoices);
-        setQuestions(selectedQuestions);
+        pickQuestionsFromBlueprint(approvedQuestions, preferredBlueprint, isFullMock, categoryId);
+        setQuestionPool(approvedQuestions);
+        setQuestions([]);
         setPhase('instructions');
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unable to prepare this exam right now.';
         setLoadError(message);
+        setQuestionPool([]);
         setQuestions([]);
         setPhase('instructions');
       }
@@ -761,15 +788,53 @@ export default function ExamSimulation() {
   }, [currentQuestion, phase, questions.length]);
 
   const startAttempt = async () => {
-    if (!user || questions.length === 0) return;
-    const nextAttemptId = doc(collection(db, 'mockExamAttempts')).id;
-    const now = Date.now();
-    const durationMinutes = blueprint.timeLimitMinutes || (isFullMock ? DEFAULT_MOCK_MINUTES : DEFAULT_PRACTICE_MINUTES);
-    const expiresAt = now + durationMinutes * 60 * 1000;
+    if (!user || questionPool.length === 0) return;
+    setLoadError('');
+    let startPayload: any = null;
+    try {
+      const response = await fetch('/api/exam/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          blueprint,
+          questionPool,
+          categoryId,
+          isFullMock,
+          assessmentMode: mode,
+          userTrack: user.specialization || user.reviewTrack || user.selectedFocus || '',
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Unable to start this exam attempt.');
+      }
+      startPayload = data;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to start this exam attempt.';
+      setLoadError(message);
+      return;
+    }
+
+    const selectedQuestions = (startPayload.questions || []) as Question[];
+    if (selectedQuestions.length === 0) {
+      setLoadError('The server did not return a valid fixed question set.');
+      return;
+    }
+
+    const nextAttemptId = startPayload.attemptId || doc(collection(db, 'mockExamAttempts')).id;
+    const now = Number(startPayload.startedAtMillis || Date.now());
+    const expiresAt = Number(startPayload.expiresAtMillis || (now + (blueprint.timeLimitMinutes || (isFullMock ? DEFAULT_MOCK_MINUTES : DEFAULT_PRACTICE_MINUTES)) * 60 * 1000));
+    setQuestions(selectedQuestions);
     setAttemptId(nextAttemptId);
     setStartedAtMillis(now);
     setExpiresAtMillis(expiresAt);
-    setTimeRemaining(durationMinutes * 60);
+    setTimeRemaining(Math.max(0, Math.ceil((expiresAt - now) / 1000)));
+    setAnswers({});
+    setFlaggedIds([]);
+    setCurrentIndex(0);
+    setWarningCount(0);
+    setWarningLogs([]);
+    setRefreshCount(0);
     setPhase('in_progress');
 
     await setDoc(doc(db, 'mockExamAttempts', nextAttemptId), {
@@ -786,11 +851,14 @@ export default function ExamSimulation() {
       expiresAtMillis: expiresAt,
       blueprintId: blueprint.id || '',
       blueprintTitle: blueprint.title || '',
-      totalQuestions: questions.length,
-      generatedQuestionIds: questions.map((question) => question.id),
-      generatedQuestions: questions.map((question, index) => ({
+      blueprintSnapshot: startPayload.blueprintSnapshot || null,
+      totalQuestions: selectedQuestions.length,
+      generatedQuestionIds: selectedQuestions.map((question) => question.id),
+      generatedQuestions: selectedQuestions.map((question, index) => ({
         questionId: question.id,
         questionNumber: index + 1,
+        stem: question.stem,
+        options: question.options,
         categoryId: question.categoryId || '',
         topicId: question.topicId || '',
         competencyId: question.competencyId || '',
@@ -890,7 +958,7 @@ export default function ExamSimulation() {
     );
   }
 
-  if (loadError || questions.length === 0) {
+  if (loadError || (phase !== 'instructions' && questions.length === 0) || (phase === 'instructions' && questionPool.length === 0)) {
     return (
       <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center p-8 text-center">
         <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-surface-container text-on-surface-variant/40">
@@ -923,7 +991,7 @@ export default function ExamSimulation() {
 
             <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-4">
               {[
-                ['Items', String(questions.length)],
+                ['Items', String(plannedQuestionCount)],
                 ['Time limit', `${blueprint.timeLimitMinutes || (isFullMock ? DEFAULT_MOCK_MINUTES : DEFAULT_PRACTICE_MINUTES)} min`],
                 ['Integrity', integrityLabel],
                 ['Passing guide', `${blueprint.passingScore || (isFullMock ? 75 : 70)}%`],

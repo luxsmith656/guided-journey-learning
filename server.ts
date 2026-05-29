@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import JSZip from 'jszip';
 import { PDFParse } from 'pdf-parse';
@@ -90,6 +91,36 @@ type SourceChunk = {
   sourcePart?: string;
   text: string;
   sourceTextSnippet: string;
+};
+
+type ServerExamQuestion = {
+  id: string;
+  stem: string;
+  options: Array<{ id: string; text: string }>;
+  correctOptionId: string;
+  categoryId?: string;
+  topicId?: string;
+  skillIds?: string[];
+  competencyId?: string;
+  difficulty?: string;
+  explanation?: string;
+  rationalization?: string;
+  wrongChoiceExplanations?: Record<string, string>;
+  relatedModuleId?: string;
+  moduleId?: string;
+  specialization?: string;
+  familyId?: string;
+};
+
+type ServerExamBlueprint = {
+  id?: string;
+  title?: string;
+  questionCount?: number;
+  timeLimitMinutes?: number;
+  categoryDistribution?: Record<string, number>;
+  sectionDistribution?: Record<string, number>;
+  difficultyMix?: Record<string, number>;
+  passingScore?: number;
 };
 
 function decodeBase64File(fileData = '') {
@@ -250,6 +281,165 @@ function deterministicGrade({ studentAnswer, expectedAnswer = '', acceptedAnswer
     feedback: score >= 70
       ? 'Accepted. Minor wording or spelling differences are okay when the meaning is correct.'
       : 'Review the reading and try to include the key idea more clearly.',
+  };
+}
+
+function serverShuffle<T>(items: T[]) {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
+}
+
+function getServerDistributionTargets(distribution: Record<string, number> | undefined, count: number) {
+  const entries = Object.entries(distribution || {})
+    .map(([key, value]) => [key, Math.max(0, Number(value) || 0)] as const)
+    .filter(([, value]) => value > 0);
+  if (!entries.length || count <= 0) return [] as Array<{ key: string; count: number }>;
+
+  const totalWeight = entries.reduce((sum, [, value]) => sum + value, 0);
+  const rows = entries.map(([key, value]) => {
+    const exact = (value / totalWeight) * count;
+    return { key, count: Math.floor(exact), remainder: exact - Math.floor(exact) };
+  });
+
+  let assigned = rows.reduce((sum, row) => sum + row.count, 0);
+  [...rows].sort((a, b) => b.remainder - a.remainder).forEach((row) => {
+    if (assigned >= count) return;
+    row.count += 1;
+    assigned += 1;
+  });
+  return rows.filter((row) => row.count > 0).map(({ key, count: target }) => ({ key, count: target }));
+}
+
+function takeServerDifficultyMix(pool: ServerExamQuestion[], targetCount: number, difficultyMix?: Record<string, number>) {
+  if (!difficultyMix || Object.keys(difficultyMix).length === 0) return serverShuffle(pool).slice(0, targetCount);
+  const selected: ServerExamQuestion[] = [];
+  const selectedIds = new Set<string>();
+  getServerDistributionTargets(difficultyMix, targetCount).forEach(({ key, count }) => {
+    serverShuffle(pool.filter((question) => (
+      !selectedIds.has(question.id) &&
+      String(question.difficulty || 'medium').toLowerCase() === key.toLowerCase()
+    ))).slice(0, count).forEach((question) => {
+      selected.push(question);
+      selectedIds.add(question.id);
+    });
+  });
+  if (selected.length < targetCount) {
+    serverShuffle(pool.filter((question) => !selectedIds.has(question.id))).slice(0, targetCount - selected.length).forEach((question) => {
+      selected.push(question);
+      selectedIds.add(question.id);
+    });
+  }
+  return selected;
+}
+
+function pickServerExamQuestions(pool: ServerExamQuestion[], blueprint: ServerExamBlueprint, categoryId: string | null, requireFullCount: boolean) {
+  const count = Math.max(1, Number(blueprint.questionCount || (requireFullCount ? 100 : 20)));
+  const filteredPool = categoryId ? pool.filter((question) => question.categoryId === categoryId) : pool;
+  if (requireFullCount && filteredPool.length < count) {
+    throw new Error(`Full mock needs ${count} approved questions, but only ${filteredPool.length} are available.`);
+  }
+  if (filteredPool.length === 0) throw new Error('No approved questions are available for this assessment yet.');
+
+  const selected: ServerExamQuestion[] = [];
+  const selectedIds = new Set<string>();
+  const categoryDistribution = blueprint.categoryDistribution || blueprint.sectionDistribution || {};
+  const categoryTargets = categoryId ? [] : getServerDistributionTargets(categoryDistribution, count);
+
+  categoryTargets.forEach(({ key, count: target }) => {
+    const categoryPool = filteredPool.filter((question) => question.categoryId === key && !selectedIds.has(question.id));
+    if (requireFullCount && categoryPool.length < target) {
+      throw new Error(`Full mock needs ${target} approved questions for ${key}, but only ${categoryPool.length} are available.`);
+    }
+    takeServerDifficultyMix(categoryPool, target, blueprint.difficultyMix).forEach((question) => {
+      selected.push(question);
+      selectedIds.add(question.id);
+    });
+  });
+
+  if (selected.length < count) {
+    takeServerDifficultyMix(filteredPool.filter((question) => !selectedIds.has(question.id)), count - selected.length, blueprint.difficultyMix)
+      .forEach((question) => {
+        selected.push(question);
+        selectedIds.add(question.id);
+      });
+  }
+
+  if (requireFullCount && selected.length < count) {
+    throw new Error(`Full mock needs ${count} approved questions, but only ${selected.length} could be selected from the configured blueprint.`);
+  }
+
+  return serverShuffle(selected).slice(0, requireFullCount ? count : Math.min(count, selected.length)).map((question) => ({
+    ...question,
+    options: serverShuffle(question.options || []),
+  }));
+}
+
+function compileServerExamResult({ attemptId, startedAtMillis, expiresAtMillis, answers = {}, questions = [], warningLogs = [], reason = 'submitted' }: any) {
+  const now = Date.now();
+  const normalizedReason = now >= Number(expiresAtMillis || 0) && reason !== 'submitted' ? 'time_expired' : reason;
+  const statusByReason: Record<string, string> = {
+    submitted: 'submitted',
+    time_expired: 'auto_submitted_time_expired',
+    warnings: 'auto_submitted_warnings',
+    idle: 'auto_submitted_idle',
+    offline: 'auto_submitted_offline',
+    refresh: 'flagged_for_review',
+    forceful_interruption: 'flagged_for_review',
+  };
+  const answerRecords = (questions as ServerExamQuestion[]).map((question, index) => {
+    const selectedOptionId = String(answers[question.id] || '');
+    const isUnanswered = !selectedOptionId;
+    const isCorrect = Boolean(selectedOptionId) && selectedOptionId === question.correctOptionId;
+    return {
+      questionId: question.id,
+      questionNumber: index + 1,
+      selectedOptionId,
+      correctOptionId: question.correctOptionId || '',
+      isCorrect,
+      isUnanswered,
+      categoryId: question.categoryId || '',
+      topicId: question.topicId || '',
+      skillIds: question.skillIds || [],
+      competencyId: question.competencyId || '',
+      difficulty: question.difficulty || 'medium',
+      stem: question.stem,
+      options: question.options || [],
+      explanation: question.explanation || '',
+      rationalization: question.rationalization || question.explanation || '',
+      wrongChoiceExplanations: question.wrongChoiceExplanations || {},
+      relatedModuleId: question.relatedModuleId || question.moduleId || '',
+    };
+  });
+  const correctCount = answerRecords.filter((answer) => answer.isCorrect).length;
+  const unansweredCount = answerRecords.filter((answer) => answer.isUnanswered).length;
+  const categoryBreakdown = answerRecords.reduce<Record<string, { total: number; correct: number; scorePercent: number }>>((acc, answer) => {
+    const key = answer.categoryId || 'uncategorized';
+    acc[key] = acc[key] || { total: 0, correct: 0, scorePercent: 0 };
+    acc[key].total += 1;
+    if (answer.isCorrect) acc[key].correct += 1;
+    acc[key].scorePercent = Math.round((acc[key].correct / acc[key].total) * 100);
+    return acc;
+  }, {});
+  const scorePercent = answerRecords.length ? Math.round((correctCount / answerRecords.length) * 100) : 0;
+  return {
+    attemptId,
+    status: statusByReason[normalizedReason] || 'flagged_for_review',
+    scorePercent,
+    totalQuestions: answerRecords.length,
+    correctCount,
+    wrongCount: answerRecords.length - correctCount,
+    unansweredCount,
+    answeredCount: answerRecords.length - unansweredCount,
+    timeUsedSeconds: startedAtMillis ? Math.max(0, Math.round((now - Number(startedAtMillis)) / 1000)) : 0,
+    categoryBreakdown,
+    answers: answerRecords,
+    warningLogs,
+    serverFinalizedAtMillis: now,
+    endedReason: normalizedReason,
   };
 }
 
@@ -691,6 +881,73 @@ Keep the explanation under 4 short sentences. Pedagogical, warm, no markdown.`;
     } catch (error: any) {
       console.error('generate-module-exam error:', error.message);
       res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post('/api/exam/start', (req: any, res: any) => {
+    try {
+      const {
+        blueprint = {},
+        questionPool = [],
+        categoryId = null,
+        isFullMock = false,
+        assessmentMode = 'practice',
+        userTrack = '',
+      } = req.body || {};
+
+      const cleanPool = (Array.isArray(questionPool) ? questionPool : [])
+        .map((question: any) => ({
+          ...question,
+          id: String(question.id || ''),
+          stem: String(question.stem || ''),
+          options: Array.isArray(question.options) ? question.options : [],
+          correctOptionId: String(question.correctOptionId || ''),
+          skillIds: Array.isArray(question.skillIds) ? question.skillIds : [],
+        }))
+        .filter((question: ServerExamQuestion) => question.id && question.stem && question.correctOptionId && question.options.length >= 2)
+        .filter((question: ServerExamQuestion) => {
+          if (!isFullMock || !userTrack) return true;
+          return !question.specialization || question.specialization === userTrack || ['gened', 'profed'].includes(question.categoryId || '');
+        });
+
+      const selectedQuestions = pickServerExamQuestions(cleanPool, blueprint, categoryId, Boolean(isFullMock));
+      const startedAtMillis = Date.now();
+      const durationMinutes = Math.max(1, Number(blueprint.timeLimitMinutes || (isFullMock ? 180 : 30)));
+      const expiresAtMillis = startedAtMillis + durationMinutes * 60 * 1000;
+      const attemptId = `exam_${startedAtMillis}_${randomUUID().slice(0, 8)}`;
+
+      res.json({
+        success: true,
+        attemptId,
+        assessmentMode,
+        serverNowMillis: startedAtMillis,
+        startedAtMillis,
+        expiresAtMillis,
+        durationSeconds: durationMinutes * 60,
+        questions: selectedQuestions,
+        blueprintSnapshot: {
+          id: blueprint.id || '',
+          title: blueprint.title || '',
+          questionCount: selectedQuestions.length,
+          timeLimitMinutes: durationMinutes,
+          passingScore: blueprint.passingScore || (isFullMock ? 75 : 70),
+          categoryDistribution: blueprint.categoryDistribution || blueprint.sectionDistribution || {},
+          difficultyMix: blueprint.difficultyMix || {},
+        },
+      });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: error.message || 'Unable to start exam attempt.' });
+    }
+  });
+
+  app.post('/api/exam/finalize', (req: any, res: any) => {
+    try {
+      const { attemptId, questions = [] } = req.body || {};
+      if (!attemptId) return res.status(400).json({ success: false, error: 'attemptId required' });
+      if (!Array.isArray(questions) || questions.length === 0) return res.status(400).json({ success: false, error: 'questions required' });
+      res.json({ success: true, result: compileServerExamResult(req.body) });
+    } catch (error: any) {
+      res.status(400).json({ success: false, error: error.message || 'Unable to finalize exam attempt.' });
     }
   });
 
