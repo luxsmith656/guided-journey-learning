@@ -104,6 +104,13 @@ interface ExamResult {
 
 type ExamPhase = 'loading' | 'instructions' | 'in_progress' | 'warning_blocked' | 'auto_submitting' | 'submitted';
 
+interface RecoveryPlan {
+  weakCategories: Array<{ id: string; scorePercent: number; total: number; correct: number }>;
+  weakTopics: Array<{ id: string; missed: number }>;
+  recommendedModuleIds: string[];
+  tasks: Array<{ title: string; body: string; targetLink: string; priority: 'high' | 'medium' | 'low' }>;
+}
+
 const DEFAULT_PRACTICE_COUNT = 20;
 const DEFAULT_MOCK_COUNT = 100;
 const DEFAULT_PRACTICE_MINUTES = 30;
@@ -116,6 +123,53 @@ const formatTime = (seconds: number) => {
   const s = safeSeconds % 60;
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
+
+function buildRecoveryPlan(result: ExamResult): RecoveryPlan {
+  const missedAnswers = result.answers.filter((answer) => !answer.isCorrect);
+  const weakCategories = Object.entries(result.categoryBreakdown)
+    .map(([id, row]) => ({ id, ...row }))
+    .filter((row) => row.scorePercent < 70 || row.correct < row.total)
+    .sort((a, b) => a.scorePercent - b.scorePercent);
+  const weakTopicMap = missedAnswers.reduce<Record<string, number>>((acc, answer) => {
+    const key = answer.topicId || answer.categoryId || 'uncategorized';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const weakTopics = Object.entries(weakTopicMap)
+    .map(([id, missed]) => ({ id, missed }))
+    .sort((a, b) => b.missed - a.missed);
+  const recommendedModuleIds = Array.from(new Set(missedAnswers.map((answer) => answer.relatedModuleId).filter(Boolean)));
+  const topWeakTopic = weakTopics[0]?.id || weakCategories[0]?.id || '';
+  const tasks: RecoveryPlan['tasks'] = missedAnswers.length === 0
+    ? [{
+      title: 'Maintain recall',
+      body: 'No missed items were recorded. Use flashcards to keep the concepts fresh before the next simulation.',
+      targetLink: '/flashcards',
+      priority: 'low',
+    }]
+    : [
+      {
+        title: 'Review missed items first',
+        body: `${missedAnswers.length} item${missedAnswers.length === 1 ? '' : 's'} should go through rationalization before another exam.`,
+        targetLink: '/mistake-bank',
+        priority: 'high',
+      },
+      {
+        title: topWeakTopic ? `Rebuild ${topWeakTopic}` : 'Rebuild weak concepts',
+        body: 'Open the related reviewer sections, then answer a shorter practice drill before another full simulation.',
+        targetLink: '/student/courses',
+        priority: 'high',
+      },
+      {
+        title: 'Use recall practice',
+        body: 'Run flashcards after reviewing so weak concepts return before the next timed attempt.',
+        targetLink: '/flashcards',
+        priority: 'medium',
+      },
+    ];
+
+  return { weakCategories, weakTopics, recommendedModuleIds, tasks };
+}
 
 const normalizeQuestion = (id: string, data: any): Question => ({
   id,
@@ -346,6 +400,7 @@ export default function ExamSimulation() {
       console.warn('server exam finalization unavailable; using local result', error);
     }
     const attemptStatus = finalResult.status;
+    const recoveryPlan = buildRecoveryPlan(finalResult);
 
     try {
       const attemptRef = doc(db, 'mockExamAttempts', finalAttemptId);
@@ -388,6 +443,7 @@ export default function ExamSimulation() {
         wrongCount: finalResult.wrongCount,
         timeUsedSeconds: finalResult.timeUsedSeconds,
         categoryBreakdown: finalResult.categoryBreakdown,
+        recoveryPlan,
         flaggedForReview: reason !== 'submitted' || finalLogs.length > 0,
         updatedAt: serverTimestamp(),
       }, { merge: true });
@@ -1040,6 +1096,7 @@ export default function ExamSimulation() {
 
   if (phase === 'submitted' && result) {
     const missedAnswers = result.answers.filter((answer) => !answer.isCorrect);
+    const recoveryPlan = buildRecoveryPlan(result);
     return (
       <div className="min-h-screen bg-surface px-5 py-8 text-on-surface">
         <div className="mx-auto max-w-5xl space-y-6">
@@ -1061,6 +1118,50 @@ export default function ExamSimulation() {
                 </button>
               </div>
             </div>
+          </section>
+
+          <section className="rounded-2xl border border-primary/20 bg-primary/5 p-5">
+            <p className="text-xs font-black uppercase tracking-widest text-primary">Recovery plan</p>
+            <h2 className="mt-2 font-headline text-xl font-black text-on-surface">What to do before the next attempt</h2>
+            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+              {recoveryPlan.tasks.map((task) => (
+                <button
+                  key={task.title}
+                  onClick={() => navigate(task.targetLink)}
+                  className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-4 text-left transition-colors hover:border-primary/40"
+                >
+                  <span className={`text-[10px] font-black uppercase tracking-widest ${task.priority === 'high' ? 'text-error' : task.priority === 'medium' ? 'text-primary' : 'text-on-surface-variant/50'}`}>
+                    {task.priority}
+                  </span>
+                  <h3 className="mt-2 font-bold text-on-surface">{task.title}</h3>
+                  <p className="mt-2 text-xs leading-relaxed text-on-surface-variant">{task.body}</p>
+                </button>
+              ))}
+            </div>
+            {(recoveryPlan.weakTopics.length > 0 || recoveryPlan.weakCategories.length > 0) && (
+              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="rounded-2xl bg-surface-container-lowest p-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Weak topics</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {recoveryPlan.weakTopics.slice(0, 6).map((topic) => (
+                      <span key={topic.id} className="rounded-full bg-error/10 px-3 py-1 text-xs font-bold text-error">
+                        {topic.id}: {topic.missed} missed
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-2xl bg-surface-container-lowest p-4">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/50">Weak categories</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {recoveryPlan.weakCategories.slice(0, 6).map((category) => (
+                      <span key={category.id} className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
+                        {category.id}: {category.scorePercent}%
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
 
           <section className="grid grid-cols-1 gap-4 md:grid-cols-2">
