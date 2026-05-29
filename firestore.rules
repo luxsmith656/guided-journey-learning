@@ -214,7 +214,8 @@ service cloud.firestore {
     match /diagnosticAttempts/{attemptId} {
       allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || instructorCanAccessStudent(resource.data.userId));
       allow create: if isSignedIn() && incoming().userId == request.auth.uid;
-      allow update, delete: if isAdmin() || (isDemoAccount() && existing().userId == request.auth.uid);
+      allow update: if isAdmin() || isOwnedOpenAttemptUpdate();
+      allow delete: if isAdmin() || (isDemoAccount() && existing().userId == request.auth.uid);
     }
 
     match /moduleProgress/{progressId} {

@@ -340,7 +340,7 @@ function pickServerExamQuestions(pool: ServerExamQuestion[], blueprint: ServerEx
   const count = Math.max(1, Number(blueprint.questionCount || (requireFullCount ? 100 : 20)));
   const filteredPool = categoryId ? pool.filter((question) => question.categoryId === categoryId) : pool;
   if (requireFullCount && filteredPool.length < count) {
-    throw new Error(`Full mock needs ${count} approved questions, but only ${filteredPool.length} are available.`);
+    throw new Error(`This assessment needs ${count} approved questions, but only ${filteredPool.length} are available.`);
   }
   if (filteredPool.length === 0) throw new Error('No approved questions are available for this assessment yet.');
 
@@ -352,7 +352,7 @@ function pickServerExamQuestions(pool: ServerExamQuestion[], blueprint: ServerEx
   categoryTargets.forEach(({ key, count: target }) => {
     const categoryPool = filteredPool.filter((question) => question.categoryId === key && !selectedIds.has(question.id));
     if (requireFullCount && categoryPool.length < target) {
-      throw new Error(`Full mock needs ${target} approved questions for ${key}, but only ${categoryPool.length} are available.`);
+      throw new Error(`This assessment needs ${target} approved questions for ${key}, but only ${categoryPool.length} are available.`);
     }
     takeServerDifficultyMix(categoryPool, target, blueprint.difficultyMix).forEach((question) => {
       selected.push(question);
@@ -369,7 +369,7 @@ function pickServerExamQuestions(pool: ServerExamQuestion[], blueprint: ServerEx
   }
 
   if (requireFullCount && selected.length < count) {
-    throw new Error(`Full mock needs ${count} approved questions, but only ${selected.length} could be selected from the configured blueprint.`);
+    throw new Error(`This assessment needs ${count} approved questions, but only ${selected.length} could be selected from the configured blueprint.`);
   }
 
   return serverShuffle(selected).slice(0, requireFullCount ? count : Math.min(count, selected.length)).map((question) => ({
@@ -891,6 +891,7 @@ Keep the explanation under 4 short sentences. Pedagogical, warm, no markdown.`;
         questionPool = [],
         categoryId = null,
         isFullMock = false,
+        requireFullCount = false,
         assessmentMode = 'practice',
         userTrack = '',
       } = req.body || {};
@@ -910,7 +911,7 @@ Keep the explanation under 4 short sentences. Pedagogical, warm, no markdown.`;
           return !question.specialization || question.specialization === userTrack || ['gened', 'profed'].includes(question.categoryId || '');
         });
 
-      const selectedQuestions = pickServerExamQuestions(cleanPool, blueprint, categoryId, Boolean(isFullMock));
+      const selectedQuestions = pickServerExamQuestions(cleanPool, blueprint, categoryId, Boolean(isFullMock || requireFullCount));
       const startedAtMillis = Date.now();
       const durationMinutes = Math.max(1, Number(blueprint.timeLimitMinutes || (isFullMock ? 180 : 30)));
       const expiresAtMillis = startedAtMillis + durationMinutes * 60 * 1000;
@@ -930,7 +931,7 @@ Keep the explanation under 4 short sentences. Pedagogical, warm, no markdown.`;
           title: blueprint.title || '',
           questionCount: selectedQuestions.length,
           timeLimitMinutes: durationMinutes,
-          passingScore: blueprint.passingScore || (isFullMock ? 75 : 70),
+          passingScore: blueprint.passingScore ?? (isFullMock ? 75 : 70),
           categoryDistribution: blueprint.categoryDistribution || blueprint.sectionDistribution || {},
           difficultyMix: blueprint.difficultyMix || {},
         },

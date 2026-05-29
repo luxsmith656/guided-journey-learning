@@ -400,6 +400,18 @@ export async function seedDatabase() {
     // 7. Seed Public Exam Blueprints
     const examBlueprints = [
       {
+        id: 'blueprint-public-let-diagnostic',
+        title: 'Public LET Baseline Diagnostic',
+        description: 'Baseline diagnostic used to create a learner profile before public self-study or class review.',
+        examMode: 'diagnostic',
+        questionCount: 8,
+        timeLimitMinutes: 25,
+        passingScore: 0,
+        difficultyMix: { easy: 60, medium: 40 },
+        categoryDistribution: { gened: 50, profed: 50 },
+        integrityLevel: 'light_protection',
+      },
+      {
         id: 'blueprint-public-gened-practice',
         title: 'General Education Public Practice Drill',
         description: 'Short public practice set for General Education review.',
