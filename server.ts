@@ -96,8 +96,9 @@ type SourceChunk = {
 type ServerExamQuestion = {
   id: string;
   stem: string;
-  options: Array<{ id: string; text: string }>;
+  options: Array<{ id: string; text: string; originalId?: string }>;
   correctOptionId: string;
+  originalCorrectOptionId?: string;
   categoryId?: string;
   topicId?: string;
   skillIds?: string[];
@@ -110,6 +111,8 @@ type ServerExamQuestion = {
   moduleId?: string;
   specialization?: string;
   familyId?: string;
+  optionOrder?: Array<{ shownId: string; originalId: string }>;
+  exposureRank?: number;
 };
 
 type ServerExamBlueprint = {
@@ -121,6 +124,13 @@ type ServerExamBlueprint = {
   sectionDistribution?: Record<string, number>;
   difficultyMix?: Record<string, number>;
   passingScore?: number;
+};
+
+type ServerExposurePolicy = {
+  seenQuestionIds?: string[];
+  seenFamilyIds?: string[];
+  recentQuestionIds?: string[];
+  recentFamilyIds?: string[];
 };
 
 function decodeBase64File(fileData = '') {
@@ -336,9 +346,50 @@ function takeServerDifficultyMix(pool: ServerExamQuestion[], targetCount: number
   return selected;
 }
 
-function pickServerExamQuestions(pool: ServerExamQuestion[], blueprint: ServerExamBlueprint, categoryId: string | null, requireFullCount: boolean) {
+function getServerQuestionFamilyId(question: ServerExamQuestion) {
+  return String(question.familyId || question.id || '');
+}
+
+function normalizeServerStringSet(items: any) {
+  return new Set((Array.isArray(items) ? items : []).map((item) => String(item || '')).filter(Boolean));
+}
+
+function hasServerBlueprintCoverage(pool: ServerExamQuestion[], blueprint: ServerExamBlueprint, count: number, categoryId: string | null, requireFullCount: boolean) {
+  if (!requireFullCount) return pool.length > 0;
+  if (pool.length < count) return false;
+  const categoryDistribution = blueprint.categoryDistribution || blueprint.sectionDistribution || {};
+  const categoryTargets = categoryId ? [] : getServerDistributionTargets(categoryDistribution, count);
+  return categoryTargets.every(({ key, count: target }) => pool.filter((question) => question.categoryId === key).length >= target);
+}
+
+function shuffleServerOptions(question: ServerExamQuestion) {
+  const originalOptions = question.options || [];
+  const shuffledOptions = serverShuffle(originalOptions);
+  const mappedOptions = shuffledOptions.map((option, index) => ({
+    id: String.fromCharCode(65 + index),
+    text: option.text,
+    originalId: option.originalId || option.id,
+  }));
+  const correctOptionId = mappedOptions.find((option) => option.originalId === question.correctOptionId)?.id || question.correctOptionId;
+  const wrongChoiceExplanations = Object.fromEntries(mappedOptions
+    .filter((option) => option.id !== correctOptionId)
+    .map((option) => [
+      option.id,
+      question.wrongChoiceExplanations?.[option.originalId] || question.wrongChoiceExplanations?.[option.id] || '',
+    ]));
+
+  return {
+    ...question,
+    originalCorrectOptionId: question.correctOptionId,
+    correctOptionId,
+    options: mappedOptions,
+    optionOrder: mappedOptions.map((option) => ({ shownId: option.id, originalId: option.originalId })),
+    wrongChoiceExplanations,
+  };
+}
+
+function selectServerExamQuestions(filteredPool: ServerExamQuestion[], blueprint: ServerExamBlueprint, categoryId: string | null, requireFullCount: boolean) {
   const count = Math.max(1, Number(blueprint.questionCount || (requireFullCount ? 100 : 20)));
-  const filteredPool = categoryId ? pool.filter((question) => question.categoryId === categoryId) : pool;
   if (requireFullCount && filteredPool.length < count) {
     throw new Error(`This assessment needs ${count} approved questions, but only ${filteredPool.length} are available.`);
   }
@@ -372,10 +423,58 @@ function pickServerExamQuestions(pool: ServerExamQuestion[], blueprint: ServerEx
     throw new Error(`This assessment needs ${count} approved questions, but only ${selected.length} could be selected from the configured blueprint.`);
   }
 
-  return serverShuffle(selected).slice(0, requireFullCount ? count : Math.min(count, selected.length)).map((question) => ({
-    ...question,
-    options: serverShuffle(question.options || []),
-  }));
+  return serverShuffle(selected).slice(0, requireFullCount ? count : Math.min(count, selected.length)).map(shuffleServerOptions);
+}
+
+function pickServerExamQuestions(
+  pool: ServerExamQuestion[],
+  blueprint: ServerExamBlueprint,
+  categoryId: string | null,
+  requireFullCount: boolean,
+  exposurePolicy: ServerExposurePolicy = {},
+) {
+  const count = Math.max(1, Number(blueprint.questionCount || (requireFullCount ? 100 : 20)));
+  const filteredPool = categoryId ? pool.filter((question) => question.categoryId === categoryId) : pool;
+  if (filteredPool.length === 0) throw new Error('No approved questions are available for this assessment yet.');
+
+  const seenQuestionIds = normalizeServerStringSet(exposurePolicy.seenQuestionIds);
+  const seenFamilyIds = normalizeServerStringSet(exposurePolicy.seenFamilyIds);
+  const recentQuestionIds = normalizeServerStringSet(exposurePolicy.recentQuestionIds);
+  const recentFamilyIds = normalizeServerStringSet(exposurePolicy.recentFamilyIds);
+  const candidatePools = [
+    {
+      reason: 'excluded_recent_questions_and_families',
+      pool: filteredPool.filter((question) => !recentQuestionIds.has(question.id) && !recentFamilyIds.has(getServerQuestionFamilyId(question))),
+    },
+    {
+      reason: 'excluded_seen_exact_questions',
+      pool: filteredPool.filter((question) => !seenQuestionIds.has(question.id)),
+    },
+    {
+      reason: 'excluded_seen_families',
+      pool: filteredPool.filter((question) => !seenFamilyIds.has(getServerQuestionFamilyId(question))),
+    },
+    {
+      reason: 'fallback_reuse_allowed',
+      pool: filteredPool,
+    },
+  ];
+
+  const selectedCandidate = candidatePools.find((candidate) => (
+    hasServerBlueprintCoverage(candidate.pool, blueprint, count, categoryId, requireFullCount)
+  )) || candidatePools[candidatePools.length - 1];
+  const selectedQuestions = selectServerExamQuestions(selectedCandidate.pool, blueprint, categoryId, requireFullCount);
+  return {
+    questions: selectedQuestions.map((question, index) => ({ ...question, exposureRank: index + 1 })),
+    exposurePolicy: {
+      selectionReason: selectedCandidate.reason,
+      avoidedRecentQuestionCount: recentQuestionIds.size,
+      avoidedRecentFamilyCount: recentFamilyIds.size,
+      seenQuestionCount: seenQuestionIds.size,
+      seenFamilyCount: seenFamilyIds.size,
+      reusedBecausePoolWasSmall: selectedCandidate.reason === 'fallback_reuse_allowed',
+    },
+  };
 }
 
 function compileServerExamResult({ attemptId, startedAtMillis, expiresAtMillis, answers = {}, questions = [], warningLogs = [], reason = 'submitted' }: any) {
@@ -399,6 +498,7 @@ function compileServerExamResult({ attemptId, startedAtMillis, expiresAtMillis, 
       questionNumber: index + 1,
       selectedOptionId,
       correctOptionId: question.correctOptionId || '',
+      originalCorrectOptionId: question.originalCorrectOptionId || question.correctOptionId || '',
       isCorrect,
       isUnanswered,
       categoryId: question.categoryId || '',
@@ -412,6 +512,8 @@ function compileServerExamResult({ attemptId, startedAtMillis, expiresAtMillis, 
       rationalization: question.rationalization || question.explanation || '',
       wrongChoiceExplanations: question.wrongChoiceExplanations || {},
       relatedModuleId: question.relatedModuleId || question.moduleId || '',
+      familyId: question.familyId || '',
+      optionOrder: question.optionOrder || [],
     };
   });
   const correctCount = answerRecords.filter((answer) => answer.isCorrect).length;
@@ -894,6 +996,7 @@ Keep the explanation under 4 short sentences. Pedagogical, warm, no markdown.`;
         requireFullCount = false,
         assessmentMode = 'practice',
         userTrack = '',
+        exposurePolicy = {},
       } = req.body || {};
 
       const cleanPool = (Array.isArray(questionPool) ? questionPool : [])
@@ -911,7 +1014,13 @@ Keep the explanation under 4 short sentences. Pedagogical, warm, no markdown.`;
           return !question.specialization || question.specialization === userTrack || ['gened', 'profed'].includes(question.categoryId || '');
         });
 
-      const selectedQuestions = pickServerExamQuestions(cleanPool, blueprint, categoryId, Boolean(isFullMock || requireFullCount));
+      const { questions: selectedQuestions, exposurePolicy: resolvedExposurePolicy } = pickServerExamQuestions(
+        cleanPool,
+        blueprint,
+        categoryId,
+        Boolean(isFullMock || requireFullCount),
+        exposurePolicy,
+      );
       const startedAtMillis = Date.now();
       const durationMinutes = Math.max(1, Number(blueprint.timeLimitMinutes || (isFullMock ? 180 : 30)));
       const expiresAtMillis = startedAtMillis + durationMinutes * 60 * 1000;
@@ -926,6 +1035,7 @@ Keep the explanation under 4 short sentences. Pedagogical, warm, no markdown.`;
         expiresAtMillis,
         durationSeconds: durationMinutes * 60,
         questions: selectedQuestions,
+        exposurePolicy: resolvedExposurePolicy,
         blueprintSnapshot: {
           id: blueprint.id || '',
           title: blueprint.title || '',

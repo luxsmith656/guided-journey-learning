@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  arrayUnion,
   collection,
   doc,
   getDoc,
@@ -28,6 +29,7 @@ import { calculateFullMockCooldown, ExamCooldown } from '../lib/examCooldown';
 interface QuestionOption {
   id: string;
   text: string;
+  originalId?: string;
 }
 
 interface Question {
@@ -35,6 +37,7 @@ interface Question {
   stem: string;
   options: QuestionOption[];
   correctOptionId: string;
+  originalCorrectOptionId?: string;
   categoryId?: string;
   topicId?: string;
   skillIds?: string[];
@@ -48,6 +51,8 @@ interface Question {
   type?: string;
   specialization?: string;
   familyId?: string;
+  optionOrder?: Array<{ shownId: string; originalId: string }>;
+  exposureRank?: number;
 }
 
 interface ExamBlueprint {
@@ -72,6 +77,7 @@ interface AnswerRecord {
   questionNumber: number;
   selectedOptionId: string;
   correctOptionId: string;
+  originalCorrectOptionId?: string;
   isCorrect: boolean;
   isUnanswered: boolean;
   categoryId: string;
@@ -85,6 +91,8 @@ interface AnswerRecord {
   rationalization: string;
   wrongChoiceExplanations: Record<string, string>;
   relatedModuleId: string;
+  familyId?: string;
+  optionOrder?: Array<{ shownId: string; originalId: string }>;
 }
 
 interface ExamResult {
@@ -179,6 +187,7 @@ const normalizeQuestion = (id: string, data: any): Question => ({
     text: option.text || option.value || '',
   })),
   correctOptionId: data.correctOptionId || data.correctOption || data.answer || '',
+  originalCorrectOptionId: data.originalCorrectOptionId || data.correctOptionId || data.correctOption || data.answer || '',
   categoryId: data.categoryId || '',
   topicId: data.topicId || '',
   skillIds: data.skillIds || [],
@@ -192,6 +201,8 @@ const normalizeQuestion = (id: string, data: any): Question => ({
   type: data.type || 'practice',
   specialization: data.specialization || '',
   familyId: data.familyId || data.questionFamilyId || '',
+  optionOrder: data.optionOrder || [],
+  exposureRank: data.exposureRank || undefined,
 });
 
 const buildDefaultBlueprint = (isFullMock: boolean): ExamBlueprint => ({
@@ -216,6 +227,48 @@ const pickQuestionsFromBlueprint = (
     requireFullCount: isFullMock,
   });
 };
+
+function buildExposurePolicyFromAttempts(attemptRows: any[], assessmentMode: string, categoryId: string | null) {
+  const relevantRows = attemptRows
+    .filter((attempt) => {
+      if (assessmentMode === 'full_mock') return ['full_mock', 'mock_exam'].includes(attempt.assessmentMode || attempt.type || '');
+      if (categoryId) return attempt.assessmentMode === assessmentMode || attempt.categoryId === categoryId || attempt.blueprintId?.includes(categoryId);
+      return ['practice', 'category_practice', 'practice_exam'].includes(attempt.assessmentMode || attempt.type || '');
+    })
+    .sort((a, b) => {
+      const bTime = Number(b.submittedAtMillis || b.startedAtMillis || b.createdAtMillis || b.submittedAt?.toMillis?.() || b.createdAt?.toMillis?.() || 0);
+      const aTime = Number(a.submittedAtMillis || a.startedAtMillis || a.createdAtMillis || a.submittedAt?.toMillis?.() || a.createdAt?.toMillis?.() || 0);
+      return bTime - aTime;
+    });
+  const allQuestions = new Set<string>();
+  const allFamilies = new Set<string>();
+  const recentQuestions = new Set<string>();
+  const recentFamilies = new Set<string>();
+
+  relevantRows.forEach((attempt, attemptIndex) => {
+    const generatedQuestions = Array.isArray(attempt.generatedQuestions) ? attempt.generatedQuestions : [];
+    const generatedQuestionIds = Array.isArray(attempt.generatedQuestionIds) ? attempt.generatedQuestionIds : [];
+    generatedQuestionIds.forEach((questionId: string) => {
+      if (questionId) allQuestions.add(questionId);
+      if (attemptIndex < 3 && questionId) recentQuestions.add(questionId);
+    });
+    generatedQuestions.forEach((question: any) => {
+      if (question.questionId) allQuestions.add(question.questionId);
+      if (question.familyId) allFamilies.add(question.familyId);
+      if (attemptIndex < 3) {
+        if (question.questionId) recentQuestions.add(question.questionId);
+        if (question.familyId) recentFamilies.add(question.familyId);
+      }
+    });
+  });
+
+  return {
+    seenQuestionIds: [...allQuestions],
+    seenFamilyIds: [...allFamilies],
+    recentQuestionIds: [...recentQuestions],
+    recentFamilyIds: [...recentFamilies],
+  };
+}
 
 export default function ExamSimulation() {
   const [searchParams] = useSearchParams();
@@ -316,6 +369,7 @@ export default function ExamSimulation() {
         questionNumber: index + 1,
         selectedOptionId,
         correctOptionId: question.correctOptionId || '',
+        originalCorrectOptionId: question.originalCorrectOptionId || question.correctOptionId || '',
         isCorrect,
         isUnanswered,
         categoryId: question.categoryId || '',
@@ -329,6 +383,8 @@ export default function ExamSimulation() {
         rationalization: question.rationalization || question.explanation || '',
         wrongChoiceExplanations: question.wrongChoiceExplanations || {},
         relatedModuleId: question.relatedModuleId || question.moduleId || '',
+        familyId: question.familyId || '',
+        optionOrder: question.optionOrder || [],
       };
     });
 
@@ -421,6 +477,10 @@ export default function ExamSimulation() {
           questionNumber: index + 1,
           stem: question.stem,
           options: question.options,
+          correctOptionId: question.correctOptionId || '',
+          originalCorrectOptionId: question.originalCorrectOptionId || question.correctOptionId || '',
+          optionOrder: question.optionOrder || [],
+          familyId: question.familyId || '',
           categoryId: question.categoryId || '',
           topicId: question.topicId || '',
           competencyId: question.competencyId || '',
@@ -460,11 +520,14 @@ export default function ExamSimulation() {
           wrongChoiceExplanations: answer.wrongChoiceExplanations,
           selectedOptionId: answer.selectedOptionId,
           correctOptionId: answer.correctOptionId,
+          originalCorrectOptionId: answer.originalCorrectOptionId || answer.correctOptionId,
           categoryId: answer.categoryId,
           topicId: answer.topicId,
           competencyId: answer.competencyId,
           difficulty: answer.difficulty,
           skillIds: answer.skillIds,
+          familyId: answer.familyId || '',
+          optionOrder: answer.optionOrder || [],
           relatedModuleId: answer.relatedModuleId,
           examType: isFullMock ? 'mock_exam' : 'practice_exam',
           sourceAttemptId: finalAttemptId,
@@ -847,6 +910,9 @@ export default function ExamSimulation() {
     if (!user || questionPool.length === 0) return;
     setLoadError('');
     let startPayload: any = null;
+    const previousAttemptsSnap = await getDocs(query(collection(db, 'mockExamAttempts'), where('userId', '==', user.uid))).catch(() => null);
+    const previousAttempts = previousAttemptsSnap ? previousAttemptsSnap.docs.map((attemptDoc) => ({ id: attemptDoc.id, ...attemptDoc.data() })) : [];
+    const exposurePolicy = buildExposurePolicyFromAttempts(previousAttempts, mode, categoryId);
     try {
       const response = await fetch('/api/exam/start', {
         method: 'POST',
@@ -858,6 +924,7 @@ export default function ExamSimulation() {
           isFullMock,
           assessmentMode: mode,
           userTrack: user.specialization || user.reviewTrack || user.selectedFocus || '',
+          exposurePolicy,
         }),
       });
       const data = await response.json();
@@ -908,6 +975,7 @@ export default function ExamSimulation() {
       blueprintId: blueprint.id || '',
       blueprintTitle: blueprint.title || '',
       blueprintSnapshot: startPayload.blueprintSnapshot || null,
+      exposurePolicy: startPayload.exposurePolicy || exposurePolicy,
       totalQuestions: selectedQuestions.length,
       generatedQuestionIds: selectedQuestions.map((question) => question.id),
       generatedQuestions: selectedQuestions.map((question, index) => ({
@@ -915,6 +983,11 @@ export default function ExamSimulation() {
         questionNumber: index + 1,
         stem: question.stem,
         options: question.options,
+        correctOptionId: question.correctOptionId || '',
+        originalCorrectOptionId: question.originalCorrectOptionId || question.correctOptionId || '',
+        optionOrder: question.optionOrder || [],
+        familyId: question.familyId || '',
+        exposureRank: question.exposureRank || index + 1,
         categoryId: question.categoryId || '',
         topicId: question.topicId || '',
         competencyId: question.competencyId || '',
@@ -928,6 +1001,27 @@ export default function ExamSimulation() {
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+
+    await Promise.all(selectedQuestions.map((question, index) => setDoc(
+      doc(db, 'questionExposures', `${user.uid}_${question.id}`),
+      {
+        userId: user.uid,
+        questionId: question.id,
+        familyId: question.familyId || '',
+        categoryId: question.categoryId || '',
+        topicId: question.topicId || '',
+        competencyId: question.competencyId || '',
+        difficulty: question.difficulty || 'medium',
+        assessmentMode: mode,
+        lastAttemptId: nextAttemptId,
+        lastSeenAt: serverTimestamp(),
+        lastOptionOrder: question.optionOrder || [],
+        lastShownPosition: index + 1,
+        timesSeen: increment(1),
+        shownInAttemptIds: arrayUnion(nextAttemptId),
+      },
+      { merge: true },
+    ))).catch((error) => console.warn('question exposure save failed', error));
   };
 
   const saveAnswer = (questionId: string, optionId: string) => {

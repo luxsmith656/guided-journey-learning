@@ -177,6 +177,16 @@ service cloud.firestore {
       allow update: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
       allow delete: if isSignedIn() && (existing().userId == request.auth.uid || isAdmin());
     }
+
+    match /questionExposures/{exposureId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || instructorCanAccessStudent(resource.data.userId));
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (existing().userId == request.auth.uid && incoming().userId == existing().userId)
+      );
+      allow delete: if isAdmin() || (isDemoAccount() && existing().userId == request.auth.uid);
+    }
     
     match /modules/{moduleId} {
       allow read: if isSignedIn();

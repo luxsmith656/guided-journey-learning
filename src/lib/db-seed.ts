@@ -73,13 +73,35 @@ export async function seedDatabase() {
        }
     }
 
+    const relatedModuleByTopic: Record<string, string> = {
+      gened_english: 'gened-critical-reading',
+      gened_math: 'major-math-problem-solving',
+      gened_socsci: 'gened-critical-reading',
+      profed_assessment: 'profed-assessment-alignment',
+      profed_childdev: 'profed-childdev-foundations',
+      profed_principles: 'profed-childdev-foundations',
+      profed_curriculum: 'profed-assessment-alignment',
+      major_math: 'major-math-problem-solving',
+    };
+
+    const misconceptionTagsByTopic: Record<string, string[]> = {
+      gened_english: ['literal-reading', 'grammar-trap', 'evidence-selection'],
+      gened_math: ['number-property-confusion', 'operation-choice'],
+      gened_socsci: ['civic-fact-confusion', 'historical-identity'],
+      profed_assessment: ['assessment-purpose-confusion', 'validity-reliability', 'formative-vs-summative'],
+      profed_childdev: ['development-stage-confusion', 'theory-application'],
+      profed_principles: ['motivation-source-confusion', 'teaching-principle-application'],
+      profed_curriculum: ['curriculum-goal-confusion', 'outcome-alignment'],
+      major_math: ['ratio-setup', 'unit-labeling'],
+    };
+
     // 4. Seed Questions with Stable IDs
     for (const quest of SEED_QUESTIONS) {
         try {
           const stableId = generateStableId(quest.stem);
           const wrongChoiceExplanations = Object.fromEntries((quest.options || [])
             .filter((option: any) => option.id !== quest.correctOptionId)
-            .map((option: any) => [option.id, `${option.text} is a distractor. Review the rationalization before approving this item for high-stakes exams.`]));
+            .map((option: any) => [option.id, `${option.text} is not the best answer because it does not match the tested competency for ${quest.topicId}. Compare it with the rationalization and review the related module.`]));
           await setDoc(doc(db, 'questions', stableId), {
             ...quest,
             id: stableId,
@@ -90,8 +112,11 @@ export async function seedDatabase() {
             approved: true,
             isPublished: true,
             examType: quest.type,
+            competencyId: (quest as any).competencyId || quest.skillIds?.[0] || quest.topicId,
             familyId: `${stableId}_family`,
             wrongChoiceExplanations,
+            misconceptionTags: (quest as any).misconceptionTags || misconceptionTagsByTopic[quest.topicId] || [],
+            relatedModuleId: (quest as any).relatedModuleId || relatedModuleByTopic[quest.topicId] || '',
             sourceNote: 'Seeded public LET reviewer question',
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
