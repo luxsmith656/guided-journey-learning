@@ -674,6 +674,8 @@ export default function DiagnosticAssessment() {
           requireFullCount: true,
           assessmentMode: 'diagnostic',
           userTrack: user.specialization || user.reviewTrack || user.selectedFocus || '',
+          userReviewTrack: user.reviewTrack || (user.selectedFocus === 'major' ? 'secondary' : ''),
+          userSpecialization: user.specialization || '',
         }),
       });
       const data = await response.json();

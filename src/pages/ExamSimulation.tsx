@@ -139,6 +139,20 @@ const formatTime = (seconds: number) => {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 };
 
+const categoryLabels: Record<string, string> = {
+  gened: 'General Education',
+  profed: 'Professional Education',
+  major: 'Field of Specialization',
+};
+
+function humanizeId(value = '') {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .trim();
+}
+
 function buildRecoveryPlan(result: ExamResult): RecoveryPlan {
   const missedAnswers = result.answers.filter((answer) => !answer.isCorrect);
   const weakCategories = Object.entries(result.categoryBreakdown)
@@ -154,9 +168,15 @@ function buildRecoveryPlan(result: ExamResult): RecoveryPlan {
     .map(([id, missed]) => ({ id, missed }))
     .sort((a, b) => b.missed - a.missed);
   const recommendedModuleIds = Array.from(new Set(missedAnswers.map((answer) => answer.relatedModuleId).filter(Boolean)));
-  const topWeakTopic = weakTopics[0]?.id || weakCategories[0]?.id || '';
+  const topWeakTopic = weakTopics[0]?.id || '';
+  const topWeakCategory = weakCategories[0]?.id || missedAnswers[0]?.categoryId || '';
   const topCompetency = missedAnswers.find((answer) => answer.competencyId)?.competencyId || '';
   const topMisconception = missedAnswers.flatMap((answer) => answer.misconceptionTags || [])[0] || '';
+  const categoryLabel = categoryLabels[topWeakCategory] || humanizeId(topWeakCategory);
+  const topicLabel = humanizeId(topWeakTopic || topWeakCategory);
+  const competencyLabel = humanizeId(topCompetency || topWeakTopic || topWeakCategory);
+  const misconceptionLabel = humanizeId(topMisconception);
+  const repairLink = `/exam?type=practice${topWeakCategory ? `&category=${encodeURIComponent(topWeakCategory)}` : ''}${topWeakTopic ? `&topic=${encodeURIComponent(topWeakTopic)}` : ''}`;
   const tasks: RecoveryPlan['tasks'] = missedAnswers.length === 0
     ? [{
       title: 'Maintain recall',
@@ -172,10 +192,16 @@ function buildRecoveryPlan(result: ExamResult): RecoveryPlan {
         priority: 'high',
       },
       {
-        title: topWeakTopic ? `Rebuild ${topWeakTopic}` : 'Rebuild weak concepts',
-        body: `Focus on ${topCompetency || topWeakTopic || 'the missed competency'}${topMisconception ? `, especially ${topMisconception}` : ''}. Review the lesson, then take a targeted repair drill.`,
+        title: topWeakTopic ? `Rebuild ${topicLabel}` : 'Rebuild weak concepts',
+        body: `You are weak in ${categoryLabel || 'this LET area'}: ${topicLabel || 'general review'}, especially ${competencyLabel || 'the missed competency'}${misconceptionLabel ? `. Likely misconception: ${misconceptionLabel}` : ''}. Review the lesson before the next timed attempt.`,
         targetLink: recommendedModuleIds[0] ? `/quest?moduleId=${recommendedModuleIds[0]}` : '/student/courses',
         priority: 'high',
+      },
+      {
+        title: 'Take a targeted repair drill',
+        body: `Answer fresh practice items for ${topicLabel || categoryLabel || 'the weak area'} after reviewing the rationalizations.`,
+        targetLink: repairLink,
+        priority: 'medium',
       },
       {
         title: 'Use recall practice',
@@ -985,6 +1011,8 @@ export default function ExamSimulation() {
           isFullMock,
           assessmentMode: mode,
           userTrack: user.specialization || user.reviewTrack || user.selectedFocus || '',
+          userReviewTrack: user.reviewTrack || (user.selectedFocus === 'major' ? 'secondary' : ''),
+          userSpecialization: user.specialization || '',
           exposurePolicy,
         }),
       });

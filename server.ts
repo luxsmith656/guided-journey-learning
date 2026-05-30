@@ -122,6 +122,10 @@ type ServerExamBlueprint = {
   title?: string;
   questionCount?: number;
   timeLimitMinutes?: number;
+  categoryId?: string;
+  topicId?: string;
+  reviewTracks?: string[];
+  specialization?: string;
   categoryDistribution?: Record<string, number>;
   sectionDistribution?: Record<string, number>;
   difficultyMix?: Record<string, number>;
@@ -1000,8 +1004,13 @@ Keep the explanation under 4 short sentences. Pedagogical, warm, no markdown.`;
         requireFullCount = false,
         assessmentMode = 'practice',
         userTrack = '',
+        userReviewTrack = '',
+        userSpecialization = '',
         exposurePolicy = {},
       } = req.body || {};
+      const normalizedReviewTrack = String(userReviewTrack || '').toLowerCase();
+      const normalizedSpecialization = String(userSpecialization || userTrack || '').toLowerCase();
+      const legacyTrack = String(userTrack || '').toLowerCase();
 
       const cleanPool = (Array.isArray(questionPool) ? questionPool : [])
         .map((question: any) => ({
@@ -1014,8 +1023,13 @@ Keep the explanation under 4 short sentences. Pedagogical, warm, no markdown.`;
         }))
         .filter((question: ServerExamQuestion) => question.id && question.stem && question.correctOptionId && question.options.length >= 2)
         .filter((question: ServerExamQuestion) => {
-          if (!isFullMock || !userTrack) return true;
-          return !question.specialization || question.specialization === userTrack || ['gened', 'profed'].includes(question.categoryId || '');
+          if (!isFullMock && !['diagnostic', 'full_mock'].includes(String(assessmentMode || '').toLowerCase())) return true;
+          if (question.categoryId !== 'major') return true;
+          if (normalizedReviewTrack === 'elementary') return false;
+          if (!question.specialization) return true;
+          const questionSpecialization = String(question.specialization || '').toLowerCase();
+          if (normalizedSpecialization && questionSpecialization === normalizedSpecialization) return true;
+          return !!legacyTrack && !['elementary', 'secondary', 'specialization', 'major', 'full_let_review'].includes(legacyTrack) && questionSpecialization === legacyTrack;
         });
 
       const { questions: selectedQuestions, exposurePolicy: resolvedExposurePolicy } = pickServerExamQuestions(
@@ -1046,6 +1060,10 @@ Keep the explanation under 4 short sentences. Pedagogical, warm, no markdown.`;
           questionCount: selectedQuestions.length,
           timeLimitMinutes: durationMinutes,
           passingScore: blueprint.passingScore ?? (isFullMock ? 75 : 70),
+          categoryId: blueprint.categoryId || '',
+          topicId: blueprint.topicId || '',
+          reviewTracks: blueprint.reviewTracks || [],
+          specialization: blueprint.specialization || '',
           categoryDistribution: blueprint.categoryDistribution || blueprint.sectionDistribution || {},
           difficultyMix: blueprint.difficultyMix || {},
         },
