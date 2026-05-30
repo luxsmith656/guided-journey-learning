@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import AdminLayout from '../components/AdminLayout';
 import { useAuth } from '../context/AuthContext';
 import { SyncManager } from '../lib/offline/SyncManager';
-import { getSeedHealth, seedDatabase, SeedHealthReport } from '../lib/db-seed';
+import { getSeedHealth, seedDemoFixtures, seedPublicCurriculum, SeedHealthReport } from '../lib/db-seed';
 import Toast from '../components/Toast';
 import { RefreshCw, CloudDownload, CloudAlert, Database, CheckCircle2, History } from 'lucide-react';
 
@@ -10,6 +10,7 @@ export default function SyncCenter() {
   const { user } = useAuth();
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSeeding, setIsSeeding] = useState(false);
+  const [isSeedingDemo, setIsSeedingDemo] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [lastSync, setLastSync] = useState<number | null>(null);
@@ -52,15 +53,30 @@ export default function SyncCenter() {
   const handleSeed = async () => {
     setIsSeeding(true);
     try {
-      await seedDatabase();
+      await seedPublicCurriculum();
       await refreshSeedHealth();
-      setToastMsg('System data seeded successfully!');
+      setToastMsg('Public LET curriculum seeded successfully. Student progress was not touched.');
       setShowToast(true);
     } catch (err: any) {
       setToastMsg(`Seed failed: ${err.message}`);
       setShowToast(true);
     } finally {
       setIsSeeding(false);
+    }
+  };
+
+  const handleSeedDemo = async () => {
+    if (!window.confirm('Seed demo accounts and demo class fixtures? This does not reset real student progress.')) return;
+    setIsSeedingDemo(true);
+    try {
+      await seedDemoFixtures();
+      setToastMsg('Demo accounts and demo class fixtures seeded.');
+      setShowToast(true);
+    } catch (err: any) {
+      setToastMsg(`Demo seed failed: ${err.message}`);
+      setShowToast(true);
+    } finally {
+      setIsSeedingDemo(false);
     }
   };
 
@@ -160,7 +176,17 @@ export default function SyncCenter() {
                      <span className={`material-symbols-outlined text-[18px] ${isSeeding ? 'animate-spin' : ''}`}>
                        {isSeeding ? 'sync' : 'database'}
                      </span> 
-                     {isSeeding ? 'Seeding Data...' : 'Seed System Data'}
+                     {isSeeding ? 'Seeding Curriculum...' : 'Seed Public Curriculum'}
+                  </button>
+                  <button
+                    onClick={handleSeedDemo}
+                    disabled={isSeedingDemo}
+                    className="bg-slate-900 text-white hover:bg-slate-800 transition-colors px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 text-sm shadow-lg shadow-slate-900/10 disabled:opacity-50"
+                  >
+                     <span className={`material-symbols-outlined text-[18px] ${isSeedingDemo ? 'animate-spin' : ''}`}>
+                       {isSeedingDemo ? 'sync' : 'science'}
+                     </span>
+                     {isSeedingDemo ? 'Seeding Demo...' : 'Seed Demo Fixtures'}
                   </button>
                   <button onClick={() => void refreshSeedHealth()} className="bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors px-4 py-2 rounded-xl font-bold flex items-center gap-2 text-sm">
                      <span className="material-symbols-outlined text-[18px]">refresh</span> Refresh Health

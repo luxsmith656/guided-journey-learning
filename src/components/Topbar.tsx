@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useSidebar } from '../context/SidebarContext';
 import { useAuth } from '../context/AuthContext';
-import { seedDatabase } from '../lib/db-seed';
+import { seedPublicCurriculum } from '../lib/db-seed';
 import { useNotifications } from '../hooks/useNotifications';
 
 interface TopbarProps {
@@ -29,8 +29,8 @@ export default function Topbar({ title = 'LET Mastery' }: TopbarProps) {
   const handleSync = async () => {
     setSyncing(true);
     try {
-      await seedDatabase();
-      alert('Cloud Sync Successful: Preset curriculum and questions have been updated.');
+      await seedPublicCurriculum();
+      alert('Cloud Sync Successful: public curriculum, questions, modules, textbooks, and blueprints have been updated.');
     } catch (err: any) {
       alert('Sync Failed: ' + (err.message || 'Unknown error'));
     } finally {

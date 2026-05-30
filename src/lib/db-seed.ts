@@ -20,7 +20,8 @@ function generateStableId(input: string): string {
   return 'q_' + Math.abs(hash).toString(36);
 }
 
-export async function seedDatabase() {
+export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
+  const includeDemo = options.includeDemo ?? true;
   console.log('Starting standardized database seed...');
   
   try {
@@ -488,106 +489,9 @@ export async function seedDatabase() {
       console.log(`Seeded exam blueprint: ${blueprint.title}`);
     }
 
-    // 8. Seed Demo Accounts
-    const demoAccounts = [
-      {
-        uid: 'demo-student',
-        email: 'student@letmastery.com',
-        role: 'student',
-        isDemo: true,
-        fullName: 'Demo Student',
-        onboarded: false,
-        learningMode: 'self_review',
-        activeClassId: null,
-        selectedFocus: null,
-        reviewTrack: null,
-        specialization: '',
-        diagnosticCompleted: false,
-        diagnosticSkipped: false,
-        streak: 0,
-        xp: 0,
-        level: 1,
-        earnedBadges: []
-      },
-      {
-        uid: 'demo-instructor',
-        email: 'instructor@letmastery.com',
-        role: 'instructor',
-        isDemo: true,
-        fullName: 'Dr. Jane Teacher',
-        onboarded: true,
-        diagnosticCompleted: false
-      },
-      {
-        uid: 'demo-admin',
-        email: 'admin@letmastery.com',
-        role: 'admin',
-        isDemo: true,
-        fullName: 'System Administrator',
-        onboarded: true,
-        diagnosticCompleted: false
-      }
-    ];
-
-    for (const acct of demoAccounts) {
-      try {
-        await setDoc(doc(db, 'users', acct.uid), {
-          ...acct,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        }, { merge: true });
-        console.log(`Seeded demo account: ${acct.email}`);
-      } catch (err) {
-         console.error(`Failed to seed demo account ${acct.email}`, err);
-      }
+    if (includeDemo) {
+      await seedDemoFixtures();
     }
-
-    // 9. Seed Demo Class, Enrollment, and Learner Profile
-    await setDoc(doc(db, 'classes', 'class_let_foundations'), {
-      id: 'class_let_foundations',
-      className: 'LET Foundations Journey',
-      classCode: 'LET2026',
-      description: 'Guided LET review class with modules, textbook readings, quizzes, and mock exam practice.',
-      instructorId: 'demo-instructor',
-      instructorEmail: 'instructor@letmastery.com',
-      instructorName: 'Dr. Jane Teacher',
-      status: 'active',
-      focus: 'full_let_review',
-      studentCount: 1,
-      inviteLink: '/join/LET2026',
-      assignedModuleIds: ['gened-critical-reading', 'profed-assessment-alignment', 'profed-childdev-foundations'],
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    }, { merge: true });
-
-    await setDoc(doc(db, 'classEnrollments', 'class_let_foundations_demo-student'), {
-      id: 'class_let_foundations_demo-student',
-      classId: 'class_let_foundations',
-      studentId: 'demo-student',
-      studentName: 'Demo Student',
-      status: 'active',
-      joinedAt: serverTimestamp()
-    }, { merge: true });
-
-    await setDoc(doc(db, 'learnerProfiles', 'demo-student'), {
-      userId: 'demo-student',
-      learningMode: 'self_review',
-      activeClassId: null,
-      selectedFocus: null,
-      currentLevel: 0,
-      overallScore: 0,
-      masteryBySkill: {},
-      masteryByTopic: {},
-      masteryByCategory: {},
-      weakSkills: [],
-      strongSkills: [],
-      weakTopics: [],
-      strongTopics: [],
-      recommendedModuleIds: [],
-      nextRecommendedModuleId: null,
-      badges: [],
-      lastUpdatedAt: serverTimestamp()
-    }, { merge: true });
 
     console.log('Standardized seeding completed');
 
@@ -596,6 +500,114 @@ export async function seedDatabase() {
     console.error('Seeding process failed:', error);
     throw error;
   }
+}
+
+export async function seedPublicCurriculum() {
+  return seedDatabase({ includeDemo: false });
+}
+
+export async function seedDemoFixtures() {
+  const demoAccounts = [
+    {
+      uid: 'demo-student',
+      email: 'student@letmastery.com',
+      role: 'student',
+      isDemo: true,
+      fullName: 'Demo Student',
+      onboarded: false,
+      learningMode: 'self_review',
+      activeClassId: null,
+      selectedFocus: null,
+      reviewTrack: null,
+      specialization: '',
+      diagnosticCompleted: false,
+      diagnosticSkipped: false,
+      streak: 0,
+      xp: 0,
+      level: 1,
+      earnedBadges: []
+    },
+    {
+      uid: 'demo-instructor',
+      email: 'instructor@letmastery.com',
+      role: 'instructor',
+      isDemo: true,
+      fullName: 'Dr. Jane Teacher',
+      onboarded: true,
+      diagnosticCompleted: false
+    },
+    {
+      uid: 'demo-admin',
+      email: 'admin@letmastery.com',
+      role: 'admin',
+      isDemo: true,
+      fullName: 'System Administrator',
+      onboarded: true,
+      diagnosticCompleted: false
+    }
+  ];
+
+  for (const acct of demoAccounts) {
+    try {
+      await setDoc(doc(db, 'users', acct.uid), {
+        ...acct,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      console.log(`Seeded demo account: ${acct.email}`);
+    } catch (err) {
+      console.error(`Failed to seed demo account ${acct.email}`, err);
+    }
+  }
+
+  await setDoc(doc(db, 'classes', 'class_let_foundations'), {
+    id: 'class_let_foundations',
+    className: 'LET Foundations Journey',
+    classCode: 'LET2026',
+    description: 'Guided LET review class with modules, textbook readings, quizzes, and mock exam practice.',
+    instructorId: 'demo-instructor',
+    instructorEmail: 'instructor@letmastery.com',
+    instructorName: 'Dr. Jane Teacher',
+    status: 'active',
+    focus: 'full_let_review',
+    studentCount: 1,
+    inviteLink: '/join/LET2026',
+    assignedModuleIds: ['gened-critical-reading', 'profed-assessment-alignment', 'profed-childdev-foundations'],
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+
+  await setDoc(doc(db, 'classEnrollments', 'class_let_foundations_demo-student'), {
+    id: 'class_let_foundations_demo-student',
+    classId: 'class_let_foundations',
+    studentId: 'demo-student',
+    studentName: 'Demo Student',
+    status: 'active',
+    joinedAt: serverTimestamp()
+  }, { merge: true });
+
+  await setDoc(doc(db, 'learnerProfiles', 'demo-student'), {
+    userId: 'demo-student',
+    learningMode: 'self_review',
+    activeClassId: null,
+    selectedFocus: null,
+    currentLevel: 0,
+    overallScore: 0,
+    masteryBySkill: {},
+    masteryByTopic: {},
+    masteryByCategory: {},
+    weakSkills: [],
+    strongSkills: [],
+    weakTopics: [],
+    strongTopics: [],
+    recommendedModuleIds: [],
+    nextRecommendedModuleId: null,
+    badges: [],
+    lastUpdatedAt: serverTimestamp()
+  }, { merge: true });
+
+  console.log('Demo fixtures seeded with zero student progress.');
+  return true;
 }
 
 export interface SeedHealthReport {

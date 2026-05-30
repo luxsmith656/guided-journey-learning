@@ -4,7 +4,7 @@ import Topbar from './Topbar';
 import { useSidebar } from '../context/SidebarContext';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { seedDatabase } from '../lib/db-seed';
+import { seedPublicCurriculum } from '../lib/db-seed';
 import HelpSupportButton from './HelpSupportButton';
 
 interface AdminLayoutProps {
@@ -25,7 +25,7 @@ export default function AdminLayout({ children, title }: AdminLayoutProps) {
         seedingRef.current = true;
         setIsSeeding(true);
         console.log('Admin Platform: Data missing or incomplete. Initializing preset journey data...');
-        seedDatabase()
+        seedPublicCurriculum()
           .then(() => console.log('System initialized with preset curriculum, modules, textbooks, and questions.'))
           .catch(err => {
             console.error('Admin Platform: Initialization failed:', err);

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import AdminLayout from '../components/AdminLayout';
 import { collection, onSnapshot, query, orderBy, limit, doc, getDocFromServer } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { seedDatabase } from '../lib/db-seed';
+import { seedPublicCurriculum } from '../lib/db-seed';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 export default function Dashboard() {
@@ -132,8 +132,8 @@ export default function Dashboard() {
                     const confirmed = window.confirm('Are you sure you want to seed the database? This might take a while.');
                     if (confirmed) {
                        try {
-                         await seedDatabase();
-                         alert('Seeding successful!');
+                         await seedPublicCurriculum();
+                         alert('Public curriculum seeding successful. Demo fixtures and student progress were not touched.');
                        } catch (e: any) {
                          alert('Seeding failed: ' + e.message);
                        }
