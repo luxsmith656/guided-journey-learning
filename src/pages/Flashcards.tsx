@@ -23,6 +23,12 @@ interface Flashcard {
   explanation?: string;
   categoryName?: string;
   topicId?: string;
+  competencyId?: string;
+  misconceptionTags?: string[];
+  source: 'mistake_bank' | 'weak_topic' | 'started_module';
+  questionId?: string;
+  mistakeId?: string;
+  mastery?: number;
 }
 
 export default function Flashcards() {
@@ -50,9 +56,33 @@ export default function Flashcards() {
           .forEach(([topicId]) => targetTopicIds.add(topicId));
 
         const mistakeSnap = await getDocs(query(collection(db, 'mistakeBank'), where('userId', '==', user.uid)));
+        const mistakeQuestionIds = new Set<string>();
+        const mistakeCards: Flashcard[] = [];
         mistakeSnap.docs.forEach((mistakeDoc) => {
-          const topicId = mistakeDoc.data().topicId;
+          const data = mistakeDoc.data();
+          const topicId = data.topicId;
           if (topicId) targetTopicIds.add(topicId);
+          if (data.questionId) mistakeQuestionIds.add(data.questionId);
+          const correctOption = data.correctOptionText
+            || data.options?.find((option: any) => option.id === data.correctOptionId)?.text
+            || data.correctOptionId
+            || 'Review the rationalization';
+          if (data.stem) {
+            mistakeCards.push({
+              id: `mistake-${mistakeDoc.id}`,
+              questionId: data.questionId || mistakeDoc.id,
+              mistakeId: mistakeDoc.id,
+              stem: data.stem,
+              correctAnswer: correctOption,
+              explanation: data.rationalization || data.explanation || 'Review why this answer fits the tested competency.',
+              categoryName: data.categoryName || data.categoryId || 'Mistake bank',
+              topicId: data.topicId || '',
+              competencyId: data.competencyId || '',
+              misconceptionTags: data.misconceptionTags || [],
+              source: 'mistake_bank',
+              mastery: topicMastery[data.topicId] || 0,
+            });
+          }
         });
 
         // 1. Get focus from user profile
@@ -96,25 +126,33 @@ export default function Flashcards() {
         }
 
         const snap = await getDocs(q);
-        const fetchedCards: Flashcard[] = [];
+        const fetchedCards: Flashcard[] = [...mistakeCards];
         
         for (const d of snap.docs) {
+          if (mistakeQuestionIds.has(d.id)) continue;
           const data = d.data();
           if (targetTopicIds.size > 0 && data.topicId && !targetTopicIds.has(data.topicId)) continue;
           const correctOption = data.options?.find((o: any) => o.id === data.correctOptionId);
+          const mastery = topicMastery[data.topicId] || 0;
           fetchedCards.push({
             id: d.id,
+            questionId: d.id,
             stem: data.stem,
             correctAnswer: correctOption?.text || 'N/A',
             explanation: data.explanation || 'Review this concept to master the topic.',
             categoryName: data.categoryName,
             topicId: data.topicId,
-            mastery: topicMastery[data.topicId] || 0
-          } as any);
+            competencyId: data.competencyId || '',
+            misconceptionTags: data.misconceptionTags || [],
+            source: mastery > 0 && mastery < 70 ? 'weak_topic' : 'started_module',
+            mastery
+          });
         }
         
-        // Sort: Weakest first (mastery ascending)
-        fetchedCards.sort((a: any, b: any) => a.mastery - b.mastery);
+        fetchedCards.sort((a, b) => {
+          if (a.source !== b.source) return a.source === 'mistake_bank' ? -1 : b.source === 'mistake_bank' ? 1 : 0;
+          return Number(a.mastery || 0) - Number(b.mastery || 0);
+        });
         
         setCards(fetchedCards.slice(0, 20)); // Limit to 20 per session
         setLoading(false);
@@ -147,6 +185,20 @@ export default function Flashcards() {
       } catch (e) { console.error(e); }
     } else {
       setSessionXP(prev => prev + 5);
+    }
+
+    if (user && currentCard.mistakeId) {
+      try {
+        await updateDoc(doc(db, 'mistakeBank', currentCard.mistakeId), mastered ? {
+          flashcardMasteredAt: serverTimestamp(),
+          flashcardMasteryCount: increment(1),
+        } : {
+          flashcardNeedsReviewAt: serverTimestamp(),
+          flashcardNeedsReviewCount: increment(1),
+        });
+      } catch (error) {
+        console.warn('Unable to update flashcard mistake review state', error);
+      }
     }
     
     setIsFlipped(false);
@@ -184,7 +236,10 @@ export default function Flashcards() {
     return (
       <div className="h-screen bg-surface flex flex-col items-center justify-center p-6 text-center">
         <Brain size={48} className="text-on-surface-variant/20 mb-4" />
-        <h2 className="text-lg font-extrabold text-on-surface mb-2">Deck Empty</h2>
+        <h2 className="text-lg font-extrabold text-on-surface mb-2">No review cards yet</h2>
+        <p className="max-w-sm text-sm font-medium text-on-surface-variant/60 mb-5">
+          Flashcards appear after real diagnostics, mistakes, or started reviewer modules. No sample cards are shown here.
+        </p>
         <button onClick={() => navigate('/student/dashboard')} className="bg-primary text-on-primary px-6 py-2 rounded-xl text-sm font-bold shadow-lg shadow-primary/20">Return Home</button>
       </div>
     );
@@ -264,7 +319,9 @@ export default function Flashcards() {
                   {/* Front */}
                   <div className="absolute inset-0 bg-surface-container-lowest rounded-[2.5rem] shadow-2xl border border-outline-variant p-8 flex flex-col backface-hidden">
                      <div className="flex justify-between items-center mb-4">
-                        <span className="px-2.5 py-0.5 bg-primary/5 text-primary rounded-lg text-[9px] font-bold tracking-widest border border-primary/10 uppercase">Quiz Item {currentIndex + 1}</span>
+                        <span className="px-2.5 py-0.5 bg-primary/5 text-primary rounded-lg text-[9px] font-bold tracking-widest border border-primary/10 uppercase">
+                          {currentCard.source === 'mistake_bank' ? 'Mistake repair' : currentCard.source === 'weak_topic' ? 'Weak topic' : 'Started module'} {currentIndex + 1}
+                        </span>
                         <Brain size={18} className="text-on-surface-variant/20" />
                      </div>
                      <div className="flex-1 flex items-center justify-center text-center overflow-y-auto px-2 scrollbar-none max-h-[280px]">
@@ -273,6 +330,11 @@ export default function Flashcards() {
                         </h2>
                      </div>
                      <div className="mt-4 pt-4 border-t border-outline-variant text-center">
+                        {(currentCard.competencyId || currentCard.misconceptionTags?.length) && (
+                          <p className="mb-2 line-clamp-1 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/40">
+                            {currentCard.competencyId || currentCard.misconceptionTags?.[0]}
+                          </p>
+                        )}
                         <p className="text-on-surface-variant/30 font-bold text-[9px] uppercase tracking-widest flex items-center justify-center gap-1.5">
                            Touch to reveal answer
                            <RotateCcw size={10} className="rotate-45" />
@@ -295,6 +357,11 @@ export default function Flashcards() {
                              <p className="text-[11px] text-on-primary/70 leading-relaxed font-medium">
                                 {currentCard.explanation}
                              </p>
+                             {currentCard.misconceptionTags?.length ? (
+                               <p className="mt-3 text-[10px] font-black uppercase tracking-widest text-on-primary/40">
+                                 Misconception: {currentCard.misconceptionTags[0]}
+                               </p>
+                             ) : null}
                           </div>
                         )}
                      </div>
