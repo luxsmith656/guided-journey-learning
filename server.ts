@@ -112,6 +112,7 @@ type ServerExamQuestion = {
   moduleId?: string;
   specialization?: string;
   familyId?: string;
+  variantId?: string;
   optionOrder?: Array<{ shownId: string; originalId: string }>;
   exposureRank?: number;
 };
@@ -515,6 +516,7 @@ function compileServerExamResult({ attemptId, startedAtMillis, expiresAtMillis, 
       misconceptionTags: question.misconceptionTags || [],
       relatedModuleId: question.relatedModuleId || question.moduleId || '',
       familyId: question.familyId || '',
+      variantId: question.variantId || '',
       optionOrder: question.optionOrder || [],
     };
   });

@@ -52,6 +52,7 @@ interface Question {
   type?: string;
   specialization?: string;
   familyId?: string;
+  variantId?: string;
   optionOrder?: Array<{ shownId: string; originalId: string }>;
   exposureRank?: number;
 }
@@ -97,6 +98,7 @@ interface AnswerRecord {
   misconceptionTags?: string[];
   relatedModuleId: string;
   familyId?: string;
+  variantId?: string;
   optionOrder?: Array<{ shownId: string; originalId: string }>;
 }
 
@@ -209,6 +211,7 @@ const normalizeQuestion = (id: string, data: any): Question => ({
   type: data.type || 'practice',
   specialization: data.specialization || '',
   familyId: data.familyId || data.questionFamilyId || '',
+  variantId: data.variantId || data.questionVariantId || '',
   optionOrder: data.optionOrder || [],
   exposureRank: data.exposureRank || undefined,
 });
@@ -420,6 +423,7 @@ export default function ExamSimulation() {
         misconceptionTags: question.misconceptionTags || [],
         relatedModuleId: question.relatedModuleId || question.moduleId || '',
         familyId: question.familyId || '',
+        variantId: question.variantId || '',
         optionOrder: question.optionOrder || [],
       };
     });
@@ -517,6 +521,7 @@ export default function ExamSimulation() {
           originalCorrectOptionId: question.originalCorrectOptionId || question.correctOptionId || '',
           optionOrder: question.optionOrder || [],
           familyId: question.familyId || '',
+          variantId: question.variantId || '',
           categoryId: question.categoryId || '',
           topicId: question.topicId || '',
           competencyId: question.competencyId || '',
@@ -565,6 +570,7 @@ export default function ExamSimulation() {
           difficulty: answer.difficulty,
           skillIds: answer.skillIds,
           familyId: answer.familyId || '',
+          variantId: answer.variantId || '',
           optionOrder: answer.optionOrder || [],
           relatedModuleId: answer.relatedModuleId,
           examType: isFullMock ? 'mock_exam' : 'practice_exam',
@@ -1042,6 +1048,7 @@ export default function ExamSimulation() {
         originalCorrectOptionId: question.originalCorrectOptionId || question.correctOptionId || '',
         optionOrder: question.optionOrder || [],
         familyId: question.familyId || '',
+        variantId: question.variantId || '',
         exposureRank: question.exposureRank || index + 1,
         categoryId: question.categoryId || '',
         topicId: question.topicId || '',
@@ -1064,6 +1071,7 @@ export default function ExamSimulation() {
         userId: user.uid,
         questionId: question.id,
         familyId: question.familyId || '',
+        variantId: question.variantId || '',
         categoryId: question.categoryId || '',
         topicId: question.topicId || '',
         competencyId: question.competencyId || '',

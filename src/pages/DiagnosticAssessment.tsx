@@ -40,6 +40,7 @@ interface Question {
   examType?: string;
   specialization?: string;
   familyId?: string;
+  variantId?: string;
 }
 
 interface ExamBlueprint {
@@ -80,6 +81,8 @@ interface AnswerRecord {
   wrongChoiceExplanations: Record<string, string>;
   misconceptionTags?: string[];
   relatedModuleId: string;
+  familyId?: string;
+  variantId?: string;
 }
 
 interface DiagnosticResult {
@@ -141,6 +144,7 @@ const normalizeQuestion = (id: string, data: any): Question => ({
   examType: data.examType || '',
   specialization: data.specialization || '',
   familyId: data.familyId || data.questionFamilyId || '',
+  variantId: data.variantId || data.questionVariantId || '',
 });
 
 const getBlueprintMode = (blueprint: ExamBlueprint) => String(blueprint.examMode || blueprint.type || '').toLowerCase();
@@ -184,6 +188,8 @@ function compileLocalResult(
       wrongChoiceExplanations: question.wrongChoiceExplanations || {},
       misconceptionTags: question.misconceptionTags || [],
       relatedModuleId: question.relatedModuleId || question.moduleId || '',
+      familyId: question.familyId || '',
+      variantId: question.variantId || '',
     };
   });
 
@@ -509,6 +515,8 @@ export default function DiagnosticAssessment() {
           questionNumber: index + 1,
           stem: question.stem,
           options: question.options,
+          familyId: question.familyId || '',
+          variantId: question.variantId || '',
           categoryId: question.categoryId || '',
           topicId: question.topicId || '',
           competencyId: question.competencyId || '',
@@ -556,6 +564,8 @@ export default function DiagnosticAssessment() {
           competencyId: answer.competencyId,
           difficulty: answer.difficulty,
           skillIds: answer.skillIds,
+          familyId: answer.familyId || '',
+          variantId: answer.variantId || '',
           relatedModuleId: answer.relatedModuleId,
           examType: 'diagnostic',
           sourceAttemptId: finalAttemptId,
@@ -704,6 +714,8 @@ export default function DiagnosticAssessment() {
           questionNumber: index + 1,
           stem: question.stem,
           options: question.options,
+          familyId: question.familyId || '',
+          variantId: question.variantId || '',
           categoryId: question.categoryId || '',
           topicId: question.topicId || '',
           competencyId: question.competencyId || '',
