@@ -77,6 +77,7 @@ export default function StudentTodo() {
 
   const todoItems = useMemo(() => modules
     .filter((module) => {
+      if ((user as any)?.archivedModuleIds?.includes(module.id)) return false;
       const progress = progressByModule[module.id];
       const assignedModuleIds = new Set(classData?.assignedModuleIds || []);
       if (module.publishScope === 'classes') return user?.activeClassId && (module.classIds?.includes(user.activeClassId) || assignedModuleIds.has(module.id));

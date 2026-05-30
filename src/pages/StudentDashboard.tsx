@@ -121,8 +121,10 @@ export default function StudentDashboard() {
         setClassData(classInfo);
 
         const moduleIds: string[] = [
-          ...rows.map((row: any) => row.moduleId).filter(Boolean),
-          ...(user.activeClassId && classInfo?.assignedModuleIds?.length ? classInfo.assignedModuleIds.filter(Boolean) : []),
+          ...rows.map((row: any) => row.moduleId).filter((id: string) => id && !archivedModuleIds.has(id)),
+          ...(user.activeClassId && classInfo?.assignedModuleIds?.length
+            ? classInfo.assignedModuleIds.filter((id: string) => id && !archivedModuleIds.has(id))
+            : []),
         ];
         const uniqueModuleIds = Array.from(new Set<string>(moduleIds));
         const loadedModules: DashboardModule[] = [];
@@ -192,8 +194,10 @@ export default function StudentDashboard() {
   const mockAverage = mockAttempts.length
     ? Math.round(mockAttempts.reduce((sum, attempt) => sum + Number(attempt.scorePercent || 0), 0) / mockAttempts.length)
     : null;
-  const completedModules = progressRows.filter((row: any) => row.status === 'completed' && (row.finalScore ?? 0) >= 85).length;
-  const startedModules = progressRows.length;
+  const archivedModuleIds = new Set<string>(((user as any)?.archivedModuleIds || []).filter(Boolean));
+  const visibleProgressRows = progressRows.filter((row: any) => row.moduleId && !archivedModuleIds.has(row.moduleId));
+  const completedModules = visibleProgressRows.filter((row: any) => row.status === 'completed' && (row.finalScore ?? 0) >= 85).length;
+  const startedModules = visibleProgressRows.length;
   const moduleCompletionScore = activeModules.length ? Math.round((completedModules / activeModules.length) * 100) : 0;
   const boardReadiness = Math.round(((diagnosticScore ?? 0) * 0.25) + ((mockAverage ?? 0) * 0.45) + (moduleCompletionScore * 0.30));
   const hasAnyRecordedActivity = !!latestDiagnostic || mockAttempts.length > 0 || progressRows.length > 0 || mistakeCount > 0;

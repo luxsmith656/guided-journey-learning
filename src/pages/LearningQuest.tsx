@@ -1531,29 +1531,25 @@ export default function LearningQuest() {
                   </button>
                 )}
               </div>
-              <div className="hidden lg:flex fixed right-5 top-1/3 z-30 flex-col gap-2 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest/95 p-2 shadow-lg backdrop-blur">
-                <button disabled={!selectedRange} onClick={() => void addHighlight(false)} className="rounded-xl p-3 text-on-surface hover:bg-surface-container disabled:opacity-35" title="Highlight selected text" aria-label="Highlight selected text">
-                  <Highlighter size={18} />
-                </button>
-                <button disabled={!selectedRange} onClick={() => void addHighlight(true)} className="rounded-xl p-3 text-on-surface hover:bg-surface-container disabled:opacity-35" title="Hide selected text for recall" aria-label="Hide selected text for recall">
-                  <EyeOff size={18} />
-                </button>
-                <button disabled={!selectedRange} onClick={() => void addHighlight(false, true)} className="rounded-xl p-3 text-on-surface hover:bg-surface-container disabled:opacity-35" title="Add note to selected text" aria-label="Add note to selected text">
-                  <MessageCircle size={18} />
-                </button>
-                <button onClick={() => setIsBookmarked(!isBookmarked)} className={`rounded-xl p-3 ${isBookmarked ? 'bg-primary text-on-primary' : 'text-on-surface hover:bg-surface-container'}`} title="Bookmark lesson" aria-label="Bookmark lesson">
-                  <Bookmark size={18} />
-                </button>
-                <button onClick={saveLessonNote} className="rounded-xl p-3 text-on-surface hover:bg-surface-container" title="Save notes" aria-label="Save notes">
-                  <Save size={18} />
-                </button>
-                <button onClick={downloadStudyGuide} className="rounded-xl p-3 text-on-surface hover:bg-surface-container" title="Download study guide" aria-label="Download study guide">
-                  <Download size={18} />
-                </button>
+              <div className="hidden lg:flex fixed right-5 top-1/3 z-30 w-56 flex-col gap-2 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest/95 p-3 shadow-lg backdrop-blur">
+                <div className="border-b border-outline-variant/30 pb-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-primary">Study marker</p>
+                  <p className="mt-1 line-clamp-3 text-[11px] font-semibold text-on-surface-variant/70">
+                    {selectedRange ? `"${selectedRange.text}"` : 'Select exact text in the reader to enable marks.'}
+                  </p>
+                </div>
+                <MarkerToolButton disabled={!selectedRange} icon={Highlighter} label="Highlight" onClick={() => void addHighlight(false)} />
+                <MarkerToolButton disabled={!selectedRange} icon={EyeOff} label="Hide for recall" onClick={() => void addHighlight(true)} />
+                <MarkerToolButton disabled={!selectedRange} icon={MessageCircle} label="Add note mark" onClick={() => void addHighlight(false, true)} />
+                <MarkerToolButton icon={Bookmark} label={isBookmarked ? 'Bookmarked' : 'Bookmark'} active={isBookmarked} onClick={() => setIsBookmarked(!isBookmarked)} />
+                <MarkerToolButton icon={Save} label="Save notes" onClick={saveLessonNote} />
+                <MarkerToolButton icon={Download} label="Study guide" onClick={downloadStudyGuide} />
                 {hiddenHighlightCount > 0 && (
-                  <button onClick={revealedHighlightIds.length ? hideRevealedHighlights : revealAllHiddenHighlights} className="rounded-xl p-3 text-on-surface hover:bg-surface-container" title="Reveal or hide recall marks" aria-label="Reveal or hide recall marks">
-                    {revealedHighlightIds.length ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
+                  <MarkerToolButton
+                    icon={revealedHighlightIds.length ? EyeOff : Eye}
+                    label={revealedHighlightIds.length ? 'Hide revealed' : 'Reveal hidden'}
+                    onClick={revealedHighlightIds.length ? hideRevealedHighlights : revealAllHiddenHighlights}
+                  />
                 )}
               </div>
               <div ref={sectionTextRef} onMouseUp={captureSelectedText} onKeyUp={captureSelectedText} className="text-on-surface-variant leading-relaxed whitespace-pre-line select-text">
@@ -2099,7 +2095,6 @@ function renderHighlightedText(
         data-annotation-hidden={isHidden && !isRevealed ? 'true' : 'false'}
         onClick={() => {
           setActiveHighlightId(activeHighlightId === highlight.id ? '' : highlight.id);
-          if (isHidden && !isRevealed) toggleRevealHighlight(highlight.id);
         }}
         className={`inline rounded px-1 font-semibold transition-colors ${
           isHidden
@@ -2134,6 +2129,35 @@ function TextOffsetSpan({ text, startOffset }: { text: string; startOffset: numb
     <span data-annotation-start={startOffset} data-annotation-end={startOffset + text.length}>
       {text}
     </span>
+  );
+}
+
+function MarkerToolButton({
+  icon: Icon,
+  label,
+  disabled = false,
+  active = false,
+  onClick,
+}: {
+  icon: React.ComponentType<{ size?: number }>;
+  label: string;
+  disabled?: boolean;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      disabled={disabled}
+      onClick={onClick}
+      className={`flex items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-bold transition-colors disabled:opacity-35 ${
+        active ? 'bg-primary text-on-primary' : 'text-on-surface hover:bg-surface-container'
+      }`}
+      title={label}
+      aria-label={label}
+    >
+      <Icon size={16} />
+      <span>{label}</span>
+    </button>
   );
 }
 
