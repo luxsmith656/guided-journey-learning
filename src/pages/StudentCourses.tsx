@@ -31,18 +31,6 @@ interface ReviewSubject {
 
 const subjectAccents = ['bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-violet-500', 'bg-cyan-500'];
 
-const statusLabel: Record<string, string> = {
-  locked: 'Locked',
-  available: 'Ready',
-  in_progress: 'In progress',
-  paused: 'Paused',
-  ready_for_final_exam: 'Ready for final',
-  review_required: 'Review required',
-  completed: 'Completed',
-  mastered: 'Mastered',
-  assigned: 'Class assigned',
-};
-
 function normalizeFirestoreModule(id: string, data: any): JourneyModule {
   return {
     id,
@@ -259,6 +247,8 @@ export default function StudentCourses() {
   const publicReviewers = useMemo(() => visibleModules
     .filter((module) => !module.publishScope || module.publishScope === 'public')
     .filter((module) => moduleAllowedForStudent(module as any, user)), [visibleModules, user]);
+  const explorePublicReviewers = useMemo(() => publicReviewers
+    .filter((module) => !progressByModule[module.id]), [publicReviewers, progressByModule]);
 
   const allowedSubjects = useMemo<ReviewSubject[]>(() => {
     return categories
@@ -269,7 +259,7 @@ export default function StudentCourses() {
           .filter((topic) => topic.categoryId === category.id)
           .forEach((topic) => topicMap.set(topic.id, topic));
 
-        publicReviewers
+        explorePublicReviewers
           .filter((module) => module.subjectId === category.id)
           .forEach((module) => {
             if (!module.topicId || topicMap.has(module.topicId)) return;
@@ -290,8 +280,8 @@ export default function StudentCourses() {
           topics: [...topicMap.values()],
         };
       })
-      .filter((subject) => subject.topics.length > 0 || publicReviewers.some((module) => module.subjectId === subject.id));
-  }, [categories, topics, publicReviewers, user]);
+      .filter((subject) => subject.topics.length > 0 || explorePublicReviewers.some((module) => module.subjectId === subject.id));
+  }, [categories, topics, explorePublicReviewers, user]);
 
   useEffect(() => {
     if (allowedSubjects.length === 0) {
@@ -308,21 +298,21 @@ export default function StudentCourses() {
   const selectedSubject = allowedSubjects.find((subject) => subject.id === selectedSubjectId) || allowedSubjects[0] || null;
   const selectedTopic = selectedSubject?.topics.find((topic) => topic.id === selectedTopicId) || selectedSubject?.topics[0] || null;
   const selectedPublicModules = selectedSubject && selectedTopic
-    ? publicReviewers.filter((module) => module.subjectId === selectedSubject.id && module.topicId === selectedTopic.id)
+    ? explorePublicReviewers.filter((module) => module.subjectId === selectedSubject.id && module.topicId === selectedTopic.id)
     : [];
   const filteredTopics = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     if (!selectedSubject) return [];
     if (!term) return selectedSubject.topics;
     return selectedSubject.topics.filter((topic) => {
-      const modules = publicReviewers.filter((module) => module.topicId === topic.id);
+      const modules = explorePublicReviewers.filter((module) => module.topicId === topic.id);
       return (
         topic.title.toLowerCase().includes(term) ||
         topic.description.toLowerCase().includes(term) ||
         modules.some((module) => module.title.toLowerCase().includes(term))
       );
     });
-  }, [searchTerm, selectedSubject, publicReviewers]);
+  }, [searchTerm, selectedSubject, explorePublicReviewers]);
 
   const completedCount = activeReviewers.filter((module) => module.status === 'completed' || module.status === 'mastered').length;
 
@@ -368,7 +358,7 @@ export default function StudentCourses() {
 
             <div className="grid grid-cols-3 gap-3 min-w-full lg:min-w-[360px]">
               <Stat label="Tracks" value={allowedSubjects.length} />
-              <Stat label="Public" value={publicReviewers.length} />
+              <Stat label="Explore" value={explorePublicReviewers.length} />
               <Stat label="Completed" value={completedCount} />
             </div>
           </div>
@@ -394,7 +384,7 @@ export default function StudentCourses() {
               <div className="space-y-2">
                 {allowedSubjects.map((subject) => {
                   const isSelected = subject.id === selectedSubject.id;
-                  const modules = publicReviewers.filter((module) => module.subjectId === subject.id);
+                  const modules = explorePublicReviewers.filter((module) => module.subjectId === subject.id);
                   return (
                     <button
                       key={subject.id}
@@ -442,7 +432,7 @@ export default function StudentCourses() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                 {filteredTopics.map((topic) => {
                   const isSelected = topic.id === selectedTopic.id;
-                  const modules = publicReviewers.filter((module) => module.topicId === topic.id);
+                  const modules = explorePublicReviewers.filter((module) => module.topicId === topic.id);
                   return (
                     <button
                       key={topic.id}
@@ -475,8 +465,6 @@ export default function StudentCourses() {
                 </div>
               ) : (
                 selectedPublicModules.map((module, index) => {
-                  const progress = progressByModule[module.id];
-                  const isStarted = !!progress;
                   return (
                     <article key={module.id} className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-5 shadow-sm">
                       <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
@@ -492,29 +480,17 @@ export default function StudentCourses() {
                           </div>
                         </div>
                         <button
-                          onClick={() => isStarted ? navigate(`/quest?moduleId=${module.id}`) : startReview(module)}
+                          onClick={() => startReview(module)}
                           className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary text-on-primary px-5 py-3 text-sm font-bold"
                         >
-                          {isStarted ? 'Resume review' : 'Start Review'}
+                          Start Review
                           <ArrowRight size={16} />
                         </button>
                       </div>
 
-                      {isStarted ? (
-                        <div className="mt-5">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-bold text-on-surface-variant">{statusLabel[module.status] || module.status}</span>
-                            <span className="text-xs font-black text-on-surface">{module.progress}%</span>
-                          </div>
-                          <div className="h-2 rounded-full bg-surface-container overflow-hidden">
-                            <div className="h-full bg-primary rounded-full" style={{ width: `${module.progress}%` }}></div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="mt-5 rounded-xl border border-outline-variant/30 bg-surface-container/30 p-3 text-xs font-bold text-on-surface-variant/70">
-                          Not active yet. Starting this reviewer creates your real progress record at 0%.
-                        </div>
-                      )}
+                      <div className="mt-5 rounded-xl border border-outline-variant/30 bg-surface-container/30 p-3 text-xs font-bold text-on-surface-variant/70">
+                        Not active yet. Starting this reviewer creates your real progress record at 0%.
+                      </div>
                     </article>
                   );
                 })

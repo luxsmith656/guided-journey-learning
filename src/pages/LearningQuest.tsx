@@ -743,6 +743,14 @@ export default function LearningQuest() {
       window.getSelection()?.removeAllRanges();
       return;
     }
+    const overlapping = normalizeAnnotationsForRender(lessonHighlights, currentPart.textbookSection.body || '')
+      .find((item) => rangesOverlap(selectedRange.startOffset, selectedRange.endOffset, Number(item.startOffset), Number(item.endOffset)));
+    if (overlapping) {
+      setActiveHighlightId(overlapping.id);
+      setToastMsg('That text overlaps an existing study mark. Edit or remove the existing mark first.');
+      setShowToast(true);
+      return;
+    }
     const annotationRef = doc(collection(db, 'learningAnnotations'));
     const annotation: LessonAnnotation = {
       id: annotationRef.id,
@@ -776,16 +784,17 @@ export default function LearningQuest() {
   };
 
   const updateHighlight = async (id: string, patch: Partial<LessonAnnotation>) => {
-    setLessonHighlights((items) => items.map((item) => item.id === id ? { ...item, ...patch } : item));
+    const current = lessonHighlights.find((item) => item.id === id);
+    const nextType = patch.hidden === false ? 'highlight' : patch.hidden === true ? 'hidden' : current?.type || 'highlight';
+    setLessonHighlights((items) => items.map((item) => item.id === id ? { ...item, ...patch, type: nextType } : item));
     if (patch.hidden === false) {
       setRevealedHighlightIds((ids) => ids.filter((itemId) => itemId !== id));
     }
-    const current = lessonHighlights.find((item) => item.id === id);
     if (!current || current.legacy) return;
     try {
       await updateDoc(doc(db, 'learningAnnotations', id), {
         ...patch,
-        type: patch.hidden === false ? 'highlight' : patch.hidden === true ? 'hidden' : current.type || 'highlight',
+        type: nextType,
         updatedAt: serverTimestamp(),
       });
     } catch (error) {
@@ -820,14 +829,25 @@ export default function LearningQuest() {
     setRevealedHighlightIds([]);
   };
 
-  const clearLessonHighlights = () => {
+  const clearLessonHighlights = async () => {
     if (!lessonHighlights.length || !window.confirm('Remove all highlights and hidden recall marks in this lesson?')) return;
-    lessonHighlights.filter((item) => !item.legacy).forEach((item) => {
-      void deleteDoc(doc(db, 'learningAnnotations', item.id)).catch((error) => console.warn('Unable to remove annotation', error));
-    });
+    await Promise.all(lessonHighlights.filter((item) => !item.legacy).map((item) => (
+      deleteDoc(doc(db, 'learningAnnotations', item.id)).catch((error) => console.warn('Unable to remove annotation', error))
+    )));
+    if (user && currentPart) {
+      await setDoc(doc(db, 'learningNotes', `${user.uid}_${module.id}_${currentPart.id}`), {
+        userId: user.uid,
+        moduleId: module.id,
+        partId: currentPart.id,
+        highlights: [],
+        updatedAt: serverTimestamp(),
+      }, { merge: true }).catch((error) => console.warn('Unable to clear legacy highlights', error));
+    }
     setLessonHighlights([]);
     setRevealedHighlightIds([]);
     setActiveHighlightId('');
+    setToastMsg('Study marks cleared for this section.');
+    setShowToast(true);
   };
 
   const recordMistake = async (question: JourneyQuestion, answer: string, sourceType: string, sourceAttemptId = '') => {
@@ -1579,7 +1599,7 @@ export default function LearningQuest() {
                               <button onClick={() => toggleRevealHighlight(mark.id)} className="rounded-full bg-surface-container px-3 py-1.5 text-[11px] font-bold text-on-surface">
                                 {revealedHighlightIds.includes(mark.id) ? 'Hide again' : 'Reveal once'}
                               </button>
-                              <button onClick={() => void updateHighlight(mark.id, { hidden: false })} className="rounded-full bg-primary px-3 py-1.5 text-[11px] font-bold text-on-primary">Unhide</button>
+                              <button onClick={() => void updateHighlight(mark.id, { hidden: false })} className="rounded-full bg-primary px-3 py-1.5 text-[11px] font-bold text-on-primary">Unhide permanently</button>
                             </>
                           )}
                           <button onClick={() => setActiveHighlightId(mark.id)} className="rounded-full bg-surface-container px-3 py-1.5 text-[11px] font-bold text-on-surface">Note</button>
@@ -1617,7 +1637,7 @@ export default function LearningQuest() {
                             className="inline-flex items-center gap-2 rounded-full bg-primary text-on-primary px-3 py-2 text-xs font-bold"
                           >
                             <Eye size={14} />
-                            Unhide
+                            Unhide permanently
                           </button>
                         </>
                       ) : (
@@ -2167,6 +2187,10 @@ function mergeAnnotations(legacyAnnotations: LessonAnnotation[], exactAnnotation
   return rows.sort(annotationSort);
 }
 
+function rangesOverlap(startA: number, endA: number, startB: number, endB: number) {
+  return Math.max(startA, startB) < Math.min(endA, endB);
+}
+
 function getSelectionOffsets(container: HTMLElement | null, body: string): SelectedTextRange | null {
   if (!container) return null;
   const selection = window.getSelection();
@@ -2176,8 +2200,8 @@ function getSelectionOffsets(container: HTMLElement | null, body: string): Selec
   const hiddenParent = getElementFromNode(range.commonAncestorContainer)?.closest('[data-annotation-hidden="true"]');
   if (hiddenParent) return null;
 
-  const startOffset = getNodeTextOffset(range.startContainer, range.startOffset);
-  const endOffset = getNodeTextOffset(range.endContainer, range.endOffset);
+  const startOffset = getNodeTextOffset(range.startContainer, range.startOffset, 'start');
+  const endOffset = getNodeTextOffset(range.endContainer, range.endOffset, 'end');
   if (startOffset == null || endOffset == null) return null;
   const start = Math.max(0, Math.min(startOffset, endOffset));
   const end = Math.min(body.length, Math.max(startOffset, endOffset));
@@ -2189,7 +2213,7 @@ function getSelectionOffsets(container: HTMLElement | null, body: string): Selec
   };
 }
 
-function getNodeTextOffset(node: Node, nodeOffset: number) {
+function getNodeTextOffset(node: Node, nodeOffset: number, edge: 'start' | 'end') {
   if (node.nodeType === Node.TEXT_NODE) {
     const element = getElementFromNode(node);
     const marked = element?.closest('[data-annotation-start]') as HTMLElement | null;
@@ -2198,11 +2222,34 @@ function getNodeTextOffset(node: Node, nodeOffset: number) {
     return base + nodeOffset;
   }
 
-  const child = node.childNodes.item(Math.max(0, Math.min(nodeOffset, node.childNodes.length - 1)));
-  const element = getElementFromNode(child || node);
-  const marked = element?.closest('[data-annotation-start]') as HTMLElement | null;
-  if (!marked) return null;
-  return Number(marked.dataset.annotationStart || 0);
+  const child = node.childNodes.item(nodeOffset);
+  if (child) return getBoundaryOffsetFromNode(child, 'start');
+
+  const previousChild = node.childNodes.item(nodeOffset - 1);
+  if (previousChild) return getBoundaryOffsetFromNode(previousChild, 'end');
+
+  return getBoundaryOffsetFromNode(node, edge);
+}
+
+function getBoundaryOffsetFromNode(node: Node, edge: 'start' | 'end'): number | null {
+  const element = getElementFromNode(node);
+  const marked = (element?.matches('[data-annotation-start]') ? element : element?.closest('[data-annotation-start]')) as HTMLElement | null;
+  if (marked) {
+    const value = edge === 'start' ? marked.dataset.annotationStart : marked.dataset.annotationEnd;
+    return Number(value || 0);
+  }
+
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    const candidate = edge === 'start'
+      ? (node as Element).querySelector('[data-annotation-start]') as HTMLElement | null
+      : [...(node as Element).querySelectorAll('[data-annotation-start]')].at(-1) as HTMLElement | null;
+    if (candidate) {
+      const value = edge === 'start' ? candidate.dataset.annotationStart : candidate.dataset.annotationEnd;
+      return Number(value || 0);
+    }
+  }
+
+  return null;
 }
 
 function getElementFromNode(node: Node) {
