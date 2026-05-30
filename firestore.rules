@@ -90,6 +90,22 @@ service cloud.firestore {
         isOpenAttemptStatus(existing().get('status', 'in_progress')) &&
         isAllowedStudentAttemptStatus(incoming().get('status', 'in_progress'));
     }
+    function isValidLearningAnnotation(data) {
+      return data.keys().hasAll(['userId', 'moduleId', 'partId', 'sectionId', 'type', 'text', 'startOffset', 'endOffset']) &&
+        data.userId == request.auth.uid &&
+        data.moduleId is string && data.moduleId.size() > 0 && data.moduleId.size() <= 128 &&
+        data.partId is string && data.partId.size() > 0 && data.partId.size() <= 128 &&
+        data.sectionId is string && data.sectionId.size() > 0 && data.sectionId.size() <= 180 &&
+        data.type in ['highlight', 'hidden', 'note'] &&
+        data.text is string && data.text.size() > 0 && data.text.size() <= 5000 &&
+        data.startOffset is number &&
+        data.endOffset is number &&
+        data.startOffset >= 0 &&
+        data.endOffset > data.startOffset &&
+        (!data.keys().hasAny(['hidden']) || data.hidden is bool) &&
+        (!data.keys().hasAny(['note']) || data.note is string) &&
+        (!data.keys().hasAny(['color']) || data.color is string);
+    }
 
     // --- Entity Validations ---
     function isValidUser(data) {
@@ -257,11 +273,11 @@ service cloud.firestore {
     }
 
     match /learningAnnotations/{annotationId} {
-      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidLearningAnnotation(incoming());
       allow read, delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
       allow update: if isSignedIn() && (
         isAdmin() ||
-        (resource.data.userId == request.auth.uid && incoming().userId == resource.data.userId)
+        (resource.data.userId == request.auth.uid && incoming().userId == resource.data.userId && isValidLearningAnnotation(incoming()))
       );
     }
 
