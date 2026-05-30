@@ -72,6 +72,7 @@ interface LessonAnnotation {
   moduleId?: string;
   partId?: string;
   sectionId?: string;
+  sectionTitle?: string;
   type?: 'highlight' | 'hidden' | 'note';
   text: string;
   startOffset?: number;
@@ -264,6 +265,7 @@ export default function LearningQuest() {
   const progressDocId = user ? `${user.uid}_${module.id}` : '';
   const localProgressKey = progressStorageKey(user?.uid, module.id);
   const answerDraftKey = user ? `let-mastery-answer-drafts:${user.uid}:${module.id}` : '';
+  const currentSectionId = currentPart ? getTextbookSectionId(currentPart) : '';
 
   useEffect(() => {
     const syncLowBandwidth = () => setLowBandwidth(localStorage.getItem('let-mastery-low-bandwidth') === '1');
@@ -281,6 +283,8 @@ export default function LearningQuest() {
       if (!user || !currentPart) return;
       const noteSnap = await getDoc(doc(db, 'learningNotes', `${user.uid}_${module.id}_${currentPart.id}`));
       const body = currentPart.textbookSection.body || '';
+      const sectionId = getTextbookSectionId(currentPart);
+      const legacySectionId = currentPart.textbookSection.title || 'textbook';
       if (noteSnap.exists()) {
         const data = noteSnap.data() as any;
         setLessonNote(data.note || '');
@@ -296,14 +300,28 @@ export default function LearningQuest() {
         setLessonHighlights([]);
       }
       try {
-        const annotationSnap = await getDocs(query(
-          collection(db, 'learningAnnotations'),
-          where('userId', '==', user.uid),
-          where('moduleId', '==', module.id),
-          where('partId', '==', currentPart.id),
-          where('sectionId', '==', currentPart.textbookSection.title || 'textbook'),
+        const annotationQueries = [
+          getDocs(query(
+            collection(db, 'learningAnnotations'),
+            where('userId', '==', user.uid),
+            where('moduleId', '==', module.id),
+            where('partId', '==', currentPart.id),
+            where('sectionId', '==', sectionId),
+          )),
+        ];
+        if (legacySectionId !== sectionId) {
+          annotationQueries.push(getDocs(query(
+            collection(db, 'learningAnnotations'),
+            where('userId', '==', user.uid),
+            where('moduleId', '==', module.id),
+            where('partId', '==', currentPart.id),
+            where('sectionId', '==', legacySectionId),
+          )));
+        }
+        const annotationSnaps = await Promise.all(annotationQueries);
+        const exactAnnotations = annotationSnaps.flatMap((annotationSnap) => (
+          annotationSnap.docs.map((annotationDoc) => ({ id: annotationDoc.id, ...annotationDoc.data() } as LessonAnnotation))
         ));
-        const exactAnnotations = annotationSnap.docs.map((annotationDoc) => ({ id: annotationDoc.id, ...annotationDoc.data() } as LessonAnnotation));
         setLessonHighlights((legacy) => mergeAnnotations(legacy, exactAnnotations));
       } catch (error) {
         console.warn('Unable to load learning annotations', error);
@@ -731,7 +749,8 @@ export default function LearningQuest() {
       userId: user.uid,
       moduleId: module.id,
       partId: currentPart.id,
-      sectionId: currentPart.textbookSection.title || 'textbook',
+      sectionId: currentSectionId,
+      sectionTitle: currentPart.textbookSection.title || 'Textbook section',
       type: hidden ? 'hidden' : focusNote ? 'note' : 'highlight',
       text: selectedRange.text,
       startOffset: selectedRange.startOffset,
@@ -2035,9 +2054,9 @@ function renderHighlightedText(
   revealedHighlightIds: string[],
   toggleRevealHighlight: (id: string) => void,
 ) {
-  if (!highlights.length) return body;
+  if (!highlights.length) return <TextOffsetSpan text={body} startOffset={0} />;
   const usable = normalizeAnnotationsForRender(highlights, body);
-  if (!usable.length) return body;
+  if (!usable.length) return <TextOffsetSpan text={body} startOffset={0} />;
   const parts: React.ReactNode[] = [];
   let cursor = 0;
   let key = 0;
@@ -2083,6 +2102,11 @@ function renderHighlightedText(
     parts.push(<TextOffsetSpan key={`text-${key++}`} text={body.slice(cursor)} startOffset={cursor} />);
   }
   return parts;
+}
+
+function getTextbookSectionId(part: JourneyModulePart) {
+  const section = part.textbookSection as JourneyModulePart['textbookSection'] & { id?: string };
+  return section.id || `${part.id}:textbook`;
 }
 
 function TextOffsetSpan({ text, startOffset }: { text: string; startOffset: number }) {

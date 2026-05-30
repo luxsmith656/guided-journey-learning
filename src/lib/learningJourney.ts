@@ -28,6 +28,7 @@ export interface JourneyModulePart {
   title: string;
   objective: string;
   textbookSection: {
+    id?: string;
     title: string;
     body: string;
     estimatedReadMinutes: number;

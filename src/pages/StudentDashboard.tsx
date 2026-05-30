@@ -120,9 +120,10 @@ export default function StudentDashboard() {
         }
         setClassData(classInfo);
 
-        const moduleIds: string[] = user.activeClassId && classInfo?.assignedModuleIds?.length
-          ? classInfo.assignedModuleIds.filter(Boolean)
-          : rows.map((row: any) => row.moduleId).filter(Boolean);
+        const moduleIds: string[] = [
+          ...rows.map((row: any) => row.moduleId).filter(Boolean),
+          ...(user.activeClassId && classInfo?.assignedModuleIds?.length ? classInfo.assignedModuleIds.filter(Boolean) : []),
+        ];
         const uniqueModuleIds = Array.from(new Set<string>(moduleIds));
         const loadedModules: DashboardModule[] = [];
 
@@ -136,10 +137,11 @@ export default function StudentDashboard() {
           }
 
           const progress = progressMap[moduleId];
+          if (!remoteModule && !progress) continue;
           loadedModules.push({
             id: moduleId,
-            title: remoteModule?.title || `Reviewer ${String(moduleId).slice(0, 4)}`,
-            description: remoteModule?.description || 'LET reviewer module',
+            title: remoteModule?.title || progress?.moduleTitle || 'Reviewer unavailable',
+            description: remoteModule?.description || progress?.moduleDescription || 'This recorded reviewer progress points to content that is no longer available.',
             duration: remoteModule?.duration || '',
             dueAt: remoteModule?.dueAt || '',
             status: moduleStatus(progress),
@@ -207,6 +209,7 @@ export default function StudentDashboard() {
   const isClassMode = user?.learningMode === 'class_based';
   const isJoinedToClass = isClassMode && !!user?.activeClassId && !!classData;
   const reviewTrackLabel = useMemo(() => {
+    if (!(user as any)?.reviewTrack) return 'No LET track selected';
     if ((user as any)?.reviewTrack === 'secondary') return `Secondary LET${(user as any)?.specialization ? ` / ${(user as any).specialization}` : ''}`;
     if ((user as any)?.reviewTrack === 'specialization') return (user as any)?.specialization || 'Specialization review';
     return 'Elementary LET';
