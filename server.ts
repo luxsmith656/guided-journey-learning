@@ -107,6 +107,7 @@ type ServerExamQuestion = {
   explanation?: string;
   rationalization?: string;
   wrongChoiceExplanations?: Record<string, string>;
+  misconceptionTags?: string[];
   relatedModuleId?: string;
   moduleId?: string;
   specialization?: string;
@@ -511,6 +512,7 @@ function compileServerExamResult({ attemptId, startedAtMillis, expiresAtMillis, 
       explanation: question.explanation || '',
       rationalization: question.rationalization || question.explanation || '',
       wrongChoiceExplanations: question.wrongChoiceExplanations || {},
+      misconceptionTags: question.misconceptionTags || [],
       relatedModuleId: question.relatedModuleId || question.moduleId || '',
       familyId: question.familyId || '',
       optionOrder: question.optionOrder || [],

@@ -46,6 +46,7 @@ interface Question {
   explanation?: string;
   rationalization?: string;
   wrongChoiceExplanations?: Record<string, string>;
+  misconceptionTags?: string[];
   relatedModuleId?: string;
   moduleId?: string;
   type?: string;
@@ -90,6 +91,7 @@ interface AnswerRecord {
   explanation: string;
   rationalization: string;
   wrongChoiceExplanations: Record<string, string>;
+  misconceptionTags?: string[];
   relatedModuleId: string;
   familyId?: string;
   optionOrder?: Array<{ shownId: string; originalId: string }>;
@@ -148,6 +150,8 @@ function buildRecoveryPlan(result: ExamResult): RecoveryPlan {
     .sort((a, b) => b.missed - a.missed);
   const recommendedModuleIds = Array.from(new Set(missedAnswers.map((answer) => answer.relatedModuleId).filter(Boolean)));
   const topWeakTopic = weakTopics[0]?.id || weakCategories[0]?.id || '';
+  const topCompetency = missedAnswers.find((answer) => answer.competencyId)?.competencyId || '';
+  const topMisconception = missedAnswers.flatMap((answer) => answer.misconceptionTags || [])[0] || '';
   const tasks: RecoveryPlan['tasks'] = missedAnswers.length === 0
     ? [{
       title: 'Maintain recall',
@@ -164,8 +168,8 @@ function buildRecoveryPlan(result: ExamResult): RecoveryPlan {
       },
       {
         title: topWeakTopic ? `Rebuild ${topWeakTopic}` : 'Rebuild weak concepts',
-        body: 'Open the related reviewer sections, then answer a shorter practice drill before another full simulation.',
-        targetLink: '/student/courses',
+        body: `Focus on ${topCompetency || topWeakTopic || 'the missed competency'}${topMisconception ? `, especially ${topMisconception}` : ''}. Review the lesson, then take a targeted repair drill.`,
+        targetLink: recommendedModuleIds[0] ? `/quest?moduleId=${recommendedModuleIds[0]}` : '/student/courses',
         priority: 'high',
       },
       {
@@ -196,6 +200,7 @@ const normalizeQuestion = (id: string, data: any): Question => ({
   explanation: data.explanation || data.rationalization || '',
   rationalization: data.rationalization || data.explanation || '',
   wrongChoiceExplanations: data.wrongChoiceExplanations || {},
+  misconceptionTags: data.misconceptionTags || [],
   relatedModuleId: data.relatedModuleId || data.moduleId || '',
   moduleId: data.moduleId || '',
   type: data.type || 'practice',
@@ -273,6 +278,7 @@ function buildExposurePolicyFromAttempts(attemptRows: any[], assessmentMode: str
 export default function ExamSimulation() {
   const [searchParams] = useSearchParams();
   const categoryId = searchParams.get('category');
+  const topicId = searchParams.get('topic');
   const isFullMock = searchParams.get('type') === 'mock';
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -312,8 +318,8 @@ export default function ExamSimulation() {
   const submittingRef = useRef(false);
   const restoredRef = useRef(false);
 
-  const mode = isFullMock ? 'full_mock' : categoryId ? 'category_practice' : 'practice';
-  const localAttemptKey = user ? `let-mastery-exam-attempt:${user.uid}:${mode}:${categoryId || 'all'}` : '';
+  const mode = isFullMock ? 'full_mock' : topicId ? 'topic_practice' : categoryId ? 'category_practice' : 'practice';
+  const localAttemptKey = user ? `let-mastery-exam-attempt:${user.uid}:${mode}:${categoryId || 'all'}:${topicId || 'all'}` : '';
   const currentQuestion = questions[currentIndex];
   const answeredCount = Object.keys(answers).filter((questionId) => questions.some((question) => question.id === questionId)).length;
   const unansweredCount = Math.max(0, questions.length - answeredCount);
@@ -382,6 +388,7 @@ export default function ExamSimulation() {
         explanation: question.explanation || '',
         rationalization: question.rationalization || question.explanation || '',
         wrongChoiceExplanations: question.wrongChoiceExplanations || {},
+        misconceptionTags: question.misconceptionTags || [],
         relatedModuleId: question.relatedModuleId || question.moduleId || '',
         familyId: question.familyId || '',
         optionOrder: question.optionOrder || [],
@@ -485,6 +492,7 @@ export default function ExamSimulation() {
           topicId: question.topicId || '',
           competencyId: question.competencyId || '',
           difficulty: question.difficulty || 'medium',
+          misconceptionTags: question.misconceptionTags || [],
         })),
         answers: finalResult.answers,
         flaggedItemIds: flaggedIdsRef.current,
@@ -518,6 +526,7 @@ export default function ExamSimulation() {
           explanation: answer.explanation,
           rationalization: answer.rationalization,
           wrongChoiceExplanations: answer.wrongChoiceExplanations,
+          misconceptionTags: answer.misconceptionTags || [],
           selectedOptionId: answer.selectedOptionId,
           correctOptionId: answer.correctOptionId,
           originalCorrectOptionId: answer.originalCorrectOptionId || answer.correctOptionId,
@@ -742,6 +751,7 @@ export default function ExamSimulation() {
           .map((questionDoc) => normalizeQuestion(questionDoc.id, questionDoc.data()))
           .filter((question) => {
             if (categoryId && question.categoryId !== categoryId) return false;
+            if (topicId && question.topicId !== topicId) return false;
             if (!isFullMock || !focus) return true;
             return !question.specialization || question.specialization === focus || ['gened', 'profed'].includes(question.categoryId || '');
           })
@@ -761,7 +771,7 @@ export default function ExamSimulation() {
     };
 
     void loadExam();
-  }, [categoryId, isFullMock, localAttemptKey, user]);
+  }, [categoryId, isFullMock, localAttemptKey, topicId, user]);
 
   useEffect(() => {
     if (!localAttemptKey || !['in_progress', 'warning_blocked'].includes(phase) || !attemptId) return;
@@ -992,6 +1002,7 @@ export default function ExamSimulation() {
         topicId: question.topicId || '',
         competencyId: question.competencyId || '',
         difficulty: question.difficulty || 'medium',
+        misconceptionTags: question.misconceptionTags || [],
       })),
       answers: {},
       flaggedItemIds: [],

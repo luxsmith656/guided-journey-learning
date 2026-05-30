@@ -33,6 +33,7 @@ interface Question {
   rationalization?: string;
   competencyId?: string;
   wrongChoiceExplanations?: Record<string, string>;
+  misconceptionTags?: string[];
   relatedModuleId?: string;
   moduleId?: string;
   type?: string;
@@ -75,6 +76,7 @@ interface AnswerRecord {
   explanation: string;
   rationalization: string;
   wrongChoiceExplanations: Record<string, string>;
+  misconceptionTags?: string[];
   relatedModuleId: string;
 }
 
@@ -130,6 +132,7 @@ const normalizeQuestion = (id: string, data: any): Question => ({
   rationalization: data.rationalization || data.explanation || '',
   competencyId: data.competencyId || data.competency || '',
   wrongChoiceExplanations: data.wrongChoiceExplanations || {},
+  misconceptionTags: data.misconceptionTags || [],
   relatedModuleId: data.relatedModuleId || data.moduleId || '',
   moduleId: data.moduleId || '',
   type: data.type || '',
@@ -168,6 +171,7 @@ function compileLocalResult(
       explanation: question.explanation || '',
       rationalization: question.rationalization || question.explanation || '',
       wrongChoiceExplanations: question.wrongChoiceExplanations || {},
+      misconceptionTags: question.misconceptionTags || [],
       relatedModuleId: question.relatedModuleId || question.moduleId || '',
     };
   });
@@ -528,6 +532,7 @@ export default function DiagnosticAssessment() {
           explanation: answer.explanation,
           rationalization: answer.rationalization || answer.explanation,
           wrongChoiceExplanations: answer.wrongChoiceExplanations,
+          misconceptionTags: answer.misconceptionTags || [],
           selectedOptionId: answer.selectedOptionId,
           correctOptionId: answer.correctOptionId,
           categoryId: answer.categoryId,
