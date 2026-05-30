@@ -107,35 +107,53 @@ export default function AIDrafts() {
       setShowToast(true);
       return;
     }
+    if (!isDraftReadyForQuestionBank(draft)) {
+      setToastMsg('This AI draft still needs a competency, rationalization, and wrong-choice explanations before review.');
+      setShowToast(true);
+      return;
+    }
 
     try {
        const { updateDoc, serverTimestamp } = await import('firebase/firestore');
+       const familyId = draft.familyId || slugifyQuestionFamily(`${catId}-${topId}-${draft.stem}`);
        await addDoc(collection(db, 'questions'), {
           stem: draft.stem,
           options: draft.options,
           correctOptionId: draft.correctOptionId,
           explanation: draft.explanation,
+          rationalization: draft.rationalization || draft.explanation,
+          wrongChoiceExplanations: draft.wrongChoiceExplanations || {},
           categoryId: catId,
           topicId: topId,
-          difficulty: draft.difficulty,
-          approved: true,
-          isPublished: true,
+          competencyId: draft.competencyId || '',
+          skillIds: draft.competencyId ? [draft.competencyId] : [],
+          difficulty: normalizeDifficulty(draft.difficulty),
+          familyId,
+          questionFamilyId: familyId,
+          variantId: `${familyId}_ai_draft_${Date.now()}`,
+          misconceptionTags: draft.misconceptionTags || [],
+          sourceNote: `AI draft from prompt: ${draft.draftTopic || topicPrompt}`,
+          status: 'draft',
+          approvalStatus: 'for_review',
+          approved: false,
+          isPublished: false,
           aiGenerated: true,
           createdBy: user?.uid,
+          author: user?.fullName || user?.email || 'Instructor',
           version: 1,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
        });
 
        await updateDoc(doc(db, 'aiDrafts', draftId), {
-         status: 'approved',
+         status: 'sent_for_review',
          reviewedAt: serverTimestamp(),
          reviewedBy: user?.uid,
          assignedCategoryId: catId,
          assignedTopicId: topId
        });
 
-       setToastMsg('Question approved and saved to bank!');
+       setToastMsg('AI draft sent to the Question Bank for human approval.');
        setShowToast(true);
     } catch (e: any) {
        setToastMsg('Failed to approve: ' + e.message);
@@ -165,7 +183,7 @@ export default function AIDrafts() {
            <h2 className="text-3xl font-extrabold font-headline text-primary flex items-center gap-3">
              <BrainCircuit /> AI Question Drafter
            </h2>
-           <p className="text-on-surface-variant/60 mt-2">Generate high-quality board exam questions instantly using AI, referenced against your exact curriculum.</p>
+             <p className="text-on-surface-variant/60 mt-2">Generate draft LET questions with rationalizations. Nothing enters live exams until the Question Bank approves it.</p>
         </div>
 
         <div className="bg-surface-container-lowest rounded-2xl shadow-sm border border-outline-variant p-8 mb-8">
@@ -250,7 +268,7 @@ export default function AIDrafts() {
                   >
                     <div className="absolute top-0 right-0 p-4 opacity-100 flex gap-2">
                        <button onClick={() => rejectDraft(draft.id)} className="p-2 bg-error/10 text-error rounded-lg hover:bg-error/20 transition-colors" title="Discard"><Trash2 size={18} /></button>
-                       <button onClick={() => approveDraft(draft.id)} className="p-2 bg-emerald-500/10 text-emerald-500 rounded-lg hover:bg-emerald-500/20 transition-colors flex items-center gap-1 font-bold text-sm" title="Approve"><Save size={18}/> Approve</button>
+                       <button onClick={() => approveDraft(draft.id)} className="p-2 bg-emerald-500/10 text-emerald-500 rounded-lg hover:bg-emerald-500/20 transition-colors flex items-center gap-1 font-bold text-sm" title="Send to question bank"><Save size={18}/> Send for review</button>
                     </div>
                     
                     <div className="mb-4 flex gap-4 opacity-60 hover:opacity-100 transition-opacity">
@@ -298,14 +316,54 @@ export default function AIDrafts() {
                     <div className="text-sm bg-primary/5 border border-primary/10 text-on-surface-variant p-4 rounded-xl">
                       <strong>Explanation:</strong> {draft.explanation}
                     </div>
+                    <div className="mt-3 flex flex-wrap gap-2 text-[10px] font-black uppercase tracking-widest">
+                      <span className={`rounded-full px-3 py-1 ${draft.competencyId ? 'bg-emerald-500/10 text-emerald-600' : 'bg-amber-500/10 text-amber-600'}`}>{draft.competencyId || 'Needs competency'}</span>
+                      <span className="rounded-full bg-surface-container px-3 py-1 text-on-surface-variant">{normalizeDifficulty(draft.difficulty)}</span>
+                      <span className={`rounded-full px-3 py-1 ${isDraftReadyForQuestionBank(draft) ? 'bg-primary/10 text-primary' : 'bg-amber-500/10 text-amber-600'}`}>
+                        {isDraftReadyForQuestionBank(draft) ? 'Ready for bank review' : 'Needs teaching metadata'}
+                      </span>
+                    </div>
+                    {draft.wrongChoiceExplanations && (
+                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {['A', 'B', 'C', 'D'].map((optionId) => (
+                          <div key={optionId} className="rounded-xl border border-outline-variant/20 bg-surface-container/30 p-3 text-xs text-on-surface-variant">
+                            <strong>{optionId}:</strong> {draft.wrongChoiceExplanations?.[optionId] || 'Needs reviewer explanation'}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </motion.div>
                 );
              })}
           </div>
         )}
 
-        <Toast message={toastMsg} isVisible={showToast} onClose={() => setShowToast(false)} type={toastMsg.includes('Failed') ? 'error' : 'success'} />
+        <Toast message={toastMsg} isVisible={showToast} onClose={() => setShowToast(false)} type={toastMsg.includes('Failed') || toastMsg.includes('needs') ? 'error' : 'success'} />
       </div>
     </DashboardLayout>
+  );
+}
+
+function slugifyQuestionFamily(value: string) {
+  return `fam_${value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 64) || 'ai_question'}`;
+}
+
+function normalizeDifficulty(value: string) {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'average' || normalized === 'normal') return 'medium';
+  if (normalized === 'difficult') return 'hard';
+  if (['easy', 'medium', 'hard'].includes(normalized)) return normalized;
+  return 'medium';
+}
+
+function isDraftReadyForQuestionBank(draft: any) {
+  const wrongChoiceExplanations = draft.wrongChoiceExplanations || {};
+  return Boolean(
+    draft.stem &&
+    draft.options?.length === 4 &&
+    draft.correctOptionId &&
+    (draft.rationalization || draft.explanation) &&
+    draft.competencyId &&
+    ['A', 'B', 'C', 'D'].every((optionId) => String(wrongChoiceExplanations[optionId] || '').trim()),
   );
 }

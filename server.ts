@@ -567,8 +567,14 @@ async function startServer() {
 
       const data = await callAI({
         messages: [
-          { role: 'system', content: 'You are an expert item writer for the Philippine Licensure Examination for Teachers (LET). Generate high-quality, board-exam-grade multiple choice questions.' },
-          { role: 'user', content: `Generate ${count} ${difficulty} difficulty LET questions about: ${topic}` },
+          {
+            role: 'system',
+            content: 'You are an expert item writer for the Philippine Licensure Examination for Teachers (LET). Generate high-quality, board-exam-grade multiple choice questions with teaching rationalizations. Every item must help a learner understand the misconception, not memorize a letter.',
+          },
+          {
+            role: 'user',
+            content: `Generate ${count} ${difficulty} difficulty LET questions about: ${topic}. Include a competency label, correct-answer explanation, explanations for every wrong option, likely misconception tags, and a question family label for variant tracking.`,
+          },
         ],
         tools: [{
           type: 'function',
@@ -598,8 +604,22 @@ async function startServer() {
                       },
                       correctOptionId: { type: 'string', enum: ['A', 'B', 'C', 'D'] },
                       explanation: { type: 'string' },
-                    },
-                    required: ['stem', 'options', 'correctOptionId', 'explanation'],
+                      wrongChoiceExplanations: {
+                        type: 'object',
+                        properties: {
+                          A: { type: 'string' },
+                          B: { type: 'string' },
+                          C: { type: 'string' },
+                          D: { type: 'string' },
+                        },
+                        required: ['A', 'B', 'C', 'D'],
+                        additionalProperties: false,
+                      },
+                      competencyId: { type: 'string' },
+                      familyId: { type: 'string' },
+                      misconceptionTags: { type: 'array', items: { type: 'string' } },
+                      },
+                    required: ['stem', 'options', 'correctOptionId', 'explanation', 'wrongChoiceExplanations', 'competencyId', 'familyId', 'misconceptionTags'],
                     additionalProperties: false,
                   },
                 },
