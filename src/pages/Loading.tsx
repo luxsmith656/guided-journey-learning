@@ -22,7 +22,7 @@ export default function Loading({ redirect = true }: { redirect?: boolean }) {
             if (user.role === 'admin') navigate('/admin/dashboard', { replace: true });
             else if (user.role === 'instructor') navigate('/instructor/dashboard', { replace: true });
             else if (!user.onboarded) navigate('/onboarding', { replace: true });
-            else if (!user.diagnosticCompleted) navigate('/diagnostic', { replace: true });
+            else if (!user.diagnosticCompleted && !user.diagnosticSkipped) navigate('/diagnostic', { replace: true });
             else navigate('/student/dashboard', { replace: true });
           }, 500);
           return 100;
