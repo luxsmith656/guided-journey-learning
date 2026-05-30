@@ -1,6 +1,7 @@
 import { collection, doc, setDoc, serverTimestamp, getDocs, query, where } from 'firebase/firestore';
 import { db } from './firebase';
 import {
+  REVIEW_TRACKS as SEED_REVIEW_TRACKS,
   CATEGORIES as SEED_CATEGORIES,
   TOPICS as SEED_TOPICS,
   SKILLS as SEED_SKILLS,
@@ -20,11 +21,49 @@ function generateStableId(input: string): string {
   return 'q_' + Math.abs(hash).toString(36);
 }
 
+function getSeedDistributionTargets(distribution: Record<string, number> | undefined, count: number) {
+  const entries = Object.entries(distribution || {})
+    .map(([key, value]) => [key, Math.max(0, Number(value) || 0)] as const)
+    .filter(([, value]) => value > 0);
+  if (entries.length === 0 || count <= 0) return [] as { key: string; count: number }[];
+
+  const totalWeight = entries.reduce((sum, [, value]) => sum + value, 0);
+  const rows = entries.map(([key, value]) => {
+    const exact = (value / totalWeight) * count;
+    return { key, count: Math.floor(exact), remainder: exact - Math.floor(exact) };
+  });
+
+  let assigned = rows.reduce((sum, row) => sum + row.count, 0);
+  [...rows].sort((a, b) => b.remainder - a.remainder).forEach((row) => {
+    if (assigned >= count) return;
+    row.count += 1;
+    assigned += 1;
+  });
+
+  return rows.filter((row) => row.count > 0).map(({ key, count: target }) => ({ key, count: target }));
+}
+
 export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
   const includeDemo = options.includeDemo ?? true;
   console.log('Starting standardized database seed...');
   
   try {
+    // 0. Seed LET Review Tracks
+    for (const track of SEED_REVIEW_TRACKS) {
+      try {
+        await setDoc(doc(db, 'reviewTracks', track.id), {
+          ...track,
+          trackId: track.id,
+          isPublished: track.isPublished ?? true,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+        console.log(`Seeded review track: ${track.title}`);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `reviewTracks/${track.id}`);
+      }
+    }
+
     // 1. Seed Categories
     for (const cat of SEED_CATEGORIES) {
       try {
@@ -58,15 +97,31 @@ export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
        }
     }
 
-    // 3. Seed Skills
+    const topicById = SEED_TOPICS.reduce<Record<string, any>>((acc, topic) => {
+      acc[topic.id] = topic;
+      return acc;
+    }, {});
+
+    // 3. Seed Skills and Competencies
     for (const skill of SEED_SKILLS) {
        try {
-         await setDoc(doc(db, 'skills', skill.id), { 
+         const topic = topicById[skill.topicId];
+         const competency = {
            ...skill,
            title: skill.name,
+           categoryId: (skill as any).categoryId || topic?.categoryId || '',
+           competencyId: skill.id,
+           topicId: skill.topicId,
+           reviewTracks: (skill as any).reviewTracks || topic?.reviewTracks || [],
+           specialization: (skill as any).specialization || topic?.specialization || '',
            isPublished: true,
            createdAt: serverTimestamp(),
            updatedAt: serverTimestamp()
+         };
+         await setDoc(doc(db, 'skills', skill.id), competency, { merge: true });
+         await setDoc(doc(db, 'competencies', skill.id), {
+           ...competency,
+           sourceCollection: 'skills',
          }, { merge: true });
          console.log(`Seeded skill: ${skill.name}`);
        } catch (err) {
@@ -74,9 +129,15 @@ export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
        }
     }
 
+    const reviewTracksForCategory = (categoryId: string) => {
+      if (categoryId === 'major') return ['secondary', 'specialization'];
+      if (categoryId === 'gened' || categoryId === 'profed') return ['elementary', 'secondary'];
+      return ['elementary', 'secondary'];
+    };
+
     const relatedModuleByTopic: Record<string, string> = {
       gened_english: 'gened-critical-reading',
-      gened_math: 'major-math-problem-solving',
+      gened_math: 'gened-math-foundations',
       gened_socsci: 'gened-critical-reading',
       profed_assessment: 'profed-assessment-alignment',
       profed_childdev: 'profed-childdev-foundations',
@@ -100,9 +161,10 @@ export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
     for (const quest of SEED_QUESTIONS) {
         try {
           const stableId = generateStableId(quest.stem);
+          const competencyId = (quest as any).competencyId || quest.skillIds?.[0] || quest.topicId;
           const wrongChoiceExplanations = Object.fromEntries((quest.options || [])
             .filter((option: any) => option.id !== quest.correctOptionId)
-            .map((option: any) => [option.id, `${option.text} is not the best answer because it does not match the tested competency for ${quest.topicId}. Compare it with the rationalization and review the related module.`]));
+            .map((option: any) => [option.id, `${option.text} is not the best answer because it does not match ${competencyId}. Compare it with the rationalization and review the related module.`]));
           await setDoc(doc(db, 'questions', stableId), {
             ...quest,
             id: stableId,
@@ -113,8 +175,10 @@ export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
             approved: true,
             isPublished: true,
             examType: quest.type,
-            competencyId: (quest as any).competencyId || quest.skillIds?.[0] || quest.topicId,
+            competencyId,
             familyId: `${stableId}_family`,
+            reviewTracks: (quest as any).reviewTracks || reviewTracksForCategory(quest.categoryId),
+            specialization: (quest as any).specialization || (quest.categoryId === 'major' ? 'Mathematics' : ''),
             wrongChoiceExplanations,
             misconceptionTags: (quest as any).misconceptionTags || misconceptionTagsByTopic[quest.topicId] || [],
             relatedModuleId: (quest as any).relatedModuleId || relatedModuleByTopic[quest.topicId] || '',
@@ -164,6 +228,8 @@ export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
         categoryId: 'gened',
         topicId: 'gened_english',
         skillIds: ['gened_english_inference', 'gened_english_grammar'],
+        reviewTracks: ['elementary', 'secondary'],
+        specialization: '',
         level: 1,
         duration: '35 min',
         lessonBlocks: [
@@ -196,7 +262,9 @@ export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
         subjectId: 'profed',
         categoryId: 'profed',
         topicId: 'profed_assessment',
-        skillIds: ['profed_assessment_formative', 'profed_assessment_summative'],
+        skillIds: ['profed_assessment_formative', 'profed_assessment_summative', 'profed_assessment_validity_reliability'],
+        reviewTracks: ['elementary', 'secondary'],
+        specialization: '',
         level: 2,
         duration: '45 min',
         lessonBlocks: [
@@ -224,13 +292,48 @@ export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
         updatedAt: serverTimestamp()
       },
       {
+        id: 'gened-math-foundations',
+        title: 'General Education Math Foundations',
+        description: 'Review prime numbers, number properties, and operation choice for LET General Education math.',
+        subjectId: 'gened',
+        categoryId: 'gened',
+        topicId: 'gened_math',
+        skillIds: ['gened_math_algebra'],
+        reviewTracks: ['elementary', 'secondary'],
+        specialization: '',
+        level: 1,
+        duration: '30 min',
+        lessonBlocks: [
+          { type: 'heading', content: 'Understand the number before solving' },
+          { type: 'text', content: 'General Education math items often test whether you know basic properties and can identify the correct operation. A prime number has exactly two factors: 1 and itself.' },
+          { type: 'callout', content: 'Do not memorize only the answer. Ask what property is being tested, then eliminate choices that violate that property.' }
+        ],
+        textbookIds: ['book_gened_math_foundations'],
+        checkQuestionIds: [
+          questionIdByStem['The smallest prime number is ________.']
+        ],
+        challengeQuestionIds: [],
+        resources: [
+          { type: 'textbook', title: 'General Education Reviewer: Math Foundations', meta: 'Chapter 3', targetId: 'book_gened_math_foundations' },
+          { type: 'quiz', title: 'Number properties drill', meta: '5 items' },
+          { type: 'exam', title: 'Gen Ed math mastery check', meta: 'Core' }
+        ],
+        prerequisiteModuleIds: [],
+        isPublished: true,
+        createdBy: 'system-seed',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      },
+      {
         id: 'profed-childdev-foundations',
         title: 'Learner Development Foundations',
         description: 'Review major development theories and how they shape classroom decisions.',
         subjectId: 'profed',
         categoryId: 'profed',
         topicId: 'profed_childdev',
-        skillIds: [],
+        skillIds: ['profed_childdev_stage_theory'],
+        reviewTracks: ['elementary', 'secondary'],
+        specialization: '',
         level: 2,
         duration: '40 min',
         lessonBlocks: [
@@ -264,7 +367,9 @@ export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
         subjectId: 'major',
         categoryId: 'major',
         topicId: 'major_math',
-        skillIds: ['major_math_ratio'],
+        skillIds: ['major_math_ratio', 'major_math_number_sense'],
+        reviewTracks: ['secondary', 'specialization'],
+        specialization: 'Mathematics',
         level: 3,
         duration: '50 min',
         lessonBlocks: [
@@ -274,9 +379,12 @@ export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
         ],
         textbookIds: ['book_major_math_number_sense'],
         checkQuestionIds: [
-          questionIdByStem['The smallest prime number is ________.']
+          questionIdByStem['A class has 18 boys and 12 girls. What is the ratio of boys to girls in simplest form?']
         ],
-        challengeQuestionIds: [],
+        challengeQuestionIds: [
+          questionIdByStem['If 5 notebooks cost 150 pesos, how much will 8 notebooks cost at the same rate?'],
+          questionIdByStem['Which number is both a factor of 24 and a multiple of 3?']
+        ],
         resources: [
           { type: 'textbook', title: 'Mathematics Major Reviewer: Number Sense', meta: 'Chapter 1', targetId: 'book_major_math_number_sense' },
           { type: 'quiz', title: 'Ratio warm-up', meta: '15 items' },
@@ -303,6 +411,7 @@ export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
             title: 'Part 1: Read and learn',
             objective: mod.description,
             textbookSection: {
+              id: `${mod.id}-part-1:textbook`,
               title: mod.resources.find((resource: any) => resource.type === 'textbook')?.title || `${mod.title} textbook reading`,
               body: mod.lessonBlocks.map((block: any) => block.content).join('\n\n'),
               estimatedReadMinutes: 8
@@ -315,6 +424,7 @@ export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
             title: 'Part 2: Apply and check',
             objective: `Apply ${mod.title} to LET-style decisions.`,
             textbookSection: {
+              id: `${mod.id}-part-2:textbook`,
               title: `${mod.title}: applied reading`,
               body: 'Use the concept in a realistic board-exam situation. First, identify the skill being tested. Next, remove answers that are unrelated, too broad, or unsupported. Finally, choose the option that best matches the principle from the lesson.',
               estimatedReadMinutes: 7
@@ -435,6 +545,21 @@ export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
         passingScore: 0,
         difficultyMix: { easy: 60, medium: 40 },
         categoryDistribution: { gened: 50, profed: 50 },
+        reviewTracks: ['elementary', 'secondary'],
+        integrityLevel: 'light_protection',
+      },
+      {
+        id: 'blueprint-public-let-diagnostic-secondary-math',
+        title: 'Secondary LET Mathematics Baseline Diagnostic',
+        description: 'Baseline diagnostic for Secondary LET students with Mathematics specialization coverage.',
+        examMode: 'diagnostic',
+        questionCount: 7,
+        timeLimitMinutes: 25,
+        passingScore: 0,
+        difficultyMix: { easy: 60, medium: 40 },
+        categoryDistribution: { gened: 43, profed: 43, major: 14 },
+        reviewTracks: ['secondary'],
+        specialization: 'Mathematics',
         integrityLevel: 'light_protection',
       },
       {
@@ -448,6 +573,7 @@ export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
         passingScore: 70,
         difficultyMix: { easy: 60, medium: 40 },
         categoryDistribution: { gened: 100 },
+        reviewTracks: ['elementary', 'secondary'],
         integrityLevel: 'open_practice',
       },
       {
@@ -461,18 +587,50 @@ export async function seedDatabase(options: { includeDemo?: boolean } = {}) {
         passingScore: 70,
         difficultyMix: { easy: 50, medium: 40, hard: 10 },
         categoryDistribution: { profed: 100 },
+        reviewTracks: ['elementary', 'secondary'],
         integrityLevel: 'open_practice',
       },
       {
-        id: 'blueprint-public-full-let-core',
-        title: 'Public Full LET Simulation Blueprint',
-        description: 'Seeded full-review blueprint using only approved public questions. Increase item count as the official bank grows.',
+        id: 'blueprint-public-major-math-practice',
+        title: 'Mathematics Specialization Practice Drill',
+        description: 'Short public practice set for Secondary LET Mathematics specialization review.',
+        examMode: 'practice_drill',
+        categoryId: 'major',
+        topicId: 'major_math',
+        specialization: 'Mathematics',
+        questionCount: 3,
+        timeLimitMinutes: 15,
+        passingScore: 70,
+        difficultyMix: { easy: 65, medium: 35 },
+        categoryDistribution: { major: 100 },
+        reviewTracks: ['secondary', 'specialization'],
+        integrityLevel: 'open_practice',
+      },
+      {
+        id: 'blueprint-public-full-let-elementary',
+        title: 'Elementary LET Full Simulation Blueprint',
+        description: 'Seeded Elementary LET blueprint using General Education and Professional Education approved questions.',
         examMode: 'full_mock',
         questionCount: 8,
         timeLimitMinutes: 80,
         passingScore: 75,
         difficultyMix: { easy: 35, medium: 45, hard: 20 },
         categoryDistribution: { gened: 50, profed: 50 },
+        reviewTracks: ['elementary'],
+        integrityLevel: 'strict_exam_mode',
+      },
+      {
+        id: 'blueprint-public-full-let-secondary-math',
+        title: 'Secondary LET Mathematics Full Simulation Blueprint',
+        description: 'Seeded Secondary LET blueprint with General Education, Professional Education, and Mathematics specialization coverage.',
+        examMode: 'full_mock',
+        questionCount: 9,
+        timeLimitMinutes: 90,
+        passingScore: 75,
+        difficultyMix: { easy: 35, medium: 45, hard: 20 },
+        categoryDistribution: { gened: 34, profed: 33, major: 33 },
+        reviewTracks: ['secondary'],
+        specialization: 'Mathematics',
         integrityLevel: 'strict_exam_mode',
       },
     ];
@@ -618,23 +776,28 @@ export interface SeedHealthReport {
     title: string;
     required: number;
     available: number;
+    categoryShortfalls?: string[];
     status: 'ready' | 'needs_questions';
   }>;
 }
 
 export async function getSeedHealth(): Promise<SeedHealthReport> {
   const [
+    reviewTracksSnap,
     categoriesSnap,
     topicsSnap,
     skillsSnap,
+    competenciesSnap,
     textbooksSnap,
     modulesSnap,
     questionsSnap,
     blueprintsSnap,
   ] = await Promise.all([
+    getDocs(collection(db, 'reviewTracks')),
     getDocs(collection(db, 'categories')),
     getDocs(collection(db, 'topics')),
     getDocs(collection(db, 'skills')),
+    getDocs(collection(db, 'competencies')),
     getDocs(collection(db, 'textbooks')),
     getDocs(query(collection(db, 'modules'), where('isPublished', '==', true))),
     getDocs(query(collection(db, 'questions'), where('approved', '==', true), where('isPublished', '==', true))),
@@ -650,19 +813,31 @@ export async function getSeedHealth(): Promise<SeedHealthReport> {
       ? approvedQuestions.filter((question) => allowedCategoryIds.includes(question.categoryId)).length
       : approvedQuestions.length;
     const required = Number(blueprint.questionCount || 0);
+    const categoryShortfalls = getSeedDistributionTargets(categoryDistribution, required)
+      .map(({ key, count }) => {
+        const categoryPool = approvedQuestions.filter((question) => (
+          question.categoryId === key &&
+          (!blueprint.specialization || !question.specialization || question.specialization === blueprint.specialization)
+        ));
+        return categoryPool.length < count ? `${key}: needs ${count}, has ${categoryPool.length}` : '';
+      })
+      .filter(Boolean);
     return {
       id: blueprintDoc.id,
       title: blueprint.title || blueprintDoc.id,
       required,
       available,
-      status: available >= required && required > 0 ? 'ready' as const : 'needs_questions' as const,
+      categoryShortfalls,
+      status: available >= required && required > 0 && categoryShortfalls.length === 0 ? 'ready' as const : 'needs_questions' as const,
     };
   });
 
   const counts = {
+    reviewTracks: reviewTracksSnap.size,
     categories: categoriesSnap.size,
     topics: topicsSnap.size,
     skills: skillsSnap.size,
+    competencies: competenciesSnap.size,
     textbooks: textbooksSnap.size,
     publishedModules: modulesSnap.size,
     approvedQuestions: questionsSnap.size,
@@ -670,15 +845,21 @@ export async function getSeedHealth(): Promise<SeedHealthReport> {
   };
 
   const warnings = [
+    counts.reviewTracks === 0 ? 'No LET review tracks exist yet.' : '',
     counts.categories === 0 ? 'No public categories exist yet.' : '',
     counts.topics === 0 ? 'No public topics exist yet.' : '',
+    counts.competencies === 0 ? 'No competency records exist yet.' : '',
     counts.textbooks === 0 ? 'No public textbooks exist yet.' : '',
     counts.publishedModules === 0 ? 'No published public modules exist yet.' : '',
     counts.approvedQuestions === 0 ? 'No approved public questions exist yet.' : '',
     counts.activeBlueprints === 0 ? 'No active public exam blueprints exist yet.' : '',
     ...blueprintCoverage
       .filter((blueprint) => blueprint.status === 'needs_questions')
-      .map((blueprint) => `${blueprint.title} needs ${blueprint.required} approved questions but only ${blueprint.available} are available.`),
+      .map((blueprint) => (
+        blueprint.categoryShortfalls?.length
+          ? `${blueprint.title} category shortage: ${blueprint.categoryShortfalls.join('; ')}.`
+          : `${blueprint.title} needs ${blueprint.required} approved questions but only ${blueprint.available} are available.`
+      )),
   ].filter(Boolean);
 
   return { counts, warnings, blueprintCoverage };

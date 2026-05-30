@@ -207,6 +207,11 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow write: if isInstructor();
     }
+
+    match /competencies/{competencyId} {
+      allow read: if isSignedIn();
+      allow write: if isInstructor();
+    }
     
     match /classes/{classId} {
       allow read: if isSignedIn();

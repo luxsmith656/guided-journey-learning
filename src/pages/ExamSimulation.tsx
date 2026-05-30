@@ -67,6 +67,9 @@ interface ExamBlueprint {
   categoryDistribution?: Record<string, number>;
   sectionDistribution?: Record<string, number>;
   difficultyMix?: Record<string, number>;
+  categoryId?: string;
+  topicId?: string;
+  reviewTracks?: string[];
   specialization?: string;
   isActive?: boolean;
   isPublished?: boolean;
@@ -218,6 +221,32 @@ const buildDefaultBlueprint = (isFullMock: boolean): ExamBlueprint => ({
   timeLimitMinutes: isFullMock ? DEFAULT_MOCK_MINUTES : DEFAULT_PRACTICE_MINUTES,
   passingScore: isFullMock ? 75 : 70,
 });
+
+function blueprintMatchesRequest(
+  blueprint: ExamBlueprint,
+  request: {
+    isFullMock: boolean;
+    categoryId: string | null;
+    topicId: string | null;
+    studentTrack?: string;
+    studentSpecialization?: string;
+  },
+) {
+  if (request.categoryId && blueprint.categoryId && blueprint.categoryId !== request.categoryId) return false;
+  if (request.topicId && blueprint.topicId && blueprint.topicId !== request.topicId) return false;
+
+  if (request.isFullMock) {
+    if (request.studentTrack && blueprint.reviewTracks?.length && !blueprint.reviewTracks.includes(request.studentTrack)) return false;
+    if (blueprint.specialization && request.studentSpecialization && blueprint.specialization !== request.studentSpecialization) return false;
+    if (blueprint.specialization && !request.studentSpecialization) return false;
+  }
+
+  if (!request.isFullMock && request.categoryId) {
+    return !blueprint.categoryId || blueprint.categoryId === request.categoryId;
+  }
+
+  return true;
+}
 
 const pickQuestionsFromBlueprint = (
   pool: Question[],
@@ -729,7 +758,9 @@ export default function ExamSimulation() {
         const availableBlueprints = blueprintRows
           ? blueprintRows.docs.map((blueprintDoc) => ({ id: blueprintDoc.id, ...blueprintDoc.data() } as ExamBlueprint))
           : [];
-        const preferredBlueprint = availableBlueprints.find((item) => {
+        const studentTrack = user.reviewTrack || (user.selectedFocus === 'major' ? 'secondary' : '');
+        const studentSpecialization = user.specialization || '';
+        const matchingBlueprints = availableBlueprints.filter((item) => {
           const blueprintMode = item.type || item.examMode || '';
           return item.isActive !== false &&
             item.isPublished !== false &&
@@ -737,7 +768,19 @@ export default function ExamSimulation() {
             (isFullMock
               ? ['full_mock', 'mock_exam', 'full_let_simulation'].includes(blueprintMode)
               : ['practice', 'category_practice', 'drill', 'practice_drill'].includes(blueprintMode || ''));
-        }) || buildDefaultBlueprint(isFullMock);
+        });
+        const requestedBlueprints = matchingBlueprints.filter((item) => blueprintMatchesRequest(item, {
+          isFullMock,
+          categoryId,
+          topicId,
+          studentTrack,
+          studentSpecialization,
+        }));
+        const preferredBlueprint = requestedBlueprints.find((item) => (
+          !!studentTrack &&
+          item.reviewTracks?.includes(studentTrack) &&
+          (!item.specialization || !studentSpecialization || item.specialization === studentSpecialization)
+        )) || requestedBlueprints[0] || matchingBlueprints[0] || buildDefaultBlueprint(isFullMock);
         setBlueprint(preferredBlueprint);
 
         const questionsQuery = query(
@@ -746,14 +789,16 @@ export default function ExamSimulation() {
           where('approved', '==', true),
         );
         const questionSnap = await getDocs(questionsQuery);
-        const focus = user.selectedFocus || user.reviewTrack || user.specialization || '';
         const approvedQuestions = questionSnap.docs
           .map((questionDoc) => normalizeQuestion(questionDoc.id, questionDoc.data()))
           .filter((question) => {
             if (categoryId && question.categoryId !== categoryId) return false;
             if (topicId && question.topicId !== topicId) return false;
-            if (!isFullMock || !focus) return true;
-            return !question.specialization || question.specialization === focus || ['gened', 'profed'].includes(question.categoryId || '');
+            if (!isFullMock) return true;
+            if (question.categoryId === 'major') {
+              return studentTrack !== 'elementary' && (!question.specialization || !studentSpecialization || question.specialization === studentSpecialization);
+            }
+            return true;
           })
           .filter((question) => question.stem && question.options.length >= 2 && question.correctOptionId);
 

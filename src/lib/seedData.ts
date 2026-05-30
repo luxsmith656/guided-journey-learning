@@ -1,28 +1,61 @@
+export const REVIEW_TRACKS = [
+  {
+    id: 'elementary',
+    title: 'Elementary LET',
+    description: 'General Education and Professional Education review path for Elementary LET examinees.',
+    categoryIds: ['gened', 'profed'],
+    requiresSpecialization: false,
+    isPublished: true,
+  },
+  {
+    id: 'secondary',
+    title: 'Secondary LET',
+    description: 'General Education, Professional Education, and Field of Specialization review path for Secondary LET examinees.',
+    categoryIds: ['gened', 'profed', 'major'],
+    requiresSpecialization: true,
+    specializationOptions: ['Mathematics'],
+    isPublished: true,
+  },
+  {
+    id: 'specialization',
+    title: 'Field of Specialization Focus',
+    description: 'Focused review path for students who want to repair or strengthen one specialization area first.',
+    categoryIds: ['major'],
+    requiresSpecialization: true,
+    specializationOptions: ['Mathematics'],
+    isPublished: true,
+  },
+];
+
 export const CATEGORIES = [
-  { id: 'gened', name: 'General Education', description: 'Core subjects including English, Math, Science, and Social Sciences.' },
-  { id: 'profed', name: 'Professional Education', description: 'Teaching profession, child development, and pedagogy.' },
-  { id: 'major', name: 'Major / Specialization', description: 'Specialized content.' }
+  { id: 'gened', name: 'General Education', description: 'Core subjects including English, Math, Science, and Social Sciences.', reviewTracks: ['elementary', 'secondary'] },
+  { id: 'profed', name: 'Professional Education', description: 'Teaching profession, child development, and pedagogy.', reviewTracks: ['elementary', 'secondary'] },
+  { id: 'major', name: 'Field of Specialization', description: 'Secondary LET specialization content such as Mathematics, English, Filipino, Science, and other majors.', reviewTracks: ['secondary', 'specialization'] }
 ];
 
 export const TOPICS = [
-  { id: 'gened_english', categoryId: 'gened', name: 'English Communication', isPublished: true },
-  { id: 'gened_math', categoryId: 'gened', name: 'Mathematics', isPublished: true },
-  { id: 'gened_science', categoryId: 'gened', name: 'Science', isPublished: true },
-  { id: 'gened_socsci', categoryId: 'gened', name: 'Social Science', isPublished: true },
-  { id: 'profed_assessment', categoryId: 'profed', name: 'Assessment of Learning', isPublished: true },
-  { id: 'profed_principles', categoryId: 'profed', name: 'Principles of Teaching', isPublished: true },
-  { id: 'profed_childdev', categoryId: 'profed', name: 'Child and Adolescent Development', isPublished: true },
-  { id: 'profed_curriculum', categoryId: 'profed', name: 'Curriculum Development', isPublished: true },
-  { id: 'major_math', categoryId: 'major', name: 'Mathematics: Number Sense and Problem Solving', isPublished: true }
+  { id: 'gened_english', categoryId: 'gened', name: 'English Communication', isPublished: true, reviewTracks: ['elementary', 'secondary'] },
+  { id: 'gened_math', categoryId: 'gened', name: 'Mathematics', isPublished: true, reviewTracks: ['elementary', 'secondary'] },
+  { id: 'gened_science', categoryId: 'gened', name: 'Science', isPublished: true, reviewTracks: ['elementary', 'secondary'] },
+  { id: 'gened_socsci', categoryId: 'gened', name: 'Social Science', isPublished: true, reviewTracks: ['elementary', 'secondary'] },
+  { id: 'profed_assessment', categoryId: 'profed', name: 'Assessment of Learning', isPublished: true, reviewTracks: ['elementary', 'secondary'] },
+  { id: 'profed_principles', categoryId: 'profed', name: 'Principles of Teaching', isPublished: true, reviewTracks: ['elementary', 'secondary'] },
+  { id: 'profed_childdev', categoryId: 'profed', name: 'Child and Adolescent Development', isPublished: true, reviewTracks: ['elementary', 'secondary'] },
+  { id: 'profed_curriculum', categoryId: 'profed', name: 'Curriculum Development', isPublished: true, reviewTracks: ['elementary', 'secondary'] },
+  { id: 'major_math', categoryId: 'major', name: 'Mathematics: Number Sense and Problem Solving', isPublished: true, reviewTracks: ['secondary', 'specialization'], specialization: 'Mathematics' }
 ];
 
 export const SKILLS = [
-  { id: 'profed_assessment_summative', topicId: 'profed_assessment', name: 'Summative Assessment' },
-  { id: 'profed_assessment_formative', topicId: 'profed_assessment', name: 'Formative Assessment' },
-  { id: 'gened_math_algebra', topicId: 'gened_math', name: 'Algebra' },
-  { id: 'gened_english_grammar', topicId: 'gened_english', name: 'Grammar' },
-  { id: 'gened_english_inference', topicId: 'gened_english', name: 'Inference and Evidence' },
-  { id: 'major_math_ratio', topicId: 'major_math', name: 'Ratios and Proportion' }
+  { id: 'profed_assessment_summative', topicId: 'profed_assessment', categoryId: 'profed', name: 'Summative Assessment', reviewTracks: ['elementary', 'secondary'] },
+  { id: 'profed_assessment_formative', topicId: 'profed_assessment', categoryId: 'profed', name: 'Formative Assessment', reviewTracks: ['elementary', 'secondary'] },
+  { id: 'profed_assessment_validity_reliability', topicId: 'profed_assessment', categoryId: 'profed', name: 'Validity vs Reliability', reviewTracks: ['elementary', 'secondary'] },
+  { id: 'gened_math_algebra', topicId: 'gened_math', categoryId: 'gened', name: 'Algebra', reviewTracks: ['elementary', 'secondary'] },
+  { id: 'gened_english_grammar', topicId: 'gened_english', categoryId: 'gened', name: 'Grammar', reviewTracks: ['elementary', 'secondary'] },
+  { id: 'gened_english_inference', topicId: 'gened_english', categoryId: 'gened', name: 'Inference and Evidence', reviewTracks: ['elementary', 'secondary'] },
+  { id: 'gened_socsci_civics', topicId: 'gened_socsci', categoryId: 'gened', name: 'Civics and Philippine Government', reviewTracks: ['elementary', 'secondary'] },
+  { id: 'profed_childdev_stage_theory', topicId: 'profed_childdev', categoryId: 'profed', name: 'Development Stage Theory', reviewTracks: ['elementary', 'secondary'] },
+  { id: 'major_math_ratio', topicId: 'major_math', categoryId: 'major', name: 'Ratios and Proportion', reviewTracks: ['secondary', 'specialization'], specialization: 'Mathematics' },
+  { id: 'major_math_number_sense', topicId: 'major_math', categoryId: 'major', name: 'Number Sense', reviewTracks: ['secondary', 'specialization'], specialization: 'Mathematics' }
 ];
 
 export const TEXTBOOKS = [
@@ -42,6 +75,24 @@ export const TEXTBOOKS = [
     sections: [
       { title: 'Reading for Purpose', minutes: 8, body: 'Identify the question type before reading the full passage.' },
       { title: 'Evidence Beats Familiarity', minutes: 10, body: 'Reject answers that repeat words but change the supported idea.' }
+    ]
+  },
+  {
+    id: 'book_gened_math_foundations',
+    title: 'General Education Reviewer: Math Foundations',
+    author: 'Let Mastery Editorial Team',
+    categoryId: 'gened',
+    topicId: 'gened_math',
+    description: 'Number sense, basic operations, prime numbers, ratios, and common LET math traps.',
+    pages: 72,
+    readTime: '1h 50m',
+    level: 'Core',
+    chapter: 'Chapter 3',
+    isPublished: true,
+    offlineReady: true,
+    sections: [
+      { title: 'Number Properties', minutes: 8, body: 'Prime numbers have exactly two factors: 1 and themselves.' },
+      { title: 'Check the Operation', minutes: 8, body: 'Name what the problem asks before choosing an operation.' }
     ]
   },
   {
@@ -312,6 +363,54 @@ export const INITIAL_QUESTIONS = [
     skillIds: [],
     difficulty: 'easy',
     type: 'mock_exam',
+    isPublished: true,
+    approved: true
+  },
+  {
+    stem: "A class has 18 boys and 12 girls. What is the ratio of boys to girls in simplest form?",
+    options: [{id: 'A', text: '3:2'}, {id: 'B', text: '2:3'}, {id: 'C', text: '18:30'}, {id: 'D', text: '6:5'}],
+    correctOptionId: 'A',
+    explanation: 'The ratio 18:12 can be divided by 6, giving 3:2. Keep the order boys to girls.',
+    categoryId: 'major',
+    categoryName: 'Field of Specialization',
+    topicId: 'major_math',
+    skillIds: ['major_math_ratio'],
+    competencyId: 'major_math_ratio',
+    difficulty: 'easy',
+    type: 'practice',
+    specialization: 'Mathematics',
+    isPublished: true,
+    approved: true
+  },
+  {
+    stem: "If 5 notebooks cost 150 pesos, how much will 8 notebooks cost at the same rate?",
+    options: [{id: 'A', text: '200 pesos'}, {id: 'B', text: '240 pesos'}, {id: 'C', text: '250 pesos'}, {id: 'D', text: '300 pesos'}],
+    correctOptionId: 'B',
+    explanation: 'One notebook costs 150 / 5 = 30 pesos. Eight notebooks cost 8 x 30 = 240 pesos.',
+    categoryId: 'major',
+    categoryName: 'Field of Specialization',
+    topicId: 'major_math',
+    skillIds: ['major_math_ratio'],
+    competencyId: 'major_math_ratio',
+    difficulty: 'medium',
+    type: 'mock_exam',
+    specialization: 'Mathematics',
+    isPublished: true,
+    approved: true
+  },
+  {
+    stem: "Which number is both a factor of 24 and a multiple of 3?",
+    options: [{id: 'A', text: '5'}, {id: 'B', text: '6'}, {id: 'C', text: '8'}, {id: 'D', text: '10'}],
+    correctOptionId: 'B',
+    explanation: '6 is a factor of 24 because 24 / 6 = 4, and it is also a multiple of 3.',
+    categoryId: 'major',
+    categoryName: 'Field of Specialization',
+    topicId: 'major_math',
+    skillIds: ['major_math_number_sense'],
+    competencyId: 'major_math_number_sense',
+    difficulty: 'easy',
+    type: 'diagnostic',
+    specialization: 'Mathematics',
     isPublished: true,
     approved: true
   }

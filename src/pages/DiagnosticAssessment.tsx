@@ -53,6 +53,8 @@ interface ExamBlueprint {
   categoryDistribution?: Record<string, number>;
   sectionDistribution?: Record<string, number>;
   difficultyMix?: Record<string, number>;
+  reviewTracks?: string[];
+  specialization?: string;
   integrityLevel?: string;
   status?: string;
   isPublished?: boolean;
@@ -142,6 +144,15 @@ const normalizeQuestion = (id: string, data: any): Question => ({
 });
 
 const getBlueprintMode = (blueprint: ExamBlueprint) => String(blueprint.examMode || blueprint.type || '').toLowerCase();
+
+function diagnosticBlueprintMatchesStudent(blueprint: ExamBlueprint, user: any) {
+  const track = user?.reviewTrack || (user?.selectedFocus === 'major' ? 'secondary' : '');
+  const specialization = user?.specialization || '';
+  if (track && blueprint.reviewTracks?.length && !blueprint.reviewTracks.includes(track)) return false;
+  if (blueprint.specialization && specialization && blueprint.specialization !== specialization) return false;
+  if (blueprint.specialization && !specialization) return false;
+  return true;
+}
 
 function compileLocalResult(
   attemptId: string,
@@ -362,14 +373,19 @@ export default function DiagnosticAssessment() {
         }
 
         const blueprintSnap = await getDocs(query(collection(db, 'examBlueprints'), where('isPublished', '==', true))).catch(() => null);
-        const diagnosticBlueprint = blueprintSnap?.docs
+        const diagnosticBlueprints = blueprintSnap?.docs
           .map((blueprintDoc) => ({ id: blueprintDoc.id, ...blueprintDoc.data() } as ExamBlueprint))
-          .find((item) => {
+          .filter((item) => {
             const mode = getBlueprintMode(item);
             return item.status !== 'archived' &&
               item.isActive !== false &&
               ['diagnostic', 'diagnostic_exam', 'baseline_diagnostic'].includes(mode);
-          });
+          }) || [];
+        const diagnosticBlueprint = diagnosticBlueprints.find((item) => (
+          diagnosticBlueprintMatchesStudent(item, user) &&
+          user?.reviewTrack &&
+          item.reviewTracks?.includes(user.reviewTrack)
+        )) || diagnosticBlueprints.find((item) => diagnosticBlueprintMatchesStudent(item, user));
         setBlueprint(diagnosticBlueprint || DEFAULT_DIAGNOSTIC_BLUEPRINT);
 
         const qSnap = await getDocs(query(
