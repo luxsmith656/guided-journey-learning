@@ -1,50 +1,50 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation } from 'react-router-dom';
-import AdminDashboard from './pages/AdminDashboard';
-import CategoryManagement from './pages/CategoryManagement';
-import QuestionBank from './pages/QuestionBank';
-import EditQuestion from './pages/EditQuestion';
-import QuestionDetail from './pages/QuestionDetail';
-import CurriculumSettings from './pages/CurriculumSettings';
-import Analytics from './pages/Analytics';
-import Users from './pages/Users';
-import Notifications from './pages/Notifications';
-import ActivityLogs from './pages/ActivityLogs';
-import BulkUpload from './pages/BulkUpload';
-import SyncCenter from './pages/SyncCenter';
-import Settings from './pages/Settings';
 import SignIn from './pages/SignIn';
 import ForgotPassword from './pages/ForgotPassword';
 import Loading from './pages/Loading';
-import Onboarding from './pages/Onboarding';
-import Focus from './pages/Focus';
-import QuizResults from './pages/QuizResults';
-import ExamSimulation from './pages/ExamSimulation';
-import StudentDashboard from './pages/StudentDashboard';
-import StudentCourses from './pages/StudentCourses';
-import InstructorDashboard from './pages/InstructorDashboard';
-import InstructorModules from './pages/InstructorModules';
-import DiagnosticAssessment from './pages/DiagnosticAssessment';
-import AIDrafts from './pages/AIDrafts';
-import LearningQuest from './pages/LearningQuest';
-import AdminClasses from './pages/AdminClasses';
-import InstructorClasses from './pages/InstructorClasses';
-import InstructorGradebook from './pages/InstructorGradebook';
-import AdminCertificates from './pages/AdminCertificates';
-import InstructorCertificates from './pages/InstructorCertificates';
 import CertificateVerify from './pages/CertificateVerify';
-import TextbookLibrary from './pages/TextbookLibrary';
-import ChooseLearningMode from './pages/ChooseLearningMode';
-import ChooseFocus from './pages/ChooseFocus';
-import JoinClass from './pages/JoinClass';
-import Flashcards from './pages/Flashcards';
-import ProfileSettings from './pages/ProfileSettings';
-import StudentTodo from './pages/StudentTodo';
-import MistakeBank from './pages/MistakeBank';
 import { SidebarProvider } from './context/SidebarContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { BrandingProvider, useBranding } from './context/BrandingContext';
 import { SyncProvider } from './context/SyncContext';
+
+const AdminDashboard = React.lazy(() => import('./pages/AdminDashboard'));
+const QuestionBank = React.lazy(() => import('./pages/QuestionBank'));
+const EditQuestion = React.lazy(() => import('./pages/EditQuestion'));
+const QuestionDetail = React.lazy(() => import('./pages/QuestionDetail'));
+const CurriculumSettings = React.lazy(() => import('./pages/CurriculumSettings'));
+const Analytics = React.lazy(() => import('./pages/Analytics'));
+const Users = React.lazy(() => import('./pages/Users'));
+const Notifications = React.lazy(() => import('./pages/Notifications'));
+const ActivityLogs = React.lazy(() => import('./pages/ActivityLogs'));
+const BulkUpload = React.lazy(() => import('./pages/BulkUpload'));
+const SyncCenter = React.lazy(() => import('./pages/SyncCenter'));
+const Settings = React.lazy(() => import('./pages/Settings'));
+const Onboarding = React.lazy(() => import('./pages/Onboarding'));
+const Focus = React.lazy(() => import('./pages/Focus'));
+const QuizResults = React.lazy(() => import('./pages/QuizResults'));
+const ExamSimulation = React.lazy(() => import('./pages/ExamSimulation'));
+const StudentDashboard = React.lazy(() => import('./pages/StudentDashboard'));
+const StudentCourses = React.lazy(() => import('./pages/StudentCourses'));
+const InstructorDashboard = React.lazy(() => import('./pages/InstructorDashboard'));
+const InstructorModules = React.lazy(() => import('./pages/InstructorModules'));
+const DiagnosticAssessment = React.lazy(() => import('./pages/DiagnosticAssessment'));
+const AIDrafts = React.lazy(() => import('./pages/AIDrafts'));
+const LearningQuest = React.lazy(() => import('./pages/LearningQuest'));
+const AdminClasses = React.lazy(() => import('./pages/AdminClasses'));
+const InstructorClasses = React.lazy(() => import('./pages/InstructorClasses'));
+const InstructorGradebook = React.lazy(() => import('./pages/InstructorGradebook'));
+const AdminCertificates = React.lazy(() => import('./pages/AdminCertificates'));
+const InstructorCertificates = React.lazy(() => import('./pages/InstructorCertificates'));
+const TextbookLibrary = React.lazy(() => import('./pages/TextbookLibrary'));
+const ChooseLearningMode = React.lazy(() => import('./pages/ChooseLearningMode'));
+const ChooseFocus = React.lazy(() => import('./pages/ChooseFocus'));
+const JoinClass = React.lazy(() => import('./pages/JoinClass'));
+const Flashcards = React.lazy(() => import('./pages/Flashcards'));
+const ProfileSettings = React.lazy(() => import('./pages/ProfileSettings'));
+const StudentTodo = React.lazy(() => import('./pages/StudentTodo'));
+const MistakeBank = React.lazy(() => import('./pages/MistakeBank'));
 
 function ProtectedRoute({ children, role, requireOnboarded = true }: { children: React.ReactNode, role?: 'admin' | 'instructor' | 'student', requireOnboarded?: boolean }) {
   const { user, isLoading } = useAuth();
@@ -119,6 +119,7 @@ function AppContent() {
 
   return (
     <Router>
+      <React.Suspense fallback={<Loading />}>
         <Routes>
             <Route path="/" element={<Navigate to="/sign-in" replace />} />
             <Route path="/sign-in" element={<SignIn />} />
@@ -129,11 +130,11 @@ function AppContent() {
             {/* Admin Routes */}
             <Route path="/admin/dashboard" element={<ProtectedRoute role="admin"><AdminDashboard /></ProtectedRoute>} />
             <Route path="/admin/categories" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />
-            <Route path="/admin/question/bank" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />
-            <Route path="/admin/question/new" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />
-            <Route path="/admin/question/edit/:id" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />
-            <Route path="/admin/bulk-upload" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />
-            <Route path="/admin/question/detail" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />
+            <Route path="/admin/question/bank" element={<ProtectedRoute role="admin"><QuestionBank /></ProtectedRoute>} />
+            <Route path="/admin/question/new" element={<ProtectedRoute role="admin"><EditQuestion /></ProtectedRoute>} />
+            <Route path="/admin/question/edit/:id" element={<ProtectedRoute role="admin"><EditQuestion /></ProtectedRoute>} />
+            <Route path="/admin/bulk-upload" element={<ProtectedRoute role="admin"><BulkUpload /></ProtectedRoute>} />
+            <Route path="/admin/question/detail" element={<ProtectedRoute role="admin"><QuestionDetail /></ProtectedRoute>} />
             <Route path="/admin/curriculum-settings" element={<ProtectedRoute role="admin"><CurriculumSettings /></ProtectedRoute>} />
             <Route path="/admin/analytics" element={<ProtectedRoute role="admin"><Analytics /></ProtectedRoute>} />
             <Route path="/admin/users" element={<ProtectedRoute role="admin"><Users /></ProtectedRoute>} />
@@ -142,16 +143,15 @@ function AppContent() {
             <Route path="/admin/certificates" element={<ProtectedRoute role="admin"><AdminCertificates /></ProtectedRoute>} />
             <Route path="/admin/notifications" element={<ProtectedRoute role="admin"><Notifications /></ProtectedRoute>} />
             <Route path="/admin/activity-logs" element={<ProtectedRoute role="admin"><ActivityLogs /></ProtectedRoute>} />
-            <Route path="/admin/bulk-upload" element={<ProtectedRoute role="admin"><Navigate to="/admin/modules" replace /></ProtectedRoute>} />
             <Route path="/admin/sync" element={<ProtectedRoute role="admin"><SyncCenter /></ProtectedRoute>} />
             <Route path="/admin/settings" element={<ProtectedRoute role="admin"><Settings /></ProtectedRoute>} />
 
             {/* Instructor Routes */}
             <Route path="/instructor/dashboard" element={<ProtectedRoute role="instructor"><InstructorDashboard /></ProtectedRoute>} />
-            <Route path="/instructor/questions" element={<ProtectedRoute role="instructor"><Navigate to="/instructor/modules" replace /></ProtectedRoute>} />
-            <Route path="/instructor/question/new" element={<ProtectedRoute role="instructor"><Navigate to="/instructor/modules" replace /></ProtectedRoute>} />
-            <Route path="/instructor/question/edit/:id" element={<ProtectedRoute role="instructor"><Navigate to="/instructor/modules" replace /></ProtectedRoute>} />
-            <Route path="/instructor/bulk-upload" element={<ProtectedRoute role="instructor"><Navigate to="/instructor/modules" replace /></ProtectedRoute>} />
+            <Route path="/instructor/questions" element={<ProtectedRoute role="instructor"><QuestionBank /></ProtectedRoute>} />
+            <Route path="/instructor/question/new" element={<ProtectedRoute role="instructor"><EditQuestion /></ProtectedRoute>} />
+            <Route path="/instructor/question/edit/:id" element={<ProtectedRoute role="instructor"><EditQuestion /></ProtectedRoute>} />
+            <Route path="/instructor/bulk-upload" element={<ProtectedRoute role="instructor"><BulkUpload /></ProtectedRoute>} />
             <Route path="/instructor/modules" element={<ProtectedRoute role="instructor"><InstructorModules /></ProtectedRoute>} />
             <Route path="/instructor/grades" element={<ProtectedRoute role="instructor"><InstructorGradebook /></ProtectedRoute>} />
             <Route path="/instructor/certificates" element={<ProtectedRoute role="instructor"><InstructorCertificates /></ProtectedRoute>} />
@@ -184,6 +184,7 @@ function AppContent() {
             
             <Route path="*" element={<Navigate to="/sign-in" replace />} />
         </Routes>
+      </React.Suspense>
     </Router>
   );
 }

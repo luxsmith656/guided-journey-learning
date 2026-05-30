@@ -12,6 +12,8 @@ export default function InstructorSidebar() {
     { name: 'Dashboard', path: '/instructor/dashboard', icon: 'dashboard' },
     { name: 'Classes', path: '/instructor/classes', icon: 'groups' },
     { name: 'Studio', path: '/instructor/modules', icon: 'design_services' },
+    { name: 'Questions', path: '/instructor/questions', icon: 'quiz' },
+    { name: 'Import', path: '/instructor/bulk-upload', icon: 'upload_file' },
     { name: 'Gradebook', path: '/instructor/grades', icon: 'grade' },
     { name: 'Certificates', path: '/instructor/certificates', icon: 'workspace_premium' },
     { name: 'Students', path: '/instructor/students', icon: 'person_search' },

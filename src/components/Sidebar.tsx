@@ -11,6 +11,8 @@ export default function Sidebar() {
   const navItems = [
     { name: 'Dashboard', path: '/admin/dashboard', icon: 'dashboard' },
     { name: 'Modules', path: '/admin/modules', icon: 'view_timeline' },
+    { name: 'Questions', path: '/admin/question/bank', icon: 'quiz' },
+    { name: 'Import', path: '/admin/bulk-upload', icon: 'upload_file' },
     { name: 'Classes', path: '/admin/classes', icon: 'groups' },
     { name: 'Certificates', path: '/admin/certificates', icon: 'workspace_premium' },
     { name: 'Analytics', path: '/admin/analytics', icon: 'bar_chart' },
