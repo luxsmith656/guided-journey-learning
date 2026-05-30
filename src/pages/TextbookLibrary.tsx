@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { ArrowLeft, BookOpen, BookText, Download, Filter, Search } from 'lucide-react';
 import { db } from '../lib/firebase';
-import { TEXTBOOKS } from '../lib/seedData';
 
 interface Textbook {
   id: string;
@@ -29,9 +28,11 @@ const categoryLabels: Record<string, string> = {
 
 export default function TextbookLibrary() {
   const navigate = useNavigate();
-  const [textbooks, setTextbooks] = useState<Textbook[]>(TEXTBOOKS);
+  const [textbooks, setTextbooks] = useState<Textbook[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     const textbooksQuery = query(collection(db, 'textbooks'), orderBy('title', 'asc'));
@@ -40,11 +41,14 @@ export default function TextbookLibrary() {
         .map((bookDoc) => ({ id: bookDoc.id, ...bookDoc.data() } as Textbook))
         .filter((book) => book.isPublished !== false);
 
-      if (remoteBooks.length > 0) {
-        setTextbooks(remoteBooks);
-      }
+      setTextbooks(remoteBooks);
+      setLoadError('');
+      setIsLoading(false);
     }, (error) => {
-      console.warn('Unable to load cloud textbooks, using seeded local samples', error);
+      console.warn('Unable to load cloud textbooks', error);
+      setTextbooks([]);
+      setLoadError('Unable to load published textbooks from the database.');
+      setIsLoading(false);
     });
 
     return () => unsubscribe();
@@ -56,8 +60,8 @@ export default function TextbookLibrary() {
       const matchesCategory = selectedCategory === 'All' || book.categoryId === selectedCategory;
       const matchesSearch = !term ||
         book.title.toLowerCase().includes(term) ||
-        book.author.toLowerCase().includes(term) ||
-        book.description.toLowerCase().includes(term) ||
+        (book.author || '').toLowerCase().includes(term) ||
+        (book.description || '').toLowerCase().includes(term) ||
         categoryLabels[book.categoryId]?.toLowerCase().includes(term);
 
       return matchesCategory && matchesSearch;
@@ -75,7 +79,7 @@ export default function TextbookLibrary() {
             <div className="min-w-0">
               <h1 className="text-2xl font-black font-headline text-on-surface tracking-tight">Textbook Library</h1>
               <p className="text-xs font-bold text-on-surface-variant/50 uppercase tracking-widest">
-                {textbooks.length.toLocaleString()} curated LET resources
+                {textbooks.length.toLocaleString()} published LET resources
               </p>
             </div>
           </div>
@@ -109,11 +113,18 @@ export default function TextbookLibrary() {
       </header>
 
       <main className="flex-1 max-w-6xl mx-auto w-full p-5 md:p-8">
-        {filteredTextbooks.length === 0 ? (
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center min-h-[420px] text-on-surface-variant/50 text-center">
+            <div className="mb-4 h-10 w-10 animate-spin rounded-full border-4 border-primary/20 border-t-primary" />
+            <p className="font-bold text-lg">Loading published textbooks...</p>
+          </div>
+        ) : filteredTextbooks.length === 0 ? (
           <div className="flex flex-col items-center justify-center min-h-[420px] text-on-surface-variant/50 text-center">
             <BookOpen size={48} className="mb-4 opacity-50" />
-            <p className="font-bold text-lg">No textbooks found.</p>
-            <p className="text-sm mt-2">Try another subject or search term.</p>
+            <p className="font-bold text-lg">{loadError || 'No published textbooks found.'}</p>
+            <p className="text-sm mt-2">
+              {loadError ? 'Check your connection or Firestore rules.' : 'Published Firestore textbooks will appear here after admin seeding or approval.'}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">

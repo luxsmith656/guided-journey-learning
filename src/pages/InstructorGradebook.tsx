@@ -6,7 +6,6 @@ import InstructorLayout from '../components/InstructorLayout';
 import Toast from '../components/Toast';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
-import { journeyModules } from '../lib/learningJourney';
 
 export default function InstructorGradebook() {
   const { user } = useAuth();
@@ -16,7 +15,7 @@ export default function InstructorGradebook() {
   const [enrollments, setEnrollments] = useState<any[]>([]);
   const [progressRows, setProgressRows] = useState<any[]>([]);
   const [attemptLogs, setAttemptLogs] = useState<any[]>([]);
-  const [modules, setModules] = useState<any[]>(journeyModules);
+  const [modules, setModules] = useState<any[]>([]);
   const [selectedClassId, setSelectedClassId] = useState('');
   const [selectedModuleId, setSelectedModuleId] = useState('all');
   const [selectedStudentId, setSelectedStudentId] = useState('');
@@ -57,8 +56,7 @@ export default function InstructorGradebook() {
     });
     const unsubModules = onSnapshot(collection(db, 'modules'), (snap) => {
       const remoteModules = snap.docs.map((moduleDoc) => ({ id: moduleDoc.id, ...moduleDoc.data() }));
-      const remoteIds = new Set(remoteModules.map((module) => module.id));
-      setModules([...remoteModules, ...journeyModules.filter((module) => !remoteIds.has(module.id))]);
+      setModules(remoteModules);
     });
 
     getDocs(collection(db, 'users')).then((snap) => {
